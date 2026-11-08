@@ -9,6 +9,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sysent.h>
+#include <sys/syscall.h>
 #include <machine/frame.h>
 #include <machine/pcb.h>
 #include <x86/x86_var.h>
@@ -26,6 +27,7 @@ darwin_fetch_syscall_args(struct thread *td)
 	struct syscall_args *sa = &td->td_sa;
 	uint64_t rax = frame->tf_rax;
 	int error = 0;
+	bool native_sigreturn = false;
 
 	sa->original_code = (u_int)rax;
 	sa->code = (u_int)(rax & 0xffffff);
@@ -35,11 +37,19 @@ darwin_fetch_syscall_args(struct thread *td)
 	case DARWIN_CLASS_MACHDEP:
 		sa->code += DARWIN_MACHDEP_BASE;
 		break;
+	case 0:					/* no class: the signal trampoline of the kernel returning with FreeBSD's sigreturn */
+		if (sa->code == SYS_sigreturn)
+			native_sigreturn = true;
+		else
+			sa->code = (u_int)darwin_nsyscalls;
+		break;
 	default:				/* Mach traps and diag calls are not implemented yet */
 		sa->code = (u_int)darwin_nsyscalls;
 		break;
 	}
-	if (sa->code >= (u_int)darwin_nsyscalls || sa->code >= DARWIN_MACHDEP_BASE + 64 ||
+	if (native_sigreturn)
+		sa->callp = &sysent[SYS_sigreturn];
+	else if (sa->code >= (u_int)darwin_nsyscalls || sa->code >= DARWIN_MACHDEP_BASE + 64 ||
 	    (sa->code >= 512 && sa->code < DARWIN_MACHDEP_BASE))
 		sa->callp = &nosys_sysent;
 	else

@@ -103,13 +103,13 @@ darwin_stat_out(struct thread *td, const struct stat *sb, void *ubuf)
 	struct darwin_stat64 d;
 
 	memset(&d, 0, sizeof(d));
-	d.st_dev = (int32_t)sb->st_dev;
+	d.st_dev = darwin_from_dev(sb->st_dev);
 	d.st_mode = sb->st_mode;
 	d.st_nlink = sb->st_nlink > 0xffff ? 0xffff : (uint16_t)sb->st_nlink;
 	d.st_ino = sb->st_ino;
 	d.st_uid = sb->st_uid;
 	d.st_gid = sb->st_gid;
-	d.st_rdev = (int32_t)sb->st_rdev;
+	d.st_rdev = darwin_from_dev(sb->st_rdev);
 	d.st_atimespec.tv_sec = sb->st_atim.tv_sec;	d.st_atimespec.tv_nsec = sb->st_atim.tv_nsec;
 	d.st_mtimespec.tv_sec = sb->st_mtim.tv_sec;	d.st_mtimespec.tv_nsec = sb->st_mtim.tv_nsec;
 	d.st_ctimespec.tv_sec = sb->st_ctim.tv_sec;	d.st_ctimespec.tv_nsec = sb->st_ctim.tv_nsec;

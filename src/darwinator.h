@@ -33,6 +33,12 @@ extern int darwin_debug;
 
 int	darwin_errno(int);				/* FreeBSD errno -> Darwin errno */
 void	darwin_machdep_syscalls_init(void);		/* per architecture */
+dev_t	darwin_to_dev(int32_t);				/* Darwin dev_t (major << 24 | minor) <-> FreeBSD's */
+int32_t	darwin_from_dev(dev_t);
+struct statfs;
+int	darwin_statfs_out(const struct statfs *, void *);
+int	darwin_sigprocmask(struct thread *, struct darwin_args *);
+void	darwin_event_syscalls_init(void);		/* syscalls_event.c */
 void	darwin_more_syscalls_init(void);		/* syscalls_more.c */
 void	darwin_syscalls_init(void);			/* fills the unused entries with nosys */
 int	darwin_fetch_syscall_args(struct thread *);	/* per architecture (darwin_<arch>.c) */
