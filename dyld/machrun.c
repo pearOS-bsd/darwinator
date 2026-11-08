@@ -523,7 +523,7 @@ main(int argc, char **argv)
 		do_bind(&im, di->lazy_bind_off, di->lazy_bind_size, true);
 	}
 	VLOG("%u unresolved symbols\n", unresolved_count);
-	if (getenv("MACHRUN_DUMPGOT")) VLOG("got CFRelease slot %p\n", *(void **)(im.slide + 0x100103198));
+	if (getenv("MACHRUN_DUMPGOT")) { extern void machrun_objc_msgSend(void); VLOG("got slot %p (machrun_objc_msgSend %p)\n", *(void **)(im.slide + strtoul(getenv("MACHRUN_DUMPGOT"), NULL, 0)), (void *)machrun_objc_msgSend); }
 	if (realpath(launcher_real ? launcher_real : argv[ch], path) == NULL) strlcpy(path, argv[ch], sizeof(path));
 	{ char *ap = malloc(strlen(path) + 32); snprintf(ap, strlen(path) + 32, "executable_path=%s", path); apple[0] = ap; apple[1] = NULL; }
 	shim_set_process(argc - ch, argv + ch, environ, path);
