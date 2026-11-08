@@ -360,6 +360,8 @@ const void *cf_CFRetain(void *);
 void cf_CFRelease(void *);
 
 /* ---- the table of what is not simply the same name ---- */
+/* setattrlist(): macOS file attributes (creation date, Finder info, flags); a file system of this system has none of them, so the call succeeds and does nothing */
+static int dw_setattrlist(const char *path, void *attrs, void *buf, size_t size, unsigned opts) { (void)path; (void)attrs; (void)buf; (void)size; (void)opts; return (0); }
 static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_open", dw_open }, { "_fcntl", dw_fcntl },
 	{ "_readdir$INODE64", dw_readdir }, { "_readdir", dw_readdir }, { "_readdir_r$INODE64", dw_readdir_r }, { "_readdir_r", dw_readdir_r },
@@ -397,6 +399,7 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_fsetxattr", dw_fsetxattr }, { "_fgetxattr", dw_fgetxattr }, { "_flistxattr", dw_flistxattr }, { "_fremovexattr", dw_fremovexattr },
 	{ "_copyfile", dw_copyfile }, { "_mbr_uid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_gid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_uuid_to_id", dw_mbr_uuid_to_id },
 	{ "_iconv_open", dw_iconv_open }, { "_iconv", dw_iconv }, { "_iconv_close", dw_iconv_close },
+	{ "_setattrlist", dw_setattrlist },
 	{ "_CFStringCreateWithCString", cf_CFStringCreateWithCString }, { "_CFStringCreateWithCharacters", cf_CFStringCreateWithCharacters },
 	{ "_CFStringGetLength", cf_CFStringGetLength }, { "_CFStringGetCharacterAtIndex", cf_CFStringGetCharacterAtIndex },
 	{ "_CFStringCreateMutableCopy", cf_CFStringCreateMutableCopy }, { "_CFStringGetCString", cf_CFStringGetCString },
@@ -429,6 +432,11 @@ shim_lookup(void *lib, const char *name)
 	a = dlsym(lib, buf);
 	if (a == NULL && lib != RTLD_DEFAULT) a = dlsym(RTLD_DEFAULT, buf);
 	if (a == NULL) a = objc_constant_fallback(name);
+	if (a == NULL && strncmp(name, "_CF", 3) == 0) {		/* CoreFoundation on top of NSString: libmachcompat.so (Objective-C programs) */
+		static int tried;
+		if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); }
+		a = dlsym(RTLD_DEFAULT, buf);
+	}
 	return (a);
 }
 
