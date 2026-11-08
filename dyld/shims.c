@@ -361,6 +361,10 @@ void cf_CFRelease(void *);
 
 /* ---- the table of what is not simply the same name ---- */
 /* setattrlist(): macOS file attributes (creation date, Finder info, flags); a file system of this system has none of them, so the call succeeds and does nothing */
+/* os_log: logging of macOS (nothing listens) */
+static void dw_os_log_impl(void *a, void *b, int c, const char *d, void *e, unsigned f) { }
+static void *dw_os_log_create(const char *s, const char *c) { static char blk[128]; return (blk); }
+static unsigned char dw_os_log_type_enabled(void *l, int t) { return (0); }
 static int dw_setattrlist(const char *path, void *attrs, void *buf, size_t size, unsigned opts) { (void)path; (void)attrs; (void)buf; (void)size; (void)opts; return (0); }
 static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_open", dw_open }, { "_fcntl", dw_fcntl },
@@ -399,7 +403,8 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_fsetxattr", dw_fsetxattr }, { "_fgetxattr", dw_fgetxattr }, { "_flistxattr", dw_flistxattr }, { "_fremovexattr", dw_fremovexattr },
 	{ "_copyfile", dw_copyfile }, { "_mbr_uid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_gid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_uuid_to_id", dw_mbr_uuid_to_id },
 	{ "_iconv_open", dw_iconv_open }, { "_iconv", dw_iconv }, { "_iconv_close", dw_iconv_close },
-	{ "_setattrlist", dw_setattrlist },
+	{ "_setattrlist", dw_setattrlist }, { "__os_log_impl", dw_os_log_impl }, { "__os_log_debug_impl", dw_os_log_impl }, { "__os_log_error_impl", dw_os_log_impl },
+	{ "_os_log_create", dw_os_log_create }, { "_os_log_type_enabled", dw_os_log_type_enabled },
 	{ "_CFStringCreateWithCString", cf_CFStringCreateWithCString }, { "_CFStringCreateWithCharacters", cf_CFStringCreateWithCharacters },
 	{ "_CFStringGetLength", cf_CFStringGetLength }, { "_CFStringGetCharacterAtIndex", cf_CFStringGetCharacterAtIndex },
 	{ "_CFStringCreateMutableCopy", cf_CFStringCreateMutableCopy }, { "_CFStringGetCString", cf_CFStringGetCString },

@@ -41,6 +41,7 @@ static Protocol *(*rt_getProtocol)(const char *);
 static Ivar (*rt_getInstanceVariable)(Class, const char *);
 static ptrdiff_t (*rt_ivarOffset)(Ivar);
 void *(*machrun_objc_lookup)(id, SEL);
+uintptr_t machrun_cls_lo, machrun_cls_hi;
 static void *(*rt_lookup_super)(void *, SEL);
 static int rt_ready;
 
@@ -193,6 +194,7 @@ build_class(struct o_class *c)
 	ro = RO(c);
 	if (c->superclass)
 		sup = objc_is_own(c->superclass) ? build_class(c->superclass) : (Class)c->superclass;
+	{ const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName"); VLOG("class %s: super %p %s%s\n", ro->name, (void *)c->superclass, c->superclass && !objc_is_own(c->superclass) && cn ? cn((Class)c->superclass) : "", c->superclass ? (objc_is_own(c->superclass) ? "(own)" : "") : " (NONE)"); }
 	if (rt_getClass(ro->name) != NULL) { VLOG("class %s exists already: kept\n", ro->name); k = rt_getClass(ro->name); }
 	else {
 		k = rt_allocateClassPair(sup, ro->name, 0);
@@ -619,6 +621,7 @@ setup_lenient(void)
 /* ---- Program-specific compatibility: a Mac application that was built for the sandbox of the Mac App Store asks its own "do I have access to this folder" before it touches a file
  * (security-scoped bookmarks, which this system does not have); outside of the sandbox every access is allowed. ---- */
 static BOOL yes_any(id self, SEL _cmd) { return (1); }
+static void nop_any(id self, SEL _cmd) { }
 static IMP orig_setdest;
 static void
 dbg_setdest(id self, SEL _cmd, id v)
@@ -643,9 +646,15 @@ program_patches(void)
 		{ "sandboxHelpers", "hasAccess:" }, { "sandboxHelpers", "hasAccess:askIfNeeded:" }, { "sandboxHelpers", "hasFullAccess" },
 		{ "sandboxHelpers", "hasHomeAccess" }, { "sandboxHelpers", "hasVolumesAccess" }, { "sandboxHelpers", "hasReadAccess:" }, { "Globals", "isPathWritable:" }, { "Globals", "isPathWritable:canCreateFile:" },
 	};
+	/* views that draw with Core Animation layers (the activity indicator of AppCleaner): their layer code has nothing to work on here, so the setters that only change layers do nothing */
+	static const struct { const char *cls, *sel; } nop[] = { { "DJActivityIndicator", "setColor:" } };
 	void *(*gim)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod"), *(*gcm)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getClassMethod");
 	IMP (*smi)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
 	size_t i;
+	for (i = 0; i < sizeof(nop) / sizeof(nop[0]); i++) {
+		Class k = rt_getClass(nop[i].cls); void *m;
+		if (k && gim && smi && (m = gim(k, rt_registerName(nop[i].sel))) != NULL) { smi(m, (IMP)nop_any); VLOG("objc: patched -[%s %s] (does nothing)\n", nop[i].cls, nop[i].sel); }
+	}
 	for (i = 0; i < sizeof(p) / sizeof(p[0]); i++) {
 		Class k = rt_getClass(p[i].cls); void *m;
 		if (k == NULL || gim == NULL || smi == NULL) continue;
@@ -702,6 +711,7 @@ objc_load_image(find_fn find, intptr_t slide)
 	size_t n, i; void **p; struct o_class **cl; struct o_cat **cats; struct o_proto **prs; uintptr_t *refs;
 	size_t ncl = 0, ncat = 0, npr = 0;
 
+	{ void *dp = find("__objc_data", &n); if (dp) { machrun_cls_lo = (uintptr_t)dp; machrun_cls_hi = (uintptr_t)dp + n; } }	/* class structures in the program: see machrun_fix_recv */
 	cl = find("__objc_classlist", &n); ncl = n / sizeof(void *);
 	cats = find("__objc_catlist", &n); ncat = n / sizeof(void *);
 	prs = find("__objc_protolist", &n); npr = n / sizeof(void *);
@@ -775,16 +785,66 @@ static BOOL placeholder_resolve_class(Class self, SEL _cmd, SEL sel) { rt_addMet
 void
 objc_send_retain_release(void *obj, int release)
 {
-	IMP (*gimp)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getMethodImplementation"); Class (*gc)(id) = dlsym(RTLD_DEFAULT, "object_getClass");
 	SEL s;
-	if (gimp == NULL || gc == NULL || !rt_init()) return;
+	if (!rt_init()) return;
 	s = rt_registerName(release ? "release" : "retain");
-	((void (*)(id, SEL))gimp(gc((id)obj), s))((id)obj, s);
+	((void (*)(id, SEL))machrun_objc_lookup((id)obj, s))((id)obj, s);
 }
+
+void *machrun_fix_recv(void *p);
+/* the optimized messages of newer compilers (objc_opt_*): plain messages that go through objc_msgSend in Apple's runtime */
+static id
+send0(id o, const char *sel)
+{
+	SEL s = rt_registerName(sel);
+	return (((id (*)(id, SEL))machrun_objc_lookup(o, s))(o, s));
+}
+static inline id fixr(id o) { return ((uintptr_t)o >= machrun_cls_lo && (uintptr_t)o < machrun_cls_hi ? (id)machrun_fix_recv(o) : o); }
+static id shim_opt_class(id o) { o = fixr(o); return (o ? send0(o, "class") : NULL); }
+static id shim_opt_new(id c) { c = fixr(c); return (c ? send0(c, "new") : NULL); }
+/* alloc and friends of newer compilers (objc_alloc(Class) ...): the class may be the structure of the program */
+static id shim_alloc(id c) { c = fixr(c); return (c ? send0(c, "alloc") : NULL); }
+static id
+shim_alloc_init(id c)
+{
+	c = fixr(c);
+	if (c == NULL) return (NULL);
+	{ id o = send0(c, "alloc"); return (o ? send0(o, "init") : NULL); }
+}
+static id
+shim_allocWithZone(id c, void *zone)
+{
+	SEL s = rt_registerName("allocWithZone:");
+	c = fixr(c);
+	return (c ? ((id (*)(id, SEL, void *))machrun_objc_lookup(c, s))(c, s, zone) : NULL);
+}
+static BOOL
+shim_opt_isKindOfClass(id o, Class c)
+{
+	o = fixr(o); c = (Class)fixr((id)c);
+	SEL s = rt_registerName("isKindOfClass:");
+	return (o ? ((BOOL (*)(id, SEL, Class))machrun_objc_lookup(o, s))(o, s, c) : 0);
+}
+static BOOL
+shim_opt_respondsToSelector(id o, SEL sel)
+{
+	o = fixr(o);
+	SEL s = rt_registerName("respondsToSelector:");
+	return (o ? ((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(o, s))(o, s, sel) : 0);
+}
+static id shim_identity(id o) { return (o); }
 
 void *
 objc_shim_lookup(const char *name)
 {
+	if (strcmp(name, "_objc_alloc") == 0) return ((void *)shim_alloc);
+	if (strcmp(name, "_objc_alloc_init") == 0) return ((void *)shim_alloc_init);
+	if (strcmp(name, "_objc_allocWithZone") == 0) return ((void *)shim_allocWithZone);
+	if (strcmp(name, "_objc_opt_class") == 0) return ((void *)shim_opt_class);
+	if (strcmp(name, "_objc_opt_new") == 0) return ((void *)shim_opt_new);
+	if (strcmp(name, "_objc_opt_isKindOfClass") == 0) return ((void *)shim_opt_isKindOfClass);
+	if (strcmp(name, "_objc_opt_respondsToSelector") == 0) return ((void *)shim_opt_respondsToSelector);
+	if (strcmp(name, "_objc_unsafeClaimAutoreleasedReturnValue") == 0) return ((void *)shim_identity);
 	if (strcmp(name, "_objc_msgSend") == 0 || strcmp(name, "_objc_msgSend_fpret") == 0) return ((void *)machrun_objc_msgSend);
 	if (strcmp(name, "_objc_msgSend_stret") == 0) return ((void *)machrun_objc_msgSend_stret);
 	if (strcmp(name, "_objc_msgSendSuper2") == 0) return ((void *)machrun_objc_msgSendSuper2);
@@ -795,6 +855,11 @@ objc_shim_lookup(const char *name)
 	    || strcmp(name, "_OBJC_EHTYPE_$_NSException") == 0 || strcmp(name, "__objc_ehtype_vtable") == 0) return (zero16);
 	if (strncmp(name, "_OBJC_CLASS_$_", 14) == 0 && rt_init()) {
 		Class k = rt_getClass(name + 14);
+		if (k == NULL && strncmp(name + 14, "NSConstant", 10) == 0) {		/* the constant literals of the compiler: classes of libmachcompat.so */
+			static int tried;
+			if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); }
+			k = rt_getClass(name + 14);
+		}
 		if (k == NULL) {					/* a class that the system does not have: an empty placeholder, so that the program starts */
 			Class ns = rt_getClass("NSObject");
 			k = rt_allocateClassPair(ns, name + 14, 0);
@@ -818,6 +883,15 @@ objc_shim_lookup(const char *name)
 	return (NULL);
 }
 
+/* A program built by a recent compiler sends messages to its own classes with the address of the class structure ("lea rdi,[rip+_OBJC_CLASS_$_Foo]"; on a Mac the runtime makes that structure the class in
+ * place).  Here the class is made by the GNU runtime, so a receiver that is one of those structures is replaced by the class it stands for (the trampolines call this when the receiver is in __objc_data). */
+void *
+machrun_fix_recv(void *p)
+{
+	Class k = own_class(p);
+	return (k ? (void *)k : p);
+}
+
 /* ---- the messaging trampolines (x86-64): look the method up with the GNU runtime, then jump to it with the registers as they were ---- */
 #if defined(__x86_64__)
 #define	SAVE_REGS \
@@ -833,11 +907,11 @@ objc_shim_lookup(const char *name)
 __asm__(
 ".text\n"
 ".globl machrun_objc_msgSend\n.type machrun_objc_msgSend,@function\nmachrun_objc_msgSend:\n\t"
-"testq %rdi,%rdi\n\tjz 1f\n\tmovq %rdx,machrun_arg2(%rip)\n\t" SAVE_REGS "call *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
+"testq %rdi,%rdi\n\tjz 1f\n\tmovq %rdx,machrun_arg2(%rip)\n\t" SAVE_REGS "cmpq machrun_cls_lo(%rip),%rdi\n\tjb 3f\n\tcmpq machrun_cls_hi(%rip),%rdi\n\tjae 3f\n\tcall machrun_fix_recv\n\tmovq %rax,0x00(%rsp)\n\tmovq %rax,%rdi\n\tmovq 0x08(%rsp),%rsi\n3:\tcall *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
 "1:\txorl %eax,%eax\n\txorl %edx,%edx\n\txorps %xmm0,%xmm0\n\txorps %xmm1,%xmm1\n\tret\n"
 
 ".globl machrun_objc_msgSend_stret\n.type machrun_objc_msgSend_stret,@function\nmachrun_objc_msgSend_stret:\n\t"
-"testq %rsi,%rsi\n\tjz 2f\n\t" SAVE_REGS "movq %rsi,%rdi\n\tmovq %rdx,%rsi\n\tcall *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
+"testq %rsi,%rsi\n\tjz 2f\n\t" SAVE_REGS "movq %rsi,%rdi\n\tmovq %rdx,%rsi\n\tcmpq machrun_cls_lo(%rip),%rdi\n\tjb 4f\n\tcmpq machrun_cls_hi(%rip),%rdi\n\tjae 4f\n\tcall machrun_fix_recv\n\tmovq %rax,0x08(%rsp)\n\tmovq %rax,%rdi\n\tmovq 0x10(%rsp),%rsi\n4:\tcall *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
 "2:\tmovq %rdi,%rax\n\tret\n"
 
 ".globl machrun_objc_msgSendSuper2\n.type machrun_objc_msgSendSuper2,@function\nmachrun_objc_msgSendSuper2:\n\t"
@@ -867,6 +941,20 @@ void *
 objc_constant_fallback(const char *name)
 {
 	static struct { char *name; void **cell; } seen[256]; static int nseen; int i; Class cls; SEL sel; id str; void **cell;
+	/* objects that the compiler refers to directly: the empty array and dictionary, @YES and @NO (the address of the symbol is the object) */
+	if (strcmp(name, "___NSArray0__struct") == 0 || strcmp(name, "___NSDictionary0__struct") == 0 || strcmp(name, "___kCFBooleanTrue") == 0 || strcmp(name, "___kCFBooleanFalse") == 0) {
+		static id objs[4]; int k = name[3] == 'N' ? (name[5] == 'A' ? 0 : 1) : (name[strlen(name) - 1] == 'e' && name[strlen(name) - 2] == 'u' ? 2 : 3);
+		if (objs[k] == NULL && rt_init()) {
+			Class c; SEL s; id (*m)(id, SEL);
+			if (k < 2) { c = rt_getClass(k ? "NSDictionary" : "NSArray"); s = rt_registerName(k ? "dictionary" : "array"); objs[k] = ((id (*)(id, SEL))machrun_objc_lookup((id)c, s))((id)c, s); }
+			else { c = rt_getClass("NSNumber"); s = rt_registerName("numberWithBool:"); objs[k] = ((id (*)(id, SEL, BOOL))machrun_objc_lookup((id)c, s))((id)c, s, k == 2); }
+			(void)m;
+			if (objs[k]) { SEL r = rt_registerName("retain"); ((id (*)(id, SEL))machrun_objc_lookup(objs[k], r))(objs[k], r); }
+		}
+		return (objs[k]);
+	}
+	if (strcmp(name, "__os_log_default") == 0) { static char blk[128]; return (blk); }
+	if (strncmp(name, "_UTType", 7) == 0 && name[7] >= 'A' && name[7] <= 'Z') { static void *nilcell[1]; return (nilcell); }	/* UTType constants: nil objects (the type system of macOS is not here) */
 	if (!((name[1] == 'N' && name[2] == 'S') || (name[1] == 'k' && name[2] >= 'A' && name[2] <= 'Z'))) return (NULL);
 	if (name[1] == 'N' && !(name[3] >= 'A' && name[3] <= 'Z')) return (NULL);
 	if (!rt_init() || (cls = rt_getClass("NSString")) == NULL) return (NULL);
