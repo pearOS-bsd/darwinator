@@ -44,6 +44,19 @@ wrap(const char *cls, SEL sel, IMP w)
 	return (method_setImplementation(m, w));
 }
 
+/* Apple's NSKeyedUnarchiver answers decodeObjectForKey: with the value itself when the archive holds a plain string or number there (Interface Builder's compiled
+ * nibs do: the text of NSLocalizableString); GNUstep's raises "value for key is ...". */
+static IMP o_decodeObjectForKey;
+static id
+w_decodeObjectForKey(id self, SEL _cmd, NSString *key)
+{
+	id map = [self valueForKey:@"_keyMap"];
+	id o = map ? [map objectForKey:key] : nil;
+	if (o == nil && map) o = [map objectForKey:[@"$" stringByAppendingString:key]];
+	if ([o isKindOfClass:[NSString class]] || [o isKindOfClass:[NSNumber class]]) return o;
+	return ((id (*)(id, SEL, NSString *))o_decodeObjectForKey)(self, _cmd, key);
+}
+
 /* GCD's main queue: a Mac program schedules work on it (dispatch_async(dispatch_get_main_queue(), ...)) and the run loop runs it; GNUstep's run loop does not know
  * libdispatch, so a timer of the main run loop drains the queue. */
 #include <dlfcn.h>
@@ -65,6 +78,10 @@ machcompat_init(void)
 	{
 		NSTimer *t = [NSTimer timerWithTimeInterval:0.02 target:[MachDispatchPump class] selector:@selector(pump:) userInfo:nil repeats:YES];
 		[[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+	}
+	{
+		Class k = objc_getClass("NSKeyedUnarchiver"); Method m;
+		if (k != Nil && (m = class_getInstanceMethod(k, @selector(decodeObjectForKey:))) != NULL) o_decodeObjectForKey = method_setImplementation(m, (IMP)w_decodeObjectForKey);
 	}
 	o_resolve = wrap("GSCassowarySolver", @selector(resolve), (IMP)w_resolve);
 	o_solver_add = wrap("GSCassowarySolver", @selector(addConstraint:), (IMP)w_solver_add);
