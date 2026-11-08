@@ -321,8 +321,11 @@ static id msg1(id o, const char *sel, id a) { SEL s = rt_registerName(sel); retu
 static id
 nsstr(const char *c)
 {
-	Class cls = rt_getClass("NSString"); SEL s = rt_registerName("stringWithUTF8String:");
-	return (((id (*)(id, SEL, const char *))machrun_objc_lookup(cls, s))(cls, s, c));
+	/* owned by the caller and never released: the strings made here are handed to programs that keep them (a path that an extraction thread uses
+	 * after the autorelease pool of the launch is gone) */
+	Class cls = rt_getClass("NSString"); SEL a = rt_registerName("alloc"), s = rt_registerName("initWithUTF8String:");
+	id o = ((id (*)(id, SEL))machrun_objc_lookup(cls, a))(cls, a);
+	return (((id (*)(id, SEL, const char *))machrun_objc_lookup(o, s))(o, s, c));
 }
 /* NSLocalizableString (keys NS.string, NSDev, NSKey): the nib stores the text of a label with its localization key; decoding gives the string itself */
 static id
