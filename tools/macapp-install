@@ -1,0 +1,35 @@
+#!/bin/sh
+# macapp-install NAME|URL ...: downloads Mac applications from their own sites into /Applications (the image cannot carry them: they are not ours to give away).
+#   macapp-install keka appcleaner xld         the applications that are tested here
+#   macapp-install https://example.com/App.dmg  any .dmg or .zip with a .app in it
+# A .dmg is read with dmgtool (HFS+ in UDIF), a .zip with unzip/tar.  Needs the network and a writable /Applications (sudo when it is not).
+DEST="${APPLICATIONS:-/Applications}"
+url_of() {
+	case "$1" in
+	keka) echo "https://github.com/aonez/Keka/releases/download/v1.6.8/Keka-1.6.8.zip" ;;
+	appcleaner) echo "https://freemacsoft.net/downloads/AppCleaner_3.7.zip" ;;
+	xld) echo "https://tmkk.undo.jp/xld/xld-20250302.dmg" ;;
+	http://*|https://*) echo "$1" ;;
+	*) return 1 ;;
+	esac
+}
+[ $# -gt 0 ] || { echo "usage: macapp-install keka|appcleaner|xld|URL ..." >&2; exit 64; }
+T="$(mktemp -d /var/tmp/macapp.XXXXXX)" || exit 1; trap 'rm -rf "$T"' EXIT
+rc=0
+for a in "$@"; do
+	u="$(url_of "$a")" || { echo "$a: not a known application nor a URL" >&2; rc=1; continue; }
+	f="$T/$(basename "$u")"; rm -rf "$T/x"; mkdir "$T/x"
+	echo "== $a: $u"
+	fetch -q -o "$f" "$u" || { echo "$a: download failed" >&2; rc=1; continue; }
+	case "$f" in
+	*.dmg) dmgtool extract "$f" "$T/x" >/dev/null 2>&1 || { echo "$a: the disk image could not be read" >&2; rc=1; continue; } ;;
+	*.zip) (cd "$T/x" && unzip -q "$f" 2>/dev/null || tar -xf "$f") || { echo "$a: the archive could not be read" >&2; rc=1; continue; } ;;
+	*) echo "$a: .dmg or .zip expected" >&2; rc=1; continue ;;
+	esac
+	found=0
+	for app in $(find "$T/x" -maxdepth 3 -name '*.app' -type d | grep -v '__MACOSX'); do
+		mkdir -p "$DEST" && rm -rf "$DEST/$(basename "$app")" && cp -R "$app" "$DEST/" && { echo "installed $DEST/$(basename "$app")"; found=1; }
+	done
+	[ "$found" = 1 ] || { echo "$a: no application in it" >&2; rc=1; }
+done
+exit $rc

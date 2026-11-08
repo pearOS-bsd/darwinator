@@ -1,8 +1,11 @@
 #!/bin/sh
-# macapp APP.app [arguments]: runs a Mac application (a .app bundle with a Mach-O executable) in the desktop session.  The bundle is wrapped the way GNUstep wants it
-# (tools/wrapapp.sh) in the user's cache, then started through machrun.   macapp /Applications/Keka.app
-APP="$1"; [ -d "$APP" ] || { echo "usage: macapp APP.app [arguments]" >&2; exit 64; }; shift
+# macapp APP.app [FILE]: runs a Mac application (a .app bundle with a Mach-O executable) in the desktop session.  The bundle is wrapped the way GNUstep wants it
+# (tools/wrapapp.sh) in the user's cache, then started through machrun.   macapp /Applications/Keka.app            (the application)
+#                                                                         macapp /Applications/Keka.app a.zip       (the application opens the file, as for a double click on it)
+APP="$1"; [ -d "$APP" ] || { echo "usage: macapp APP.app [FILE]" >&2; exit 64; }; shift
 APP="$(cd "$APP" && pwd)"
 CACHE="${XDG_CACHE_HOME:-$HOME/Library/Caches}/machrun"; mkdir -p "$CACHE" || exit 1
 LAUNCHER="$(sh /usr/local/libexec/wrapapp.sh "$APP" "$CACHE" /usr/local/bin/machrun)" || exit 1
+if [ -n "$1" ] && [ -e "$1" ]; then MACHRUN_OPENFILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; export MACHRUN_OPENFILE; shift
+else MACHRUN_SHOWWINDOWS=1; export MACHRUN_SHOWWINDOWS; fi
 exec "$LAUNCHER" "$@"
