@@ -209,9 +209,9 @@ parse(struct image *im, const char *path)
 			errx(1, "%s: no slice for this architecture", path);
 	}
 	mh = (const struct mach_header_64 *)im->file;
-	if (mh->magic != MH_MAGIC_64 || mh->cputype != hostcpu || (mh->filetype != MH_EXECUTE && mh->filetype != MH_DYLIB_TYPE))
+	if (mh->magic != MH_MAGIC_64 || mh->cputype != hostcpu || (mh->filetype != MH_EXECUTE && mh->filetype != MH_DYLIB_TYPE && mh->filetype != 8 /* MH_BUNDLE */))
 		errx(1, "%s: not a Mach-O executable or dynamic library for this architecture", path);
-	im->is_dylib = mh->filetype == MH_DYLIB_TYPE;
+	im->is_dylib = mh->filetype != MH_EXECUTE;
 	im->flags = mh->flags;
 	im->min_vm = ~0ULL;
 
@@ -295,6 +295,7 @@ map_image(struct image *im)
 
 /* ---- libraries and symbols ---- */
 
+extern char **environ;
 struct image *machrun_images_head(void);
 static struct image *images;				/* every Mach-O file that is loaded: the program and its dylibs */
 static struct image *main_image;
@@ -305,38 +306,46 @@ struct image *machrun_images_head(void) { return (images ? images : main_image);
 /* The export trie of an image: the address of a symbol (a re-exported one is looked up in the library that has it). */
 static uintptr_t image_export(struct image *im, const char *name, int depth);
 
+/* The edges of a node are tried one after the other (the trie of some linkers is not compact: "error" and "error_str" can be two edges of the same node) */
+static uintptr_t
+trie_walk(struct image *im, const uint8_t *node, const char *name, const char *full, int depth, int level)
+{
+	const uint8_t *base = im->exports, *end = im->exports + im->export_size;
+	const uint8_t *p = node; uint64_t tsize; const uint8_t *term, *ch; uint8_t n;
+	if (level > 512 || node >= end) return (0);
+	tsize = uleb(&p, end); term = p; ch = p + tsize;
+	if (*name == 0 && tsize != 0) {
+		uint64_t flags = uleb(&term, end);
+		if (flags & 0x8) {				/* EXPORT_SYMBOL_FLAGS_REEXPORT: (ordinal, name in that library) */
+			uint64_t ord = uleb(&term, end); const char *in = (const char *)term;
+			if (ord >= 1 && ord <= (uint64_t)im->nlib && im->libimg[ord - 1] != NULL && depth < 8)
+				return (image_export(im->libimg[ord - 1], *in ? in : full, depth + 1));
+			return (0);
+		}
+		{ uint64_t off = uleb(&term, end);
+		  if (flags & 0x10) {				/* stub and resolver: the resolver gives the address */
+			uint64_t res = uleb(&term, end);
+			return (((uintptr_t (*)(void))(im->min_vm + im->slide + res))());
+		  }
+		  return (im->min_vm + im->slide + off); }
+	}
+	n = *ch++;
+	while (n--) {
+		const char *edge = (const char *)ch; size_t el = strlen(edge); uint64_t off;
+		ch += el + 1; off = uleb(&ch, end);
+		if (strncmp(name, edge, el) == 0) {
+			uintptr_t r = trie_walk(im, base + off, name + el, full, depth, level + 1);
+			if (r) return (r);
+		}
+	}
+	return (0);
+}
+
 static uintptr_t
 trie_lookup(struct image *im, const char *name, int depth)
 {
-	const uint8_t *base = im->exports, *end = im->exports + im->export_size, *node = base; const char *full = name;
-	if (base == NULL) return (0);
-	for (;;) {
-		const uint8_t *p = node; uint64_t tsize = uleb(&p, end); const uint8_t *term = p, *ch = p + tsize; uint8_t n; int found = 0;
-		if (*name == 0) {
-			uint64_t flags;
-			if (tsize == 0) return (0);
-			flags = uleb(&term, end);
-			if (flags & 0x8) {				/* EXPORT_SYMBOL_FLAGS_REEXPORT: (ordinal, name in that library) */
-				uint64_t ord = uleb(&term, end); const char *in = (const char *)term;
-				if (ord >= 1 && ord <= (uint64_t)im->nlib && im->libimg[ord - 1] != NULL && depth < 8)
-					return (image_export(im->libimg[ord - 1], *in ? in : full, depth + 1));
-				return (0);
-			}
-			{ uint64_t off = uleb(&term, end);
-			  if (flags & 0x10) {				/* stub and resolver: the resolver gives the address */
-				uint64_t res = uleb(&term, end);
-				return (((uintptr_t (*)(void))(im->min_vm + im->slide + res))());
-			  }
-			  return (im->min_vm + im->slide + off); }
-		}
-		n = *ch++;
-		while (n--) {
-			const char *edge = (const char *)ch; size_t el = strlen(edge); uint64_t off;
-			ch += el + 1; off = uleb(&ch, end);
-			if (!found && strncmp(name, edge, el) == 0) { name += el; node = base + off; found = 1; }
-		}
-		if (!found) return (0);
-	}
+	if (im->exports == NULL) return (0);
+	return (trie_walk(im, im->exports, name, name, depth, 0));
 }
 
 static uintptr_t
@@ -747,7 +756,7 @@ script_symbol(const char *name)
 {
 	char buf[256]; struct image *d; uintptr_t a;
 	snprintf(buf, sizeof(buf), "_%s", name);
-	if (strcmp(name, "peek") == 0 || strcmp(name, "peek32") == 0 || strcmp(name, "peek16") == 0) return (0);
+	if (strcmp(name, "peek") == 0 || strcmp(name, "peek32") == 0 || strcmp(name, "peek16") == 0 || strcmp(name, "poke32") == 0 || strcmp(name, "poke") == 0) return (0);
 	for (d = images; d != NULL; d = d->next) if ((a = image_export(d, buf, 0)) != 0) { VLOG("%s: %#lx in %s (image at %#lx, slide %#lx)\n", buf, (unsigned long)a, d->path, (unsigned long)(d->min_vm + d->slide), (unsigned long)d->slide); return (a); }
 	return ((uintptr_t)dlsym(RTLD_DEFAULT, name));		/* the C library of this system (calloc, printf ...) */
 }
@@ -755,6 +764,8 @@ script_symbol(const char *name)
 static uintptr_t peek_fn(uintptr_t addr, uintptr_t off) { return (*(uintptr_t *)(addr + off)); }
 static uintptr_t peek32_fn(uintptr_t addr, uintptr_t off) { return (*(uint32_t *)(addr + off)); }
 static uintptr_t peek16_fn(uintptr_t addr, uintptr_t off) { return (*(uint16_t *)(addr + off)); }
+static uintptr_t poke32_fn(uintptr_t addr, uintptr_t off, uintptr_t v) { *(uint32_t *)(addr + off) = (uint32_t)v; return (v); }
+static uintptr_t poke_fn(uintptr_t addr, uintptr_t off, uintptr_t v) { *(uintptr_t *)(addr + off) = v; return (v); }
 
 static int
 run_script(const char *file)
@@ -790,7 +801,7 @@ run_script(const char *file)
 		}
 		while (*name == ' ') name++;
 		{ char *e = name + strlen(name); while (e > name && (e[-1] == ' ')) *--e = 0; }
-		fn = strcmp(name, "peek") == 0 ? (uintptr_t)peek_fn : strcmp(name, "peek32") == 0 ? (uintptr_t)peek32_fn : strcmp(name, "peek16") == 0 ? (uintptr_t)peek16_fn : script_symbol(name);
+		fn = strcmp(name, "peek") == 0 ? (uintptr_t)peek_fn : strcmp(name, "peek32") == 0 ? (uintptr_t)peek32_fn : strcmp(name, "peek16") == 0 ? (uintptr_t)peek16_fn : strcmp(name, "poke32") == 0 ? (uintptr_t)poke32_fn : strcmp(name, "poke") == 0 ? (uintptr_t)poke_fn : script_symbol(name);
 		if (fn == 0) { printf("%s: no such symbol\n", name); fflush(stdout); failed++; continue; }
 		r = ((uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, double, double, double, double))fn)(iv[0], iv[1], iv[2], iv[3], iv[4], iv[5], dv[0], dv[1], dv[2], dv[3]);
 		if (assign >= 0) var[assign & 63] = r;
@@ -801,6 +812,83 @@ run_script(const char *file)
 	return (failed);
 }
 
+/* the file of the image that holds an address (compat.m: +[NSBundle bundleForClass:] of a class that a plug-in or a framework defines) */
+const char *
+machrun_image_path_for_addr(const void *addr)
+{
+	struct image *d;
+	for (d = images; d != NULL; d = d->next) if ((uintptr_t)addr >= d->min_vm + d->slide && (uintptr_t)addr < d->max_vm + d->slide) return (d->path);
+	if (main_image && (uintptr_t)addr >= main_image->min_vm + main_image->slide && (uintptr_t)addr < main_image->max_vm + main_image->slide) return (main_image->path);
+	return (NULL);
+}
+
+/* MACHRUN_DEBUG: a fatal signal says which Mach-O images the program counter and the stack point into */
+#include <signal.h>
+#include <ucontext.h>
+static void
+fatal_handler(int sig, siginfo_t *si, void *ucv)
+{
+	ucontext_t *uc = ucv; int i; struct image *d;
+#if defined(__x86_64__)
+	uintptr_t rip = uc->uc_mcontext.mc_rip, *sp = (uintptr_t *)uc->uc_mcontext.mc_rsp;
+#else
+	uintptr_t rip = 0, *sp = NULL;
+#endif
+	dprintf(2, "machrun: signal %d at %#lx (fault address %p)\n", sig, (unsigned long)rip, si->si_addr);
+	{ Dl_info di; if (dladdr((void *)rip, &di) && di.dli_sname) dprintf(2, "  pc in %s (%s + %#lx)\n", di.dli_fname, di.dli_sname, (unsigned long)(rip - (uintptr_t)di.dli_saddr)); }
+#if defined(__x86_64__)
+	dprintf(2, "  rdi %#lx rsi %#lx rdx %#lx rcx %#lx\n", (unsigned long)uc->uc_mcontext.mc_rdi, (unsigned long)uc->uc_mcontext.mc_rsi, (unsigned long)uc->uc_mcontext.mc_rdx, (unsigned long)uc->uc_mcontext.mc_rcx);
+	dprintf(2, "  rbx %#lx r12 %#lx r13 %#lx r14 %#lx r15 %#lx\n", (unsigned long)uc->uc_mcontext.mc_rbx, (unsigned long)uc->uc_mcontext.mc_r12, (unsigned long)uc->uc_mcontext.mc_r13, (unsigned long)uc->uc_mcontext.mc_r14, (unsigned long)uc->uc_mcontext.mc_r15);
+#endif
+	for (d = machrun_images_head(); d != NULL; d = d->next) {
+		if (rip >= d->min_vm + d->slide && rip < d->max_vm + d->slide) dprintf(2, "  pc in %s + %#lx\n", d->path, (unsigned long)(rip - d->slide - d->min_vm));
+	}
+	if (sp) for (i = 0; i < 200; i++) for (d = machrun_images_head(); d != NULL; d = d->next)
+		if (sp[i] >= d->min_vm + d->slide && sp[i] < d->max_vm + d->slide) { dprintf(2, "  stack[%d]: %s + %#lx\n", i, d->path, (unsigned long)(sp[i] - d->slide - d->min_vm)); break; }
+	_exit(139);
+}
+static void
+install_fatal_handler(void)
+{
+	static char stk[1 << 16]; stack_t ss = { .ss_sp = stk, .ss_size = sizeof(stk), .ss_flags = 0 }; struct sigaction sa;
+	sigaltstack(&ss, NULL);
+	memset(&sa, 0, sizeof(sa)); sa.sa_sigaction = fatal_handler; sa.sa_flags = SA_SIGINFO | SA_ONSTACK; sigemptyset(&sa.sa_mask);
+	sigaction(SIGSEGV, &sa, NULL); sigaction(SIGBUS, &sa, NULL);
+}
+
+/* A Mach-O bundle (a plug-in) that the program asks to load: it is loaded like a dylib, after the program has started */
+/* is there code for this machine in the file? (a plug-in for another architecture is no reason to end the program) */
+static bool
+macho_for_this_machine(const char *path)
+{
+	uint8_t b[8 + 20 * 16]; int fd = open(path, O_RDONLY); ssize_t n; bool ok = false; uint32_t i;
+	const uint32_t hostcpu =
+#if defined(__x86_64__)
+	    CPU_TYPE_X86_64;
+#else
+	    CPU_TYPE_ARM64;
+#endif
+	if (fd < 0) return (false);
+	n = read(fd, b, sizeof(b)); close(fd);
+	if (n < 8) return (false);
+	if (be32dec(b) == FAT_MAGIC) { uint32_t cnt = be32dec(b + 4); for (i = 0; i < cnt && i < 16 && 8 + 20 * (i + 1) <= (uint32_t)n; i++) if (be32dec(b + 8 + 20 * i) == hostcpu) ok = true; }
+	else if (le32dec(b) == MH_MAGIC_64 && le32dec(b + 4) == hostcpu) ok = true;
+	return (ok);
+}
+
+void *
+machrun_load_macho(const char *path)
+{
+	struct image *d, *k; char *apple2[2] = { NULL, NULL }; char *none[1] = { NULL };
+	if (!macho_for_this_machine(path)) { VLOG("%s: no code for this machine\n", path); return (NULL); }
+	d = load_lib_file(path);
+	for (k = images; k != NULL; k = k->next) bind_image(k);
+	for (k = images; k != NULL; k = k->next) objc_load_deps(k, false);
+	objc_call_loads();
+	for (k = images; k != NULL; k = k->next) run_all_initializers(k, 0, none, environ, apple2);
+	return (d);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -808,6 +896,7 @@ main(int argc, char **argv)
 	extern char **environ;
 
 	if (getenv("MACHRUN_DEBUG")) machrun_verbose = 1;
+	if (getenv("MACHRUN_SEGV")) install_fatal_handler();
 	{	/* launcher mode: started under another name (e.g. as Keka.app/Contents/MacOS/Keka), it runs the Mach-O file next to it,
 		 * NAME.macho, so that the process, and with it the main bundle of the program, is the application's own */
 		const char *base = strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0];
@@ -852,7 +941,7 @@ main(int argc, char **argv)
 	if (launcher_real == NULL && ch >= argc) errx(64, "usage: machrun [-v] PROGRAM [arguments]");
 	memset(&im, 0, sizeof(im));
 	parse(&im, launcher_real ? launcher_real : argv[ch]);
-	if (!im.have_main) errx(1, "%s: no LC_MAIN (only programs that start at main() are supported)", launcher_real ? launcher_real : argv[ch]);
+	if (!im.have_main && !im.have_thread) errx(1, "%s: no LC_MAIN and no LC_UNIXTHREAD: no entry point", launcher_real ? launcher_real : argv[ch]);
 	{	/* an Objective-C program (a Mac application): the settings that made them run in the tests.  MALLOC_CONF=junk:true has to be in the environment before the allocator
 		 * starts, so the process starts itself again once; MACHRUN_STRICT=1 turns the leniency off (messages that nothing implements raise as GNUstep's do) */
 		int objc = 0, i; uint32_t j;
@@ -883,6 +972,20 @@ main(int argc, char **argv)
 
 	objc_call_loads();
 	run_all_initializers(&im, argc - ch, argv + ch, environ, apple);
+	if (!im.have_main) {			/* an older program (LC_UNIXTHREAD): its start function expects the stack that the kernel makes: argc, argv, envp, apple */
+		int ac = argc - ch, ne = 0, k; char **av = argv + ch; size_t words, sz = 8 << 20; uintptr_t *sp; char *stk;
+		while (environ[ne]) ne++;
+		stk = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_STACK, -1, 0);
+		if (stk == MAP_FAILED) err(1, "mmap stack");
+		words = 1 + ac + 1 + ne + 1 + 1 + 1;
+		sp = (uintptr_t *)(stk + sz - 4096 - words * 8); sp = (uintptr_t *)((uintptr_t)sp & ~(uintptr_t)15);
+		{ uintptr_t *w = sp; *w++ = (uintptr_t)ac; for (k = 0; k < ac; k++) *w++ = (uintptr_t)av[k]; *w++ = 0; for (k = 0; k < ne; k++) *w++ = (uintptr_t)environ[k]; *w++ = 0; *w++ = (uintptr_t)apple[0]; *w++ = 0; }
+		VLOG("start at %p (LC_UNIXTHREAD), stack %p\n", (void *)(im.thread_pc + im.slide), (void *)sp);
+#if defined(__x86_64__)
+		__asm__ volatile("movq %0,%%rsp\n\txorl %%ebp,%%ebp\n\tjmp *%1" :: "r"(sp), "r"(im.thread_pc + im.slide) : "memory");
+#endif
+		_exit(127);
+	}
 	VLOG("main at %p\n", (void *)(im.text_vm + im.slide + im.entryoff));
 	ret = ((int (*)(int, char **, char **, char **))(im.text_vm + im.slide + im.entryoff))(argc - ch, argv + ch, environ, apple);
 	exit(ret);

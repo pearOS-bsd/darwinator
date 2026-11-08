@@ -865,3 +865,161 @@ trash_init(void)
 	(void)[k class];
 	class_addMethod(k, @selector(trashItemAtURL:resultingItemURL:error:), (IMP)fm_trashItem, "c40@0:8@16^@24^@32");
 }
+
+
+/* Plug-ins that are Mach-O bundles (XLD's output and decoder plug-ins): -[NSBundle load] asks machrun to load the executable of the bundle (Contents/MacOS/NAME); the principal class
+ * is the class that the Info.plist names. */
+static void *(*macho_loader)(const char *);
+static IMP o_bundleLoad, o_bundlePrincipal, o_bundleIsLoaded;
+static NSString *
+macho_exec(id self)
+{
+	NSDictionary *info = [(NSBundle *)self infoDictionary]; NSString *name = [info objectForKey:@"CFBundleExecutable"], *p;
+	if (name == nil) return nil;
+	p = [[(NSBundle *)self bundlePath] stringByAppendingPathComponent:[@"Contents/MacOS" stringByAppendingPathComponent:name]];
+	if (access([p fileSystemRepresentation], R_OK) != 0) return nil;
+	{ FILE *f = fopen([p fileSystemRepresentation], "r"); unsigned char m[4] = { 0 }; int ok;
+	  if (f == NULL) return nil;
+	  ok = fread(m, 1, 4, f) == 4 && ((m[0] == 0xca && m[1] == 0xfe && m[2] == 0xba && m[3] == 0xbe) || (m[0] == 0xcf && m[1] == 0xfa && m[2] == 0xed && m[3] == 0xfe));
+	  fclose(f);
+	  return ok ? p : nil; }
+}
+static NSMutableSet *macho_loaded;
+static BOOL
+w_bundleLoad(id self, SEL _cmd)
+{
+	NSString *p;
+	if (getenv("MACHRUN_DEBUG")) fprintf(stderr, "machrun: -[NSBundle load] %s (loader %p, Mach-O executable %s)\n", [[(NSBundle *)self bundlePath] UTF8String], (void *)macho_loader, macho_loader ? [macho_exec(self) UTF8String] : "-");
+	if (macho_loader == NULL || (p = macho_exec(self)) == nil) return ((BOOL (*)(id, SEL))o_bundleLoad)(self, _cmd);
+	@synchronized(macho_loaded) {
+		if ([macho_loaded containsObject:p]) return YES;
+		if (macho_loader([p fileSystemRepresentation]) == NULL) return NO;
+		[macho_loaded addObject:p];
+	}
+	return YES;
+}
+static BOOL
+w_bundleIsLoaded(id self, SEL _cmd)
+{
+	NSString *p = macho_loader ? macho_exec(self) : nil;
+	if (p != nil) return [macho_loaded containsObject:p];
+	return ((BOOL (*)(id, SEL))o_bundleIsLoaded)(self, _cmd);
+}
+static Class
+w_bundlePrincipal(id self, SEL _cmd)
+{
+	if (macho_loader && macho_exec(self) != nil) {
+		NSString *cn = [[(NSBundle *)self infoDictionary] objectForKey:@"NSPrincipalClass"];
+		if (!w_bundleIsLoaded(self, _cmd) && !w_bundleLoad(self, @selector(load))) return Nil;
+		return cn ? NSClassFromString(cn) : Nil;
+	}
+	return ((Class (*)(id, SEL))o_bundlePrincipal)(self, _cmd);
+}
+__attribute__((constructor)) static void
+machobundle_init(void)
+{
+	Class k = NSClassFromString(@"NSBundle"); Method m; const char *a = getenv("MACHRUN_LOADER_FN");
+	if (k == Nil) return;
+	(void)[k class];
+	macho_loaded = [[NSMutableSet alloc] init];
+	if (a) macho_loader = (void *(*)(const char *))strtoul(a, NULL, 16);
+	if ((m = class_getInstanceMethod(k, @selector(load))) != NULL) o_bundleLoad = method_setImplementation(m, (IMP)w_bundleLoad);
+	if ((m = class_getInstanceMethod(k, @selector(isLoaded))) != NULL) o_bundleIsLoaded = method_setImplementation(m, (IMP)w_bundleIsLoaded);
+	if ((m = class_getInstanceMethod(k, @selector(principalClass))) != NULL) o_bundlePrincipal = method_setImplementation(m, (IMP)w_bundlePrincipal);
+}
+
+/* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
+static const char *(*class_image_path)(Class);
+static IMP o_bundleForClass;
+static id
+w_bundleForClass(id self, SEL _cmd, Class k)
+{
+	const char *p = class_image_path ? class_image_path(k) : NULL;
+	if (p != NULL) {
+		NSString *s = [NSString stringWithUTF8String:p]; NSArray *parts = [s pathComponents]; NSInteger i;
+		for (i = (NSInteger)[parts count] - 1; i >= 0; i--) {
+			NSString *c = [parts objectAtIndex:i];
+			if ([c hasSuffix:@".bundle"] || [c hasSuffix:@".framework"] || [c hasSuffix:@".app"]) {
+				NSString *dir = [NSString pathWithComponents:[parts subarrayWithRange:NSMakeRange(0, i + 1)]];
+				id b = [NSBundle bundleWithPath:dir];
+				if (b != nil) return b;
+				break;
+			}
+		}
+	}
+	return ((id (*)(id, SEL, Class))o_bundleForClass)(self, _cmd, k);
+}
+__attribute__((constructor)) static void
+bundleforclass_init(void)
+{
+	Class k = NSClassFromString(@"NSBundle"); Method m; const char *a = getenv("MACHRUN_CLASSPATH_FN");
+	if (k == Nil) return;
+	(void)[k class];
+	if (a) class_image_path = (const char *(*)(Class))strtoul(a, NULL, 16);
+	if ((m = class_getClassMethod(k, @selector(bundleForClass:))) != NULL) o_bundleForClass = method_setImplementation(m, (IMP)w_bundleForClass);
+}
+
+/* The resources of a bundle in the layout of macOS (NAME.bundle/Contents/Resources): GNUstep looks in NAME.bundle/Resources */
+static IMP o_resourcePath, o_pathForResource3;
+static NSString *
+mac_resources(id self)
+{
+	NSString *r = [[(NSBundle *)self bundlePath] stringByAppendingPathComponent:@"Contents/Resources"]; BOOL d = NO;
+	return ([[NSFileManager defaultManager] fileExistsAtPath:r isDirectory:&d] && d) ? r : nil;
+}
+static NSString *
+w_resourcePath(id self, SEL _cmd)
+{
+	NSString *r = mac_resources(self);
+	return r != nil ? r : ((id (*)(id, SEL))o_resourcePath)(self, _cmd);
+}
+static NSString *
+w_pathForResource(id self, SEL _cmd, NSString *name, NSString *ext, NSString *dir)
+{
+	NSString *base = mac_resources(self);
+	if (base != nil && name != nil) {
+		NSFileManager *fm = [NSFileManager defaultManager]; NSString *file = [ext length] ? [name stringByAppendingPathExtension:ext] : name, *root = [dir length] ? [base stringByAppendingPathComponent:dir] : base, *c;
+		NSArray *langs = [NSArray arrayWithObjects:@"", @"en.lproj", @"English.lproj", @"Base.lproj", nil]; NSUInteger i;
+		for (i = 0; i < [langs count]; i++) {
+			NSString *l = [langs objectAtIndex:i];
+			c = [l length] ? [[root stringByAppendingPathComponent:l] stringByAppendingPathComponent:file] : [root stringByAppendingPathComponent:file];
+			if ([fm fileExistsAtPath:c]) return c;
+		}
+	}
+	return ((id (*)(id, SEL, id, id, id))o_pathForResource3)(self, _cmd, name, ext, dir);
+}
+static NSString *
+w_pathForResource2(id self, SEL _cmd, NSString *name, NSString *ext) { return w_pathForResource(self, @selector(pathForResource:ofType:inDirectory:), name, ext, nil); }
+__attribute__((constructor)) static void
+macresources_init(void)
+{
+	Class k = NSClassFromString(@"NSBundle"); Method m;
+	if (k == Nil) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(resourcePath))) != NULL) o_resourcePath = method_setImplementation(m, (IMP)w_resourcePath);
+	if ((m = class_getInstanceMethod(k, @selector(pathForResource:ofType:inDirectory:))) != NULL) o_pathForResource3 = method_setImplementation(m, (IMP)w_pathForResource);
+	if ((m = class_getInstanceMethod(k, @selector(pathForResource:ofType:))) != NULL) method_setImplementation(m, (IMP)w_pathForResource2);
+}
+
+/* AppKit before the application object: a command line program of a Mac application (XLD --cmdline) loads a nib or asks for fonts without NSApplication; AppKit of macOS works that way, GNUstep
+ * needs the shared application (it starts the backend) first. */
+static IMP o_fontEnumShared;
+static id
+w_fontEnumShared(id self, SEL _cmd)
+{
+	static BOOL once;
+	if (!once) {
+		Class ak = NSClassFromString(@"NSApplication");
+		once = YES;
+		if (ak != Nil) ((id (*)(id, SEL))class_getMethodImplementation(object_getClass(ak), @selector(sharedApplication)))(ak, @selector(sharedApplication));
+	}
+	return ((id (*)(id, SEL))o_fontEnumShared)(self, _cmd);
+}
+__attribute__((constructor)) static void
+fontenum_init(void)
+{
+	Class k = NSClassFromString(@"GSFontEnumerator"); Method m;
+	if (k == Nil) return;
+	(void)[k class];
+	if ((m = class_getClassMethod(k, @selector(sharedEnumerator))) != NULL) o_fontEnumShared = method_setImplementation(m, (IMP)w_fontEnumShared);
+}

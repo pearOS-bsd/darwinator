@@ -111,6 +111,26 @@ st_out(const struct stat *sb, struct darwin_stat64 *d)
 }
 static int dw_stat(const char *p, struct darwin_stat64 *d) { struct stat sb; int r = stat(p, &sb); if (r == 0) st_out(&sb, d); return (r); }
 static int dw_lstat(const char *p, struct darwin_stat64 *d) { struct stat sb; int r = lstat(p, &sb); if (r == 0) st_out(&sb, d); return (r); }
+/* the plain stat/lstat/fstat of x86-64 macOS (a program built without the 64 bit inode types) have the older, smaller structure: 120 bytes, 32 bit inode */
+struct darwin_stat32 {
+	int32_t st_dev; uint32_t st_ino; uint16_t st_mode; uint16_t st_nlink; uint32_t st_uid, st_gid; int32_t st_rdev;
+	struct { int64_t tv_sec, tv_nsec; } st_atimespec, st_mtimespec, st_ctimespec;
+	int64_t st_size, st_blocks; int32_t st_blksize; uint32_t st_flags, st_gen; int32_t st_lspare; int64_t st_qspare[2];
+};
+static void
+st_out32(const struct stat *sb, struct darwin_stat32 *d)
+{
+	memset(d, 0, sizeof(*d));
+	d->st_dev = (int32_t)sb->st_dev; d->st_ino = (uint32_t)sb->st_ino; d->st_mode = sb->st_mode; d->st_nlink = sb->st_nlink > 0xffff ? 0xffff : (uint16_t)sb->st_nlink;
+	d->st_uid = sb->st_uid; d->st_gid = sb->st_gid; d->st_rdev = (int32_t)sb->st_rdev;
+	d->st_atimespec.tv_sec = sb->st_atim.tv_sec; d->st_atimespec.tv_nsec = sb->st_atim.tv_nsec;
+	d->st_mtimespec.tv_sec = sb->st_mtim.tv_sec; d->st_mtimespec.tv_nsec = sb->st_mtim.tv_nsec;
+	d->st_ctimespec.tv_sec = sb->st_ctim.tv_sec; d->st_ctimespec.tv_nsec = sb->st_ctim.tv_nsec;
+	d->st_size = sb->st_size; d->st_blocks = sb->st_blocks; d->st_blksize = sb->st_blksize; d->st_flags = sb->st_flags; d->st_gen = (uint32_t)sb->st_gen;
+}
+static int dw_stat32(const char *p, struct darwin_stat32 *d) { struct stat sb; int r = stat(p, &sb); if (r == 0) st_out32(&sb, d); return (r); }
+static int dw_lstat32(const char *p, struct darwin_stat32 *d) { struct stat sb; int r = lstat(p, &sb); if (r == 0) st_out32(&sb, d); return (r); }
+static int dw_fstat32(int fd, struct darwin_stat32 *d) { struct stat sb; int r = fstat(fd, &sb); if (r == 0) st_out32(&sb, d); return (r); }
 static int dw_fstat(int fd, struct darwin_stat64 *d) { struct stat sb; int r = fstat(fd, &sb); if (r == 0) st_out(&sb, d); return (r); }
 
 /* statfs: Darwin's struct statfs is 2168 bytes, FreeBSD's is larger (2344): writing FreeBSD's would overflow the program's buffer */
@@ -453,6 +473,24 @@ static long dw_minus_one(void) { return (-1); }
 static int dw_pthread_threadid_np(void *thr, unsigned long long *id) { if (id) *id = (unsigned long long)(uintptr_t)pthread_self(); return (0); }
 static int dw_qos_class_self(void) { return (0x15); }	/* QOS_CLASS_DEFAULT */
 extern void *machrun_tlv_thunk_addr(void), *machrun_chkstk_addr(void);
+/* Gestalt (Carbon): what a program asks of the system version; this system says macOS 13 */
+static int
+dw_gestalt(unsigned sel, int *resp)
+{
+	int v;
+	switch (sel) {
+	case 0x73797376: v = 0x1060; break;	/* 'sysv': the version in the old BCD form (caps at 10.6) */
+	case 0x73797331: v = 13; break;		/* 'sys1': major */
+	case 0x73797332: v = 0; break;		/* 'sys2': minor */
+	case 0x73797333: v = 0; break;		/* 'sys3': bug fix */
+	case 0x61726368: v = 2; break;		/* 'arch': gestaltIntel86 (? new) */
+	default: if (resp) *resp = 0; return (-5551);	/* gestaltUndefSelectorErr */
+	}
+	if (resp) *resp = v;
+	return (0);
+}
+/* AudioToolbox / CoreAudio: no codec service here; the calls that open a file or ask for a converter say that the file type is not supported (a program tries its next decoder) */
+static long dw_audio_unsupported(void) { return (0x7479703f); }	/* kAudioFileUnsupportedFileTypeError 'typ?' */
 /* System Integrity Protection: nothing protected, nothing disabled (the configuration is empty) */
 static int dw_csr_get_active_config(unsigned *config) { if (config) *config = 0; return (0); }
 static int dw_csr_check(unsigned mask) { return (0); }
@@ -476,7 +514,7 @@ static int dw_setattrlist(const char *path, void *attrs, void *buf, size_t size,
 static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_open", dw_open }, { "_fcntl", dw_fcntl },
 	{ "_readdir$INODE64", dw_readdir }, { "_readdir", dw_readdir }, { "_readdir_r$INODE64", dw_readdir_r }, { "_readdir_r", dw_readdir_r },
-	{ "_stat$INODE64", dw_stat }, { "_lstat$INODE64", dw_lstat }, { "_fstat$INODE64", dw_fstat },
+	{ "_stat", dw_stat32 }, { "_lstat", dw_lstat32 }, { "_fstat", dw_fstat32 }, { "_stat$INODE64", dw_stat }, { "_lstat$INODE64", dw_lstat }, { "_fstat$INODE64", dw_fstat },
 	{ "_statfs$INODE64", dw_statfs }, { "_statfs", dw_statfs }, { "_fstatfs$INODE64", dw_fstatfs }, { "_fstatfs", dw_fstatfs },
 	{ "_utimes", dw_utimes }, { "_lutimes", dw_lutimes },
 	{ "_fstatat$INODE64", dw_fstatat }, { "_fstatat", dw_fstatat }, { "_openat", dw_openat }, { "_unlinkat", dw_unlinkat },
@@ -510,7 +548,9 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_fsetxattr", dw_fsetxattr }, { "_fgetxattr", dw_fgetxattr }, { "_flistxattr", dw_flistxattr }, { "_fremovexattr", dw_fremovexattr },
 	{ "_copyfile", dw_copyfile }, { "_mbr_uid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_gid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_uuid_to_id", dw_mbr_uuid_to_id },
 	{ "_iconv_open", dw_iconv_open }, { "_iconv", dw_iconv }, { "_iconv_close", dw_iconv_close },
-	{ "_setattrlist", dw_setattrlist }, { "_csr_get_active_config", dw_csr_get_active_config },
+	{ "_setattrlist", dw_setattrlist }, { "_csr_get_active_config", dw_csr_get_active_config }, { "_Gestalt", dw_gestalt },
+	{ "_ExtAudioFileOpenURL", dw_audio_unsupported }, { "_AudioFileOpenURL", dw_audio_unsupported }, { "_AudioFileOpenWithCallbacks", dw_audio_unsupported }, { "_AudioConverterNew", dw_audio_unsupported },
+	{ "_ExtAudioFileDispose", dw_zero }, { "_AudioFileClose", dw_zero }, { "_AudioConverterDispose", dw_zero },
 	{ "_SecStaticCodeCreateWithPath", dw_sec_unsigned }, { "_SecCodeCopySigningInformation", dw_sec_unsigned }, { "_SecStaticCodeCheckValidity", dw_sec_unsigned },
 	{ "_AuthorizationCreate", dw_auth_internal }, { "_AuthorizationCopyRights", dw_auth_internal }, { "_AuthorizationFree", dw_zero },
 	{ "_IOServiceGetMatchingService", dw_zero }, { "_IOObjectRelease", dw_zero }, { "_IOObjectConformsTo", dw_zero }, { "_IORegistryEntryCreateCFProperties", dw_kern_failure },
@@ -557,10 +597,14 @@ shim_lookup(void *lib, const char *name)
 	if (lib == NULL) lib = RTLD_DEFAULT;
 	a = dlsym(lib, buf);
 	if (a == NULL && lib != RTLD_DEFAULT) a = dlsym(RTLD_DEFAULT, buf);
+	if (a == NULL) {			/* libSystem has the math functions too (floor, fmod ...), FreeBSD has them in libm, which the process may not have loaded */
+		static void *libm; static int tried;
+		if (!tried) { tried = 1; libm = dlopen("libm.so.5", RTLD_NOW | RTLD_GLOBAL); }
+		if (libm) a = dlsym(libm, buf);
+	}
 	if (a == NULL) a = objc_constant_fallback(name);
 	if (a == NULL && strncmp(name, "_CF", 3) == 0) {		/* CoreFoundation on top of NSString: libmachcompat.so (Objective-C programs) */
-		static int tried;
-		if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); }
+		{ void machrun_load_compat(void); machrun_load_compat(); }
 		a = dlsym(RTLD_DEFAULT, buf);
 	}
 	return (a);

@@ -23,6 +23,8 @@ for L in en.lproj English.lproj; do
 	done
 done
 [ -d "$C/Frameworks" ] && ln -s "$C/Frameworks" "$W/Frameworks"
+# plug-ins and the other folders that the program looks for in its bundle
+for d in PlugIns SharedSupport Library; do [ -d "$C/$d" ] && ln -s "$C/$d" "$W/$d"; done
 cp "$C/Info.plist" "$W/Info-gnustep.plist"
 ln -s "$C/MacOS/$EXE" "$W/$EXE.macho"
 # the helper programs of the application (NSBundle pathForAuxiliaryExecutable: looks next to the executable): links to the Mach-O files
