@@ -456,6 +456,10 @@ machrun_show_windows(id app, SEL _cmd, id arg)
 		} else if (((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, of)) {
 			arr = ((id (*)(id, SEL, id))machrun_objc_lookup(ca, wo))(ca, wo, str);
 			((void (*)(id, SEL, id, id))machrun_objc_lookup(del, of))(del, of, app, arr); fprintf(stderr, "openFiles: %s\n", path);
+		} else if (((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, rt_registerName("application:openFile:"))) {	/* the old single-file form (The Unarchiver 3) */
+			SEL o1 = rt_registerName("application:openFile:");
+			BOOL r = ((BOOL (*)(id, SEL, id, id))machrun_objc_lookup(del, o1))(del, o1, app, str);
+			fprintf(stderr, "openFile: %s -> %d\n", path, (int)r & 0xff);
 		} else fprintf(stderr, "the delegate does not open files\n");
 	}
 	if (getenv("MACHRUN_SHOWWINDOWS") == NULL) return;

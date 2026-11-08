@@ -4,6 +4,8 @@
 #                                                                         macapp /Applications/Keka.app a.zip       (the application opens the file, as for a double click on it)
 APP="$1"; [ -d "$APP" ] || { echo "usage: macapp APP.app [FILE]" >&2; exit 64; }; shift
 APP="$(cd "$APP" && pwd)"
+# per-application settings that its run needs: The Unarchiver crashes in objc_autoreleasePoolPop when freed and new memory is filled with junk (the default for Mac programs, see machrun)
+case "$(basename "$APP")" in "The Unarchiver.app") : "${MALLOC_CONF:=junk:false}"; export MALLOC_CONF ;; esac
 CACHE="${XDG_CACHE_HOME:-$HOME/Library/Caches}/machrun"; mkdir -p "$CACHE" || exit 1
 LAUNCHER="$(sh /usr/local/libexec/wrapapp.sh "$APP" "$CACHE" /usr/local/bin/machrun)" || exit 1
 if [ -n "$1" ] && [ -e "$1" ]; then MACHRUN_OPENFILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; export MACHRUN_OPENFILE; shift
