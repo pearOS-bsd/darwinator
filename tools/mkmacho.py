@@ -27,8 +27,8 @@ def code_arm64(msg_off, code_off):
     adr_at = code_off + 8
     off = msg_off - adr_at
     adr = 0x10000000 | ((off & 3) << 29) | (((off >> 2) & 0x7FFFF) << 5) | 1
-    ins = [movz(16, 4), movz(0, 1), adr, movz(2, len(MSG)), 0xD4001001,   # svc #0x80
-           movz(16, 1), movz(0, EXIT), 0xD4001001]
+    ins = [movz(16, 4), movz(0, 1), adr, movz(2, len(MSG)), 0xD4000001,   # svc #0 (FreeBSD arm64 raises SIGILL for any other immediate, see README)
+           movz(16, 1), movz(0, EXIT), 0xD4000001]
     return b"".join(struct.pack("<I", i) for i in ins)
 
 def thin(arch, entry):

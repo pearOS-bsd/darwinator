@@ -1,5 +1,5 @@
 /*
- * Darwin arm64 system call convention: "svc #0x80" with the number in x16 (positive: BSD call, negative: Mach
+ * Darwin arm64 system call convention: "svc #0x80" (here "svc #0": the svc handler of FreeBSD 14 sends SIGILL for any other immediate) with the number in x16 (positive: BSD call, negative: Mach
  * trap), arguments in x0-x7, the result in x0 with the carry flag set on error.  FreeBSD's arm64 return
  * convention is the same (carry flag, errno in x0); it takes the number from x8 and from "svc #0", so only the
  * fetching of the number differs (the exception handler of the kernel does not look at the immediate).
