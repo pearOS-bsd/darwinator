@@ -242,9 +242,16 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 			break;
 		}
 		case LC_LOAD_DYLINKER:
-		case LC_LOAD_DYLIB:
+		case LC_LOAD_DYLIB: {
+			/* both commands start with cmd, cmdsize, and the offset of the name (a dylib_command has more after it) */
+			uint32_t noff = lc->cmdsize >= 12 ? ((const uint32_t *)lc)[2] : 0;
+
 			mi->needs_dyld = true;
+			if (noff >= 12 && noff < lc->cmdsize)
+				DPRINTF("  needs %s %.*s\n", lc->cmd == LC_LOAD_DYLINKER ? "linker" : "library",
+				    (int)(lc->cmdsize - noff), (const char *)lc + noff);
 			break;
+		}
 		default:
 			break;
 		}
@@ -326,6 +333,7 @@ macho_imgact(struct image_params *imgp)
 	if (error != 0)
 		goto out;
 	if (mi->needs_dyld) {
+		DPRINTF("%s: refused, it needs dyld and its libraries\n", imgp->execpath != NULL ? imgp->execpath : "?");
 		uprintf("darwinator: %s needs dyld (not implemented): only files without dylibs run\n",
 		    imgp->execpath != NULL ? imgp->execpath : "this file");
 		error = ENOEXEC;
