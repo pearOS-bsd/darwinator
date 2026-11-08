@@ -32,6 +32,16 @@ Things the shims had to fix, found by running real programs (`struct statfs` is 
 
 Not done: arm64 (and there the variadic calling convention of Darwin's arm64 differs from the standard one: `printf` and friends need their own shims), chained fixups, thread-local variables, `dlopen` of Mach-O dylibs.
 
+## The application: Objective-C and AppKit (state, pearOS image)
+
+`dyld/objc.c` turns the Objective-C 2 metadata of the file into calls of libobjc2: protocols, classes (with ivar offsets written back into the program's variables), categories, selector, class, super and protocol references, the 1444 constant strings (`__cfstring`, as instances of an NSString subclass that reads them in place), `+load`, and the `objc_msgSend` family as trampolines over `objc_msg_lookup`. Foundation and AppKit are GNUstep's. Run in the pearOS image (QEMU/KVM, the real `wsd`), `Keka`:
+
+* maps, binds (30 symbols still unresolved of 438: Security, some CoreFoundation, dispatch details, IOKit, ImageIO), registers 68 classes, 1 category, 18 protocols, runs `main()`;
+* GNUstep starts (`GSInitializeProcess`), connects to the window server, finds the application bundle (needs the GNUstep layout: `tools/wrapapp.sh`) and its `NSPrincipalClass`;
+* **stops at `Cannot load the main model file`**: the user interface of Keka is in Apple's compiled `.nib` files (binary keyed archives); GNUstep reads `.gorm` and `.xib` but not these.
+
+What is needed next: a loader for compiled nibs (NSKeyedUnarchiver data with `NSIBObjectData`, connections, the Cocoa classes), the remaining 30 symbols, `SPUUpdater` (Sparkle) as a stub, and exceptions in Mach-O code (the unwind tables are `__unwind_info`: `@try`/C++ exceptions in the program do not unwind yet).
+
 ## The files, from the simplest
 
 | File | Needs | Size of the gap |

@@ -403,6 +403,9 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_CFStringNormalize", cf_CFStringNormalize }, { "_CFRetain", cf_CFRetain }, { "_CFRelease", cf_CFRelease },
 };
 
+void *objc_shim_lookup(const char *name);
+void *objc_constant_fallback(const char *name);
+
 void *
 shim_lookup(void *lib, const char *name)
 {
@@ -413,6 +416,10 @@ shim_lookup(void *lib, const char *name)
 			return (overrides[i].addr);
 	if (strcmp(name, "__DefaultRuneLocale") == 0)
 		return (runelocale());
+	if (strstr(name, "objc") != NULL || strstr(name, "OBJC") != NULL || strcmp(name, "___CFConstantStringClassReference") == 0) {
+		void *o = objc_shim_lookup(name);
+		if (o != NULL) return (o);
+	}
 	if (name[0] != '_')
 		return (NULL);
 	n = strcspn(name + 1, "$");				/* "_fopen$DARWIN_EXTSN" -> "fopen" */
@@ -421,6 +428,7 @@ shim_lookup(void *lib, const char *name)
 	if (lib == NULL) lib = RTLD_DEFAULT;
 	a = dlsym(lib, buf);
 	if (a == NULL && lib != RTLD_DEFAULT) a = dlsym(RTLD_DEFAULT, buf);
+	if (a == NULL) a = objc_constant_fallback(name);
 	return (a);
 }
 
@@ -434,6 +442,23 @@ shim_open_library(const char *installname)
 	};
 	size_t i; void *h;
 
+	if (strstr(installname, "libobjc") || strstr(installname, "Foundation.framework") || strstr(installname, "AppKit.framework") ||
+	    strstr(installname, "Cocoa.framework") || strstr(installname, "libdispatch")) {
+		static int loaded;
+		if (!loaded) {				/* the Objective-C runtime and GNUstep stand in for libobjc, Foundation and AppKit (the name depends on the system: with or without the development symlinks) */
+			static const char *const so[][4] = {
+				{ "libobjc.so.4", "libobjc.so.4.6", "libobjc.so", NULL }, { "libBlocksRuntime.so.0", "libBlocksRuntime.so", NULL },
+				{ "libdispatch.so.1", "libdispatch.so", NULL },
+				{ "libgnustep-base.so.1.31", "libgnustep-base.so", NULL }, { "libgnustep-gui.so.0.32", "libgnustep-gui.so.0", "libgnustep-gui.so", NULL } };
+			size_t k, j;
+			for (k = 0; k < sizeof(so) / sizeof(so[0]); k++) {
+				for (j = 0; so[k][j]; j++) if (dlopen(so[k][j], RTLD_LAZY | RTLD_GLOBAL) != NULL) break;
+				if (so[k][j] == NULL) VLOG("no %s\n", so[k][0]);
+			}
+			loaded = 1;
+		}
+		return (RTLD_DEFAULT);
+	}
 	for (i = 0; i < sizeof(map) / sizeof(map[0]); i++)
 		if (strncmp(installname, map[i].prefix, strlen(map[i].prefix)) == 0) {
 			h = dlopen(map[i].so, RTLD_NOW | RTLD_GLOBAL);
