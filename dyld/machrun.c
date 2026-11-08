@@ -273,6 +273,7 @@ resolve(struct image *im, int ordinal, const char *name, bool weak)
 	void *h = NULL, *a;
 	if (ordinal >= 1 && ordinal <= im->nlib) h = im->libhandle[ordinal - 1];
 	a = shim_lookup(h, name);
+	if (strncmp(name, "_CF", 3) == 0) VLOG("bind %s -> %p\n", name, a);
 	if (a == NULL) {
 		if (weak) return (0);
 		unresolved_count++;
@@ -461,6 +462,10 @@ main(int argc, char **argv)
 	}
 	map_image(&im);
 	open_libs(&im);
+	{	/* GNUstep wants to see the arguments and the environment of the process (its own main() macro does this) */
+		void (*gsargs)(int, char **, char **) = dlsym(RTLD_DEFAULT, "GSInitializeProcess");
+		if (gsargs) { VLOG("GNUstep: GSInitializeProcess\n"); gsargs(argc - ch, argv + ch, environ); }
+	}
 	if (im.dyld_info) {
 		const struct dyld_info_command *di = im.dyld_info;
 		do_rebase(&im);
@@ -468,13 +473,10 @@ main(int argc, char **argv)
 		do_bind(&im, di->lazy_bind_off, di->lazy_bind_size, true);
 	}
 	VLOG("%u unresolved symbols\n", unresolved_count);
+	if (getenv("MACHRUN_DUMPGOT")) VLOG("got CFRelease slot %p\n", *(void **)(im.slide + 0x100103198));
 	if (realpath(launcher_real ? launcher_real : argv[ch], path) == NULL) strlcpy(path, argv[ch], sizeof(path));
 	{ char *ap = malloc(strlen(path) + 32); snprintf(ap, strlen(path) + 32, "executable_path=%s", path); apple[0] = ap; apple[1] = NULL; }
 	shim_set_process(argc - ch, argv + ch, environ, path);
-	{	/* GNUstep wants to see the arguments and the environment of the process (its own main() macro does this) */
-		void (*gsargs)(int, char **, char **) = dlsym(RTLD_DEFAULT, "GSInitializeProcess");
-		if (gsargs) { VLOG("GNUstep: GSInitializeProcess\n"); gsargs(argc - ch, argv + ch, environ); }
-	}
 	g_im = &im;
 	if (objc_load_image(find_sect, im.slide) < 0) errx(1, "Objective-C setup failed");
 	protect_image(&im);

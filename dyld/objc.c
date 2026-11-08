@@ -106,13 +106,35 @@ static Class to_class(void *p) { Class k = own_class(p); return (k ? k : (Class)
 static Protocol *to_proto(void *p) { int i; for (i = 0; i < npromap; i++) if (promap[i].p == p) return (promap[i].k); return ((Protocol *)p); }
 
 static FILE *symfile; static const char *sym_cls; static int sym_meta;
+/* Apple's type encodings carry the frame size and the offsets of the arguments ("c40@0:8o^@16@24o^@32"), GNUstep's do not ("c@:o^@@o^@"); libobjc2 dispatches on the types too, so a
+ * method with Apple's string is not found by a call from GNUstep.  The numbers outside of structure names and quoted names are taken out, and the qualifiers of arguments. */
+static const char *
+gnu_types(const char *t)
+{
+	size_t n = strlen(t); char *o = malloc(n + 1), *w = o; int depth = 0, quote = 0;
+	for (; *t; t++) {
+		if (*t == '"') quote = !quote;
+		else if (!quote) { if (*t == '{' || *t == '(') depth++; else if (*t == '}' || *t == ')') depth--; }
+		if (!quote && depth == 0 && ((*t >= '0' && *t <= '9') || strchr("nNoORV", *t) != NULL)) continue;	/* offsets, and the qualifiers in / inout / out / bycopy / byref / oneway: Apple's headers write (out id *) where GNUstep's do not */
+		*w++ = *t;
+	}
+	*w = 0;
+	return (o);
+}
+
 struct sel_add { Class cls; int replace; };
 static void
 add_method_cb(const char *nm, const char *types, void *imp, void *arg)
 {
 	struct sel_add *a = arg; SEL sel = rt_registerName(nm);
+	types = gnu_types(types);
 	if (symfile) fprintf(symfile, "%lx %c[%s %s]\n", (unsigned long)imp, sym_meta ? '+' : '-', sym_cls ? sym_cls : "?", nm);
-	if (a->replace) rt_replaceMethod(a->cls, sel, imp, types); else rt_addMethod(a->cls, sel, imp, types);
+	BOOL ok;
+	if (a->replace) { rt_replaceMethod(a->cls, sel, imp, types); ok = 1; } else ok = rt_addMethod(a->cls, sel, imp, types);
+	if (!ok || machrun_verbose > 1) {
+		const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
+		VLOG("objc: class_addMethod %s %s [%s] -> %d\n", cn ? cn(a->cls) : "?", nm, types, (int)ok);
+	}
 }
 static void
 add_methods(Class cls, const void *list, int replace)
@@ -134,7 +156,7 @@ add_protocols(Class cls, struct o_plist *pl)
 static void
 proto_method_cb(const char *nm, const char *types, void *imp, void *arg)
 {
-	void **a = arg; rt_protocolAddMethod((Protocol *)a[0], rt_registerName(nm), types ? types : "", (BOOL)(intptr_t)a[1], (BOOL)(intptr_t)a[2]);
+	void **a = arg; rt_protocolAddMethod((Protocol *)a[0], rt_registerName(nm), types ? gnu_types(types) : "", (BOOL)(intptr_t)a[1], (BOOL)(intptr_t)a[2]);
 }
 static void
 make_protocol(struct o_proto *p)
@@ -191,6 +213,19 @@ build_class(struct o_class *c)
 	add_methods(k, ro->baseMethods, 0);
 	if (c->isa) add_methods(rt_object_getClass((id)k), RO(c->isa)->baseMethods, 0);
 	add_protocols(k, (struct o_plist *)ro->baseProtocols);
+	if (machrun_verbose && strcmp(ro->name, "KFormatter") == 0) {
+		IMP (*gmi)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getMethodImplementation");
+		SEL sel = rt_registerName("getObjectValue:forString:errorDescription:");
+		const struct o_list *ml = ro->baseMethods; const void *const *e = (const void *const *)((const uint8_t *)(ml + 1) + 3 * 24);
+		{	void *(*gim)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod"); IMP (*mgi)(void *) = dlsym(RTLD_DEFAULT, "method_getImplementation");
+			const char *(*mgt)(void *) = dlsym(RTLD_DEFAULT, "method_getTypeEncoding"); BOOL (*rs)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_respondsToSelector");
+			void *m = gim ? gim(k, sel) : NULL;
+			fprintf(stderr, "objc: KFormatter: method %p imp %p types %s responds %d\n", m, m && mgi ? (void *)mgi(m) : NULL, m && mgt ? mgt(m) : "-", rs ? (int)rs(k, sel) & 0xff : -1); }
+		{	id (*cci)(Class, size_t) = dlsym(RTLD_DEFAULT, "class_createInstance");
+			if (cci) { id o = cci(k, 0); void *i1 = machrun_objc_lookup(o, sel); void *i2 = machrun_objc_lookup(o, rt_registerName("stringForObjectValue:")); fprintf(stderr, "objc: lookup on an instance: getObjectValue %p stringForObjectValue %p (program's 0x1000425c4 / 0x100042582)\n", i1, i2); }
+		}
+		fprintf(stderr, "objc: KFormatter %p super %p; getObjectValue: found %p, program's %p (%s)\n", (void *)k, (void *)rt_getSuperclass(k), gmi ? (void *)gmi(k, sel) : NULL, e[2], (const char *)e[0]);
+	}
 	clsmap[nclsmap].c = c; clsmap[nclsmap++].k = k;
 	return (k);
 }
@@ -581,6 +616,44 @@ setup_lenient(void)
 	VLOG("objc: lenient mode: unknown messages are stubbed\n");
 }
 
+/* ---- Program-specific compatibility: a Mac application that was built for the sandbox of the Mac App Store asks its own "do I have access to this folder" before it touches a file
+ * (security-scoped bookmarks, which this system does not have); outside of the sandbox every access is allowed. ---- */
+static BOOL yes_any(id self, SEL _cmd) { return (1); }
+static IMP orig_setdest;
+static void
+dbg_setdest(id self, SEL _cmd, id v)
+{
+	IMP (*gimp)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getMethodImplementation"); Class (*gc)(id) = dlsym(RTLD_DEFAULT, "object_getClass");
+	id (*desc)(id, SEL) = v ? (id (*)(id, SEL))gimp(gc(v), rt_registerName("description")) : NULL;
+	const char *(*utf)(id, SEL) = v ? (const char *(*)(id, SEL))gimp(gc(desc(v, rt_registerName("description"))), rt_registerName("UTF8String")) : NULL;
+	VLOG("objc: KTask setDestination: %p %s\n", (void *)v, v ? utf(desc(v, rt_registerName("description")), rt_registerName("UTF8String")) : "(nil)");
+	if (v == NULL) { /* the destination is derived from a format that this runtime cannot evaluate: use the folder of the archive */
+		id f = ((id (*)(id, SEL))gimp(gc(self), rt_registerName("file")))(self, rt_registerName("file"));
+		v = f ? ((id (*)(id, SEL))gimp(gc(f), rt_registerName("stringByDeletingLastPathComponent")))(f, rt_registerName("stringByDeletingLastPathComponent")) : NULL;
+		VLOG("objc: KTask setDestination: nil replaced by the folder of the file %p\n", (void *)v);
+	}
+	((void (*)(id, SEL, id))orig_setdest)(self, _cmd, v);
+}
+static void
+program_patches(void)
+{
+	{ void *(*g)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod"); IMP (*sm)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation"); Class k = rt_getClass("KTask");
+	  void *m = k ? g(k, rt_registerName("setDestination:")) : NULL; if (m) orig_setdest = sm(m, (IMP)dbg_setdest); }
+	static const struct { const char *cls, *sel; } p[] = {
+		{ "sandboxHelpers", "hasAccess:" }, { "sandboxHelpers", "hasAccess:askIfNeeded:" }, { "sandboxHelpers", "hasFullAccess" },
+		{ "sandboxHelpers", "hasHomeAccess" }, { "sandboxHelpers", "hasVolumesAccess" }, { "sandboxHelpers", "hasReadAccess:" }, { "Globals", "isPathWritable:" }, { "Globals", "isPathWritable:canCreateFile:" },
+	};
+	void *(*gim)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod"), *(*gcm)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getClassMethod");
+	IMP (*smi)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
+	size_t i;
+	for (i = 0; i < sizeof(p) / sizeof(p[0]); i++) {
+		Class k = rt_getClass(p[i].cls); void *m;
+		if (k == NULL || gim == NULL || smi == NULL) continue;
+		if ((m = gim(k, rt_registerName(p[i].sel))) != NULL) { smi(m, (IMP)yes_any); VLOG("objc: patched -[%s %s]\n", p[i].cls, p[i].sel); }
+		if (gcm && (m = gcm(k, rt_registerName(p[i].sel))) != NULL) { smi(m, (IMP)yes_any); VLOG("objc: patched +[%s %s]\n", p[i].cls, p[i].sel); }
+	}
+}
+
 /* ---- audit: the selectors of the program that no class of the runtime implements (the Apple API that GNUstep lacks, or messages to classes that are not there) ---- */
 static void
 audit_selectors(void *(*find)(const char *, size_t *))
@@ -662,6 +735,7 @@ objc_load_image(find_fn find, intptr_t slide)
 	if ((refs = find("__objc_superrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_protorefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_proto((void *)refs[i]);
 	if (getenv("MACHRUN_AUDIT")) audit_selectors(find);
+	program_patches();
 	/* constant strings */
 	if ((p = find("__cfstring", &n)) != NULL) {
 		setup_cfstring_class();
@@ -697,6 +771,16 @@ struct pair (*machrun_super1_p)(struct o_super *, SEL) = machrun_super1;
 static long placeholder_nop(id self, SEL _cmd) { return (0); }
 static BOOL placeholder_resolve_instance(Class self, SEL _cmd, SEL sel) { rt_addMethod(self, sel, (IMP)placeholder_nop, "@16@0:8"); return (1); }
 static BOOL placeholder_resolve_class(Class self, SEL _cmd, SEL sel) { rt_addMethod(rt_object_getClass((id)self), sel, (IMP)placeholder_nop, "@16@0:8"); return (1); }
+
+void
+objc_send_retain_release(void *obj, int release)
+{
+	IMP (*gimp)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getMethodImplementation"); Class (*gc)(id) = dlsym(RTLD_DEFAULT, "object_getClass");
+	SEL s;
+	if (gimp == NULL || gc == NULL || !rt_init()) return;
+	s = rt_registerName(release ? "release" : "retain");
+	((void (*)(id, SEL))gimp(gc((id)obj), s))((id)obj, s);
+}
 
 void *
 objc_shim_lookup(const char *name)

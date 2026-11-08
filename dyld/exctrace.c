@@ -60,6 +60,10 @@ fatal(int sig, siginfo_t *si, void *ucv)
 #if defined(__amd64__)
 	void *rip = (void *)((ucontext_t *)ucv)->uc_mcontext.mc_rip;
 	dprintf(2, "--- signal %d (%s), fault address %p, rip %p\n", sig, strsignal(sig), si->si_addr, rip);
+	{ Dl_info di; if (dladdr(rip, &di)) dprintf(2, " rip in %s (%s+%#lx)\n", di.dli_fname, di.dli_sname ? di.dli_sname : "?", (unsigned long)((char *)rip - (char *)di.dli_saddr)); }
+	dprintf(2, " trapno %ld err %#lx si_code %d\n", (long)((ucontext_t *)ucv)->uc_mcontext.mc_trapno, (unsigned long)((ucontext_t *)ucv)->uc_mcontext.mc_err, si->si_code);
+	{ uintptr_t *sp = (uintptr_t *)((ucontext_t *)ucv)->uc_mcontext.mc_rsp; int i;	/* the words on top of the stack: the return address of a call to a bad address is the first */
+	  for (i = 0; i < 12; i++) dprintf(2, " sp[%d] %#lx\n", i, (unsigned long)sp[i]); }
 #else
 	dprintf(2, "--- signal %d (%s), fault address %p\n", sig, strsignal(sig), si->si_addr);
 #endif

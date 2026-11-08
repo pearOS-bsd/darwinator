@@ -79,3 +79,16 @@ The binaries use the classic `LC_DYLD_INFO_ONLY` bind tables with `dyld_stub_bin
 1. ~~Userland dyld + libc shims for `kekaxz`, `keka7zz`~~ (done, see above). `kekatar` too (done). Next: the Objective-C 2 metadata loader for the application.
 2. The Objective-C metadata loader, tested first with a small Objective-C test program, then the Keka application.
 3. Mach IPC and `psynch` in the module only when a program really needs them.
+
+
+## Extraction end to end
+
+The original Mach-O Keka now extracts an archive from its own window: open `demo.zip` (`MACHRUN_OPENFILE`), Keka makes the task, starts the helper
+`kekaunar` (a Mach-O too, run by machrun through binmisc) and the files appear in `demo/` next to the archive.  What it took:
+
+- `Globals isPathWritable:` / `isPathWritable:canCreateFile:` are patched to YES (the sandbox checks of the Mac App Store build).
+- `KTask setDestination:` is given the folder of the archive when Keka computes nil (a format that GNUstep evaluates differently).
+- CoreFoundation string encodings on top of NSString (`compat.m`: CFStringCreateWithBytes, GetBytes, encoding name/number conversions), found by
+  machrun in libmachcompat.so for `_CF*` symbols; CFRetain/CFRelease pass objects of the runtime on, and ignore tagged pointers.
+- `GSInitializeProcess` runs before the symbols are bound (loading libmachcompat.so during binding needs it).
+- `setattrlist` succeeds without doing anything.

@@ -102,9 +102,19 @@ cf_CFStringGetCString(const struct cfstr *s, char *buf, CFIndex size, CFStringEn
 	return (1);
 }
 void cf_CFStringNormalize(struct cfstr *s, int form) { (void)s; (void)form; }
-CFTypeRef cf_CFRetain(struct cfstr *s) { if (s) s->refcnt++; return (s); }
-void
-cf_CFRelease(struct cfstr *s)
+void objc_send_retain_release(void *obj, int release);	/* objc.c: an object of the Objective-C runtime (toll-free bridged types) */
+__attribute__((force_align_arg_pointer)) CFTypeRef
+cf_CFRetain(struct cfstr *s)
 {
-	if (s && s->magic == CF_MAGIC && --s->refcnt == 0) { s->magic = 0; free(s->u); free(s); }
+	if (s == NULL) return (NULL);
+	if (((uintptr_t)s & 7) == 0 && s->magic == CF_MAGIC) s->refcnt++; else objc_send_retain_release(s, 0);
+	return (s);
+}
+void
+__attribute__((force_align_arg_pointer)) cf_CFRelease(struct cfstr *s)
+{
+	if (s == NULL) return;
+	if (((uintptr_t)s & 7) != 0) return;			/* a small object of the runtime (tagged pointer): nothing to release */
+	if (s->magic != CF_MAGIC) { objc_send_retain_release(s, 1); return; }
+	if (--s->refcnt == 0) { s->magic = 0; free(s->u); free(s); }
 }
