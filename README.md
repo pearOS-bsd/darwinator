@@ -6,7 +6,11 @@ It is to Mach-O what `linux.ko` is to ELF programs of Linux: an image activator 
 
 Written from the public description of the Mach-O format and the system call conventions; no Apple source code is copied.
 
-## State (milestone 1)
+![machsh, a Mach-O program, in the Terminal of pearOS](docs/screenshot-machsh-crop.png)
+
+*`file` on a Mach-O program, then the program (`tests/c/machsh.c`) running interactively in the Terminal of the pearOS image (QEMU/KVM): it reads and writes files, maps memory, asks the time and the kernel's entropy with Darwin system calls only.*
+
+## State
 
 | | |
 |---|---|
