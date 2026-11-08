@@ -43,6 +43,9 @@ static Ivar (*rt_getInstanceVariable)(Class, const char *);
 static ptrdiff_t (*rt_ivarOffset)(Ivar);
 void *(*machrun_objc_lookup)(id, SEL);
 uintptr_t machrun_cls_lo, machrun_cls_hi;
+void machrun_load_compat(void);
+extern const char *machrun_image_path_for_addr(const void *addr);
+const char *machrun_class_image_path(Class k);
 static void *(*rt_lookup_super)(void *, SEL);
 static int rt_ready;
 
@@ -780,9 +783,7 @@ objc_load_image2(find_fn find, intptr_t slide, int is_main)
 	VLOG("objc: %zu classes, %zu categories, %zu protocols\n", ncl, ncat, npr);
 	ib_register_classes();
 	gnustep_fixes();
-	{	const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so";	/* GNUstep fixes written in Objective-C */
-		if (dlopen(cp, RTLD_NOW | RTLD_GLOBAL) == NULL) VLOG("objc: no %s: %s\n", cp, dlerror()); else VLOG("objc: loaded %s\n", cp);
-	}
+	machrun_load_compat();					/* GNUstep fixes written in Objective-C */
 	add_compat_methods();
 	if (getenv("MACHRUN_LENIENT")) setup_lenient();
 	if (getenv("MACHRUN_TRACE_AFTER_INVOKE")) trace_on = 0;
@@ -802,6 +803,7 @@ objc_load_image2(find_fn find, intptr_t slide, int is_main)
 	}
 	/* references: selectors become registered selectors, class and protocol references the runtime's objects */
 	if ((refs = find("__objc_selrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)rt_registerName((const char *)refs[i]);
+	if ((refs = find("__objc_msgrefs", &n))) for (i = 0; i < n / 16; i++) refs[i * 2 + 1] = (uintptr_t)rt_registerName((const char *)refs[i * 2 + 1]);
 	if ((refs = find("__objc_classrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_superrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_protorefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_proto((void *)refs[i]);
@@ -819,6 +821,7 @@ objc_load_image2(find_fn find, intptr_t slide, int is_main)
 }
 
 /* ---- what the program binds to ---- */
+extern void machrun_objc_msgSend_fixup(void), machrun_objc_msgSend_stret_fixup(void), machrun_objc_msgSendSuper2_fixup(void), machrun_objc_msgSendSuper2_stret_fixup(void);
 extern void machrun_objc_msgSend(void), machrun_objc_msgSend_stret(void), machrun_objc_msgSendSuper2(void),
     machrun_objc_msgSendSuper2_stret(void), machrun_objc_msgSendSuper(void), machrun_objc_msgSendSuper_stret(void);
 static char zero16[64];
@@ -842,6 +845,32 @@ struct pair (*machrun_super1_p)(struct o_super *, SEL) = machrun_super1;
 static long placeholder_nop(id self, SEL _cmd) { return (0); }
 static BOOL placeholder_resolve_instance(Class self, SEL _cmd, SEL sel) { rt_addMethod(self, sel, (IMP)placeholder_nop, "@16@0:8"); return (1); }
 static BOOL placeholder_resolve_class(Class self, SEL _cmd, SEL sel) { rt_addMethod(rt_object_getClass((id)self), sel, (IMP)placeholder_nop, "@16@0:8"); return (1); }
+
+const char *
+machrun_class_image_path(Class k)
+{
+	int i;
+	for (i = 0; i < nclsmap; i++) if (clsmap[i].k == k) return (machrun_image_path_for_addr(clsmap[i].c));
+	return (NULL);
+}
+
+/* libmachcompat.so (the fixes of GNUstep that are written in Objective-C) is loaded once, when something first needs it.  It is told where the loader of Mach-O bundles is (plug-ins are
+ * loaded when the program asks the bundle to load); the address is in the environment only while the library starts. */
+extern void *machrun_load_macho(const char *path);
+
+void
+machrun_load_compat(void)
+{
+	static int tried; char buf[32];
+	if (tried) return;
+	tried = 1;
+	{	const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so";
+		snprintf(buf, sizeof(buf), "%p", (void *)machrun_load_macho); setenv("MACHRUN_LOADER_FN", buf, 1);
+		snprintf(buf, sizeof(buf), "%p", (void *)machrun_class_image_path); setenv("MACHRUN_CLASSPATH_FN", buf, 1);
+		if (dlopen(cp, RTLD_NOW | RTLD_GLOBAL) == NULL) VLOG("objc: no %s: %s\n", cp, dlerror()); else VLOG("objc: loaded %s\n", cp);
+		unsetenv("MACHRUN_LOADER_FN"); unsetenv("MACHRUN_CLASSPATH_FN");
+	}
+}
 
 void
 objc_send_retain_release(void *obj, int release)
@@ -955,6 +984,10 @@ objc_shim_lookup(const char *name)
 	if (strcmp(name, "_objc_opt_respondsToSelector") == 0) return ((void *)shim_opt_respondsToSelector);
 	if (strcmp(name, "_objc_unsafeClaimAutoreleasedReturnValue") == 0) return ((void *)shim_identity);
 	}
+	if (strcmp(name, "_objc_msgSend_fixup") == 0 || strcmp(name, "_objc_msgSend_fpret_fixup") == 0 || strcmp(name, "_objc_msgSend_fixedup") == 0) return ((void *)machrun_objc_msgSend_fixup);
+	if (strcmp(name, "_objc_msgSend_stret_fixup") == 0) return ((void *)machrun_objc_msgSend_stret_fixup);
+	if (strcmp(name, "_objc_msgSendSuper2_fixup") == 0) return ((void *)machrun_objc_msgSendSuper2_fixup);
+	if (strcmp(name, "_objc_msgSendSuper2_stret_fixup") == 0) return ((void *)machrun_objc_msgSendSuper2_stret_fixup);
 	if (strcmp(name, "_objc_msgSend") == 0 || strcmp(name, "_objc_msgSend_fpret") == 0) return ((void *)machrun_objc_msgSend);
 	if (strcmp(name, "_objc_msgSend_stret") == 0) return ((void *)machrun_objc_msgSend_stret);
 	if (strcmp(name, "_objc_msgSendSuper2") == 0) return ((void *)machrun_objc_msgSendSuper2);
@@ -966,8 +999,7 @@ objc_shim_lookup(const char *name)
 	if (strncmp(name, "_OBJC_CLASS_$_", 14) == 0 && rt_init()) {
 		Class k = rt_getClass(name + 14);
 		if (k == NULL && (strncmp(name + 14, "NSConstant", 10) == 0 || strcmp(name + 14, "UTType") == 0)) {		/* the constant literals of the compiler: classes of libmachcompat.so */
-			static int tried;
-			if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); }
+			machrun_load_compat();
 			k = rt_getClass(name + 14);
 		}
 		if (k == NULL) {					/* a class that the system does not have: an empty placeholder, so that the program starts */
@@ -1020,6 +1052,12 @@ __asm__(
 "testq %rdi,%rdi\n\tjz 1f\n\tmovq %rdx,machrun_arg2(%rip)\n\t" SAVE_REGS "cmpq machrun_cls_lo(%rip),%rdi\n\tjb 3f\n\tcmpq machrun_cls_hi(%rip),%rdi\n\tjae 3f\n\tcall machrun_fix_recv\n\tmovq %rax,0x00(%rsp)\n\tmovq %rax,%rdi\n\tmovq 0x08(%rsp),%rsi\n3:\tcall *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
 "1:\txorl %eax,%eax\n\txorl %edx,%edx\n\txorps %xmm0,%xmm0\n\txorps %xmm1,%xmm1\n\tret\n"
 
+/* the "fixup" messages of the older ABI (SDK before 10.14): the call goes through a message reference {function, selector}; the function is called with the reference in the place of the selector */
+".globl machrun_objc_msgSend_fixup\n.type machrun_objc_msgSend_fixup,@function\nmachrun_objc_msgSend_fixup:\n\tmovq 8(%rsi),%rsi\n\tjmp machrun_objc_msgSend\n"
+".globl machrun_objc_msgSend_stret_fixup\n.type machrun_objc_msgSend_stret_fixup,@function\nmachrun_objc_msgSend_stret_fixup:\n\tmovq 8(%rdx),%rdx\n\tjmp machrun_objc_msgSend_stret\n"
+".globl machrun_objc_msgSendSuper2_fixup\n.type machrun_objc_msgSendSuper2_fixup,@function\nmachrun_objc_msgSendSuper2_fixup:\n\tmovq 8(%rsi),%rsi\n\tjmp machrun_objc_msgSendSuper2\n"
+".globl machrun_objc_msgSendSuper2_stret_fixup\n.type machrun_objc_msgSendSuper2_stret_fixup,@function\nmachrun_objc_msgSendSuper2_stret_fixup:\n\tmovq 8(%rdx),%rdx\n\tjmp machrun_objc_msgSendSuper2_stret\n"
+
 ".globl machrun_objc_msgSend_stret\n.type machrun_objc_msgSend_stret,@function\nmachrun_objc_msgSend_stret:\n\t"
 "testq %rsi,%rsi\n\tjz 2f\n\t" SAVE_REGS "movq %rsi,%rdi\n\tmovq %rdx,%rsi\n\tcmpq machrun_cls_lo(%rip),%rdi\n\tjb 4f\n\tcmpq machrun_cls_hi(%rip),%rdi\n\tjae 4f\n\tcall machrun_fix_recv\n\tmovq %rax,0x08(%rsp)\n\tmovq %rax,%rdi\n\tmovq 0x10(%rsp),%rsi\n4:\tcall *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
 "2:\tmovq %rdi,%rax\n\tret\n"
@@ -1038,6 +1076,10 @@ SAVE_REGS "movq %rsi,%rdi\n\tmovq %rdx,%rsi\n\tcall *machrun_super1_p(%rip)\n\tm
 );
 #else
 void machrun_objc_msgSend(void) {}
+void machrun_objc_msgSend_fixup(void) {}
+void machrun_objc_msgSend_stret_fixup(void) {}
+void machrun_objc_msgSendSuper2_fixup(void) {}
+void machrun_objc_msgSendSuper2_stret_fixup(void) {}
 void machrun_objc_msgSend_stret(void) {}
 void machrun_objc_msgSendSuper2(void) {}
 void machrun_objc_msgSendSuper2_stret(void) {}
@@ -1086,7 +1128,7 @@ objc_constant_fallback(const char *name)
 	if (strncmp(name, "_UTType", 7) == 0 && name[7] >= 'A' && name[7] <= 'Z') {	/* UTType constants: a variable that holds the UTType of libmachcompat.so */
 		static void *cells[64]; static char *names[64]; static int n; int q; id (*mk)(const char *);
 		for (q = 0; q < n; q++) if (strcmp(names[q], name) == 0) return (&cells[q]);
-		{ static int tried; if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); } }
+		machrun_load_compat();
 		mk = dlsym(RTLD_DEFAULT, "MachoUTConstant");
 		if (n == 64) return (NULL);
 		cells[n] = mk ? (void *)mk(name + 7) : NULL; names[n] = strdup(name);
