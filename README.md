@@ -23,6 +23,16 @@ Written from the public description of the Mach-O format and the system call con
 
 Tested on FreeBSD 14.5 amd64 under KVM (`tools/vm-test.sh`): the module builds with `-Werror`, loads, runs the Mach-O test files (`LC_MAIN`, `LC_UNIXTHREAD`, a universal file), refuses a file of the other architecture, and ELF programs and scripts still run; `kldunload` works. **arm64 compiles (syntax check against the 14.5 headers) but has not been run yet** (needs an arm64 FreeBSD: the Mac's HVF VM, or CI). The GitHub-hosted FreeBSD VMs of the CI job (`.github/workflows/ci.yml`) were unreachable at the time of writing (HTTP 504 when the action downloads its VM image).
 
+## machrun: a dyld for FreeBSD (`dyld/`)
+
+Mach-O programs that need dyld and libSystem (nearly every Mac program) run through `machrun`, a userland loader that maps the file, applies rebase/bind and binds the imports to FreeBSD's libc and libraries, with shims for what differs (`dyld/shims.c`, `dyld/cf.c`). No kernel module is needed for this path. The unmodified command line tools of Keka (xz, zstd, lz4 and 7-Zip) run and produce archives that the system tools read: see `docs/KEKA.md` and `tests/keka.sh`.
+
+```
+make -C dyld                      # builds dyld/machrun (FreeBSD)
+dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
+KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
+```
+
 ## Build and use
 
 On FreeBSD 14 with the kernel sources (`/usr/src/sys`):
