@@ -423,7 +423,7 @@ static void
 machrun_show_windows(id app, SEL _cmd, id arg)
 {
 	id wins, del = msg0(app, "delegate"); unsigned long n, i; SEL at = rt_registerName("objectAtIndex:");
-	if (del) {	/* what Apple's AppKit does for a launch without documents: ask the delegate, then let it open an untitled window */
+	if (del && getenv("MACHRUN_OPENFILE") == NULL) {	/* what Apple's AppKit does for a launch without documents: ask the delegate, then let it open an untitled window */
 		SEL should = rt_registerName("applicationShouldOpenUntitledFile:"), open = rt_registerName("applicationOpenUntitledFile:");
 		SEL rsp = rt_registerName("respondsToSelector:"), reopen = rt_registerName("applicationShouldHandleReopen:hasVisibleWindows:");
 		fprintf(stderr, "delegate %p responds: shouldOpenUntitled %d openUntitled %d reopen %d\n", del,
@@ -458,6 +458,7 @@ machrun_show_windows(id app, SEL _cmd, id arg)
 			((void (*)(id, SEL, id, id))machrun_objc_lookup(del, of))(del, of, app, arr); fprintf(stderr, "openFiles: %s\n", path);
 		} else fprintf(stderr, "the delegate does not open files\n");
 	}
+	if (getenv("MACHRUN_SHOWWINDOWS") == NULL) return;
 	wins = msg0(app, "windows"); n = (unsigned long)msg0(wins, "count");
 	fprintf(stderr, "windows: %lu\n", n);
 	for (i = 0; i < n; i++) {
@@ -511,7 +512,7 @@ safe_finishLaunching(id self, SEL _cmd)
 		rt_addMethod(rt_object_getClass(self), s, (IMP)machrun_kvc, "v24@0:8@16");
 		((void (*)(id, SEL, SEL, id, double))machrun_objc_lookup(self, p))(self, p, s, NULL, getenv("MACHRUN_KVC_DELAY") ? atof(getenv("MACHRUN_KVC_DELAY")) : 20.0);
 	}
-	if (getenv("MACHRUN_SHOWWINDOWS")) {
+	if (getenv("MACHRUN_SHOWWINDOWS") || getenv("MACHRUN_OPENFILE")) {
 		SEL s = rt_registerName("machrunShowWindows:"), p = rt_registerName("performSelector:withObject:afterDelay:");
 		Class k = rt_object_getClass(self);
 		rt_addMethod(k, s, (IMP)machrun_show_windows, "v24@0:8@16");
