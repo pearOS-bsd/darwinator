@@ -280,21 +280,27 @@ macho_map_segment(struct image_params *imgp, vm_map_t map, const struct macho_in
 	int error, rv;
 
 	rv = vm_map_fixed(map, NULL, 0, s->start, s->end - s->start, VM_PROT_RW, VM_PROT_ALL, MAP_CHECK_EXCL);
-	if (rv != KERN_SUCCESS)
+	if (rv != KERN_SUCCESS) {
+		DPRINTF("vm_map_fixed %#lx-%#lx failed: %d\n", (u_long)s->start, (u_long)s->end, rv);
 		return (vm_mmap_to_errno(rv));
+	}
 
 	for (done = 0; done < s->filesize; done += n) {
 		n = MIN(s->filesize - done, MACHO_CHUNK);
 		error = macho_read(imgp, buf, n, mi->base + s->fileoff + done);
 		if (error == 0)
 			error = copyout(buf, (void *)(uintptr_t)(s->vmaddr + done), n);
-		if (error != 0)
+		if (error != 0) {
+			DPRINTF("segment copy at %#lx failed: %d\n", (u_long)(s->vmaddr + done), error);
 			return (error);
+		}
 	}
 	if (s->prot != VM_PROT_RW) {
 		rv = vm_map_protect(map, s->start, s->end, s->prot, 0, VM_MAP_PROTECT_SET_PROT);
-		if (rv != KERN_SUCCESS)
+		if (rv != KERN_SUCCESS) {
+			DPRINTF("vm_map_protect failed: %d\n", rv);
 			return (vm_mmap_to_errno(rv));
+		}
 	}
 	return (0);
 }
@@ -326,9 +332,15 @@ macho_imgact(struct image_params *imgp)
 		goto out;
 	}
 
+	DPRINTF("%s: %d segments, entry %#lx\n", imgp->execpath != NULL ? imgp->execpath : "?", mi->nseg, (u_long)mi->entry);
 	error = exec_new_vmspace(imgp, &darwin_sysvec);
-	if (error != 0)
+	/* as imgact_elf does, whatever the result: the address space is the new one, the process is a Darwin process */
+	imgp->proc->p_sysent = &darwin_sysvec;
+	imgp->proc->p_elf_brandinfo = NULL;
+	if (error != 0) {
+		DPRINTF("exec_new_vmspace failed: %d\n", error);
 		goto out;
+	}
 	vmspace = imgp->proc->p_vmspace;
 
 	buf = macho_alloc(imgp, MACHO_CHUNK);
@@ -338,8 +350,10 @@ macho_imgact(struct image_params *imgp)
 			goto out;
 	}
 	error = exec_map_stack(imgp);
-	if (error != 0)
+	if (error != 0) {
+		DPRINTF("exec_map_stack failed: %d\n", error);
 		goto out;
+	}
 
 	imgp->entry_addr = mi->entry;
 	imgp->reloc_base = mi->text_vmaddr;

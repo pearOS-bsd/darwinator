@@ -16,7 +16,7 @@ Written from the public description of the Mach-O format and the system call con
 | arm64 convention (`src/darwin_aarch64.c`) | `svc #0x80`, number in `x16`, arguments `x0-x7`, carry flag = error |
 | Not yet | **dyld** (files with `LC_LOAD_DYLINKER` / `LC_LOAD_DYLIB` are refused with a message), Mach traps and Mach IPC (ports, `bootstrap`), `commpage`, `psynch`, signals in the Darwin layout, arm64e (PAC), the other BSD calls (their flags and structures differ from FreeBSD's: open, stat, mmap, sigaction, kevent64 ...) |
 
-The module was **compiled in a syntax check against the 14.5 kernel headers for both architectures**; it has not been loaded on a running kernel yet: the CI job (`.github/workflows/ci.yml`) does that on FreeBSD x86_64 and aarch64 and is the first real test.
+Tested on FreeBSD 14.5 amd64 under KVM (`tools/vm-test.sh`): the module builds with `-Werror`, loads, runs the Mach-O test files (`LC_MAIN`, `LC_UNIXTHREAD`, a universal file), refuses a file of the other architecture, and ELF programs and scripts still run; `kldunload` works. **arm64 compiles (syntax check against the 14.5 headers) but has not been run yet** (needs an arm64 FreeBSD: the Mac's HVF VM, or CI). The GitHub-hosted FreeBSD VMs of the CI job (`.github/workflows/ci.yml`) were unreachable at the time of writing (HTTP 504 when the action downloads its VM image).
 
 ## Build and use
 
@@ -29,6 +29,7 @@ python3 tools/mkmacho.py --arch x86_64 -o hello      # or --arch arm64, --entry 
 ./hello                                              # prints "hello from a Mach-O file", exit status 7
 sysctl kern.darwinator.debug=1                       # log why a Mach-O file is refused
 sh tests/run.sh                                      # the whole test (root)
+sh tools/vm-test.sh                                  # the same, in the local KVM VM (~/fbsd-vm), from the development machine
 kldunload darwinator                                 # EBUSY while a Darwin process lives
 ```
 
