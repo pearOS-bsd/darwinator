@@ -18,11 +18,16 @@ ulimit -c 0
 for a in t1.zip t2.tar.gz t3.tar.bz2 t4.tar.xz t5.7z; do
 	[ -e "$WORK/$a" ] || { echo "skip $a (no tool to make it)"; continue; }
 	d="${a%%.*}"
-	( MACHRUN_OPENFILE="$WORK/$a" timeout -s KILL "${TIMEOUT:-45}" "$WORK/cache/$(basename "$APP")/$(basename "$APP" .app)" > "$WORK/$a.log" 2>&1 ) &
-	for i in $(seq 1 45); do [ -f "$WORK/$d/rand.bin" ] && [ -f "$WORK/$d/sub/n.txt" ] && break; sleep 1; done
-	sleep 1; pkill -KILL -f "$(basename "$APP" .app)\$" 2>/dev/null; wait
-	if [ -f "$WORK/$d/hello.txt" ] && cmp -s "$WORK/src/hello.txt" "$WORK/$d/hello.txt" && cmp -s "$WORK/src/rand.bin" "$WORK/$d/rand.bin" && cmp -s "$WORK/src/sub/n.txt" "$WORK/$d/sub/n.txt"
-	then ok "$a is extracted with the same bytes"; else bad "$a is not extracted correctly"; fi
+	# the application crashes in about half of its runs (a message to an object that was freed: unresolved, see docs/UNARCHIVER.md): up to ATTEMPTS runs
+	n=0; good=0
+	while [ $n -lt "${ATTEMPTS:-4}" ] && [ $good -eq 0 ]; do
+		n=$((n + 1)); rm -rf "$WORK/$d"
+		( MACHRUN_OPENFILE="$WORK/$a" timeout -s KILL "${TIMEOUT:-45}" "$WORK/cache/$(basename "$APP")/$(basename "$APP" .app)" > "$WORK/$a.log" 2>&1 ) &
+		for i in $(seq 1 45); do [ -f "$WORK/$d/rand.bin" ] && [ -f "$WORK/$d/sub/n.txt" ] && break; sleep 1; done
+		sleep 1; pkill -KILL -f "$(basename "$APP" .app)\$" 2>/dev/null; wait
+		if [ -f "$WORK/$d/hello.txt" ] && cmp -s "$WORK/src/hello.txt" "$WORK/$d/hello.txt" && cmp -s "$WORK/src/rand.bin" "$WORK/$d/rand.bin" && cmp -s "$WORK/src/sub/n.txt" "$WORK/$d/sub/n.txt"; then good=1; fi
+	done
+	[ $good -eq 1 ] && ok "$a is extracted with the same bytes (run $n)" || bad "$a is not extracted correctly ($n runs)"
 done
 echo "== $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

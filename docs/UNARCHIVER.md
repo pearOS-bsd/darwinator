@@ -17,7 +17,13 @@ Install and run it in the pearOS image: `macapp-install unarchiver`, then `macap
 | `application:openFile:` (the single file form of the delegate, used by `MACHRUN_OPENFILE`) | `objc.c` |
 | It crashes in `objc_autoreleasePoolPop` with `MALLOC_CONF=junk:true` (the default for Mac programs, see `machrun.c`); `macapp` starts it with `junk:false` | `tools/macapp` |
 
+## Not solved
+
+The application crashes in about half of its runs, with a message to an object that was freed (`objc_msgSend` with a receiver without a class, or
+`objc_autoreleasePoolPop` when `junk:true`). The Preferences window and the extraction work in the other runs (6 runs with a tar.gz: 3 extracted).
+The receiver is not sent from the application's code but from GNUstep's: some object is released once too often earlier. Not found yet.
+
 ## Test
 
 `sh tests/unar.sh "/Applications/The Unarchiver.app"` makes archives of a small tree (tar.gz, tar.bz2, tar.xz; zip and 7z too with `PREBUILT=dir`),
-has the application open each one and compares the extracted files with the originals byte for byte.
+has the application open each one (up to `ATTEMPTS`, 4 by default, runs for each archive, because of the crashes) and compares the extracted files with the originals byte for byte.
