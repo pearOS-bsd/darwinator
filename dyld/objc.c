@@ -396,6 +396,19 @@ machrun_show_windows(id app, SEL _cmd, id arg)
 		BOOL ok = ((BOOL (*)(id, SEL, SEL, id, id))machrun_objc_lookup(app, sa))(app, sa, act, NULL, NULL);
 		fprintf(stderr, "action %s -> %d\n", getenv("MACHRUN_ACTION"), (int)ok & 0xff);
 	}
+	if (getenv("MACHRUN_OPENFILE") && del) {	/* MACHRUN_OPENFILE=/path/archive.zip: what a double click or a drop on the Dock does */
+		const char *path = getenv("MACHRUN_OPENFILE"); id str = nsstr(path), arr, url;
+		Class ca = rt_getClass("NSArray"), cu = rt_getClass("NSURL");
+		SEL wo = rt_registerName("arrayWithObject:"), fu = rt_registerName("fileURLWithPath:"), of = rt_registerName("application:openFiles:"), ou = rt_registerName("application:openURLs:"), rsp = rt_registerName("respondsToSelector:");
+		url = ((id (*)(id, SEL, id))machrun_objc_lookup(cu, fu))(cu, fu, str);
+		if (((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, ou)) {
+			arr = ((id (*)(id, SEL, id))machrun_objc_lookup(ca, wo))(ca, wo, url);
+			((void (*)(id, SEL, id, id))machrun_objc_lookup(del, ou))(del, ou, app, arr); fprintf(stderr, "openURLs: %s\n", path);
+		} else if (((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, of)) {
+			arr = ((id (*)(id, SEL, id))machrun_objc_lookup(ca, wo))(ca, wo, str);
+			((void (*)(id, SEL, id, id))machrun_objc_lookup(del, of))(del, of, app, arr); fprintf(stderr, "openFiles: %s\n", path);
+		} else fprintf(stderr, "the delegate does not open files\n");
+	}
 	wins = msg0(app, "windows"); n = (unsigned long)msg0(wins, "count");
 	fprintf(stderr, "windows: %lu\n", n);
 	for (i = 0; i < n; i++) {
@@ -625,6 +638,9 @@ objc_load_image(find_fn find, intptr_t slide)
 	VLOG("objc: %zu classes, %zu categories, %zu protocols\n", ncl, ncat, npr);
 	ib_register_classes();
 	gnustep_fixes();
+	{	const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so";	/* GNUstep fixes written in Objective-C */
+		if (dlopen(cp, RTLD_NOW | RTLD_GLOBAL) == NULL) VLOG("objc: no %s: %s\n", cp, dlerror()); else VLOG("objc: loaded %s\n", cp);
+	}
 	add_compat_methods();
 	if (getenv("MACHRUN_LENIENT")) setup_lenient();
 	if (getenv("MACHRUN_TRACEMSG")) { traced_lookup = machrun_objc_lookup; machrun_objc_lookup = trace_lookup; }

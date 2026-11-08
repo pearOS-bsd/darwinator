@@ -25,5 +25,7 @@ done
 [ -d "$C/Frameworks" ] && ln -s "$C/Frameworks" "$W/Frameworks"
 cp "$C/Info.plist" "$W/Info-gnustep.plist"
 ln -s "$C/MacOS/$EXE" "$W/$EXE.macho"
+# the helper programs of the application (NSBundle pathForAuxiliaryExecutable: looks next to the executable): links to the Mach-O files
+for f in "$C/MacOS"/*; do b="$(basename "$f")"; [ "$b" = "$EXE" ] || ln -sf "$f" "$W/$b"; done
 cp "$MR" "$W/$EXE"; chmod +x "$W/$EXE"
 echo "$W/$EXE"
