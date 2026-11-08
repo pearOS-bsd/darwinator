@@ -55,6 +55,7 @@ ok   com.aone.keka.plist is in ~/.Trash                        (and the other th
 
 The window shows the result now: "5 files were found" and the list (the list view was outside of the window, at x = 450, because `animator` did not exist and the push animation never moved it;
 `-[NSView animator]` is the object itself and `NSAnimationContext` makes its changes at once, `compat.m`).
-Not right yet: the row shows the description of the object (`<ACAppBundle: 0x...>`) and not the name and icon (the cell view of the nib gets its text from a binding that GNUstep does not evaluate the same way),
-and the size says "Zero KB" (the sizes of the files come from `getAllocatedSize:ofItemAtURL:...` of AppCleaner, which uses calls of macOS that are not here).
+Rows: GNUstep has no view based table views (`NSTableCellView`), so a row is a cell that shows the description of the object; for the model objects of AppCleaner the description is their `displayName`
+(`objc.c` `program_patches`). The sizes ("4 KB") come from the size keys of `NSURL` (`getResourceValue:forKey:` of `NSURLTotalFileAllocatedSizeKey` and the others, `compat.m`).
+Not right yet: the rows have no icons and no checkboxes (they are views of the nib's cell view), and the window is the size of the nib.
 Open: the images of `Assets.car` (no CoreUI reader), PDF images (`DropApp.pdf`), Sparkle as a library, a crash in `objc_msgSend` that was seen once at start and not again.
