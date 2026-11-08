@@ -16,7 +16,7 @@ Written from the public description of the Mach-O format and the system call con
 
 ![AppCleaner 3.7 (the unmodified Mac application) running in pearOS](docs/screenshot-appcleaner.png)
 
-*AppCleaner 3.7, an original Mach-O application of macOS 15 (Objective-C, chained fixups, Xcode 16 nibs, Sparkle), in its main window in the pearOS image. It starts, finds the files that an application leaves in `~/Library` and removes them (`tests/appcleaner.sh`, 13 checks); the window shows the list of files (the rows still show the description of the object instead of the names: `docs/APPCLEANER.md`).*
+*AppCleaner 3.7, an original Mach-O application of macOS 15 (Objective-C, chained fixups, Xcode 16 nibs, Sparkle), in its main window in the pearOS image. It starts, finds the files that an application leaves in `~/Library` and removes them (`tests/appcleaner.sh`, 13 checks); the window lists what it found, with the name of the application and the size (rows without icons or checkboxes yet: `docs/APPCLEANER.md`).*
 
 ## State
 

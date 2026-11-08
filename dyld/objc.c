@@ -673,6 +673,8 @@ setup_lenient(void)
  * (security-scoped bookmarks, which this system does not have); outside of the sandbox every access is allowed. ---- */
 static BOOL yes_any(id self, SEL _cmd) { return (1); }
 static void nop_any(id self, SEL _cmd) { }
+/* view based table views (NSTableCellView) do not exist in GNUstep: a row is drawn by a cell with the description of the object; for the model objects of AppCleaner the description is their name */
+static id desc_displayName(id self, SEL _cmd) { SEL s = rt_registerName("displayName"); return (((id (*)(id, SEL))machrun_objc_lookup(self, s))(self, s)); }
 static IMP orig_setdest;
 static void
 dbg_setdest(id self, SEL _cmd, id v)
@@ -702,6 +704,12 @@ program_patches(void)
 	void *(*gim)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod"), *(*gcm)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getClassMethod");
 	IMP (*smi)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
 	size_t i;
+	{	static const char *const named[] = { "ACBundle", "ACAppBundle", "ACFile" }; size_t q;
+		for (q = 0; q < sizeof(named) / sizeof(named[0]); q++) {
+			Class k = rt_getClass(named[q]);
+			if (k) { rt_addMethod(k, rt_registerName("description"), (IMP)desc_displayName, "@16@0:8"); VLOG("objc: description of %s is its displayName\n", named[q]); }
+		}
+	}
 	for (i = 0; i < sizeof(nop) / sizeof(nop[0]); i++) {
 		Class k = rt_getClass(nop[i].cls); void *m;
 		if (k && gim && smi && (m = gim(k, rt_registerName(nop[i].sel))) != NULL) { smi(m, (IMP)nop_any); VLOG("objc: patched -[%s %s] (does nothing)\n", nop[i].cls, nop[i].sel); }

@@ -638,10 +638,31 @@ MachoUTConstant(const char *name)
 
 /* NSURLContentTypeKey for a file URL: what the file is on the disk */
 static IMP o_getRV;
+/* the size of a file, or of a folder with everything in it (st_blocks: what the file system allocates) */
+static unsigned long long
+tree_size(NSString *path, BOOL allocated)
+{
+	struct stat st; unsigned long long n;
+	if (lstat([path fileSystemRepresentation], &st) != 0) return 0;
+	n = allocated ? (unsigned long long)st.st_blocks * 512 : (unsigned long long)st.st_size;
+	if (S_ISDIR(st.st_mode)) {
+		NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:NULL]; NSUInteger i;
+		for (i = 0; i < [items count]; i++) n += tree_size([path stringByAppendingPathComponent:[items objectAtIndex:i]], allocated);
+	}
+	return n;
+}
 static BOOL
 w_getRV(id self, SEL _cmd, id *value, NSString *key, NSError **err)
 {
 	if (getenv("MACHRUN_DEBUG_RV")) fprintf(stderr, "machrun: getResourceValue key '%s' url %s\n", [key UTF8String], [[(NSURL *)self description] UTF8String]);
+	if (([key isEqualToString:@"NSURLFileSizeKey"] || [key isEqualToString:@"NSURLTotalFileSizeKey"] || [key isEqualToString:@"NSURLFileAllocatedSizeKey"] || [key isEqualToString:@"NSURLTotalFileAllocatedSizeKey"]) && [(NSURL *)self isFileURL]) {
+		NSString *path = [(NSURL *)self path]; struct stat st;
+		if (path == nil || lstat([path fileSystemRepresentation], &st) != 0) return NO;
+		{ BOOL total = [key hasPrefix:@"NSURLTotal"], alloc = [key rangeOfString:@"Allocated"].location != NSNotFound;
+		  unsigned long long n = total ? tree_size(path, alloc) : (alloc ? (unsigned long long)st.st_blocks * 512 : (unsigned long long)st.st_size);
+		  if (value) *value = [NSNumber numberWithUnsignedLongLong:n]; }
+		return YES;
+	}
 	if ([key isEqualToString:@"NSURLContentTypeKey"] || [key isEqualToString:@"NSURLTypeIdentifierKey"]) {
 		NSString *path = [(NSURL *)self path]; struct stat st; UTType *t = nil;
 		if (path && [(NSURL *)self isFileURL] && lstat([path fileSystemRepresentation], &st) == 0) {
