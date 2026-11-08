@@ -422,6 +422,124 @@ darwin_shared_region_check_np(struct thread *td __unused, struct darwin_args *ua
 	return (ENOMEM);			/* no dyld shared cache is mapped: dyld loads the libraries itself */
 }
 
+
+/* ---- bsdthread_register / bsdthread_create / bsdthread_terminate: the threads of libpthread ----
+ * libpthread registers the address of its thread start routine; bsdthread_create then makes a thread that begins there with
+ * (pthread, kport, func, arg, stack, flags) in the first six argument registers and the stack pointer at the stack given. */
+
+#include <sys/thr.h>
+
+static struct mtx pth_mtx;
+MTX_SYSINIT(darwin_pth, &pth_mtx, "darwin pthread", MTX_DEF);
+static struct { struct proc *p; pid_t pid; uint64_t start, wqstart; } pth_reg[64];
+
+static int
+darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)
+{
+	struct proc *p = td->td_proc;
+	int i, slot = -1;
+
+	mtx_lock(&pth_mtx);
+	for (i = 0; i < (int)nitems(pth_reg); i++) {
+		if (pth_reg[i].p == p && pth_reg[i].pid == p->p_pid) { slot = i; break; }
+		if (slot < 0 && pth_reg[i].p == NULL)
+			slot = i;
+	}
+	if (slot < 0)
+		slot = p->p_pid % nitems(pth_reg);	/* full: the oldest entry of that hash slot goes */
+	pth_reg[slot].p = p;
+	pth_reg[slot].pid = p->p_pid;
+	pth_reg[slot].start = uap->a[0];
+	pth_reg[slot].wqstart = uap->a[1];
+	mtx_unlock(&pth_mtx);
+	td->td_retval[0] = 0;		/* the features of the kernel side: none (no workqueue, no kevent workloop) */
+	return (0);
+}
+
+struct pth_create {
+	uint64_t	start, pthread, func, arg, stack, flags;
+};
+
+static int
+pth_initthr(struct thread *td, void *thunk)
+{
+	struct pth_create *c = thunk;
+	stack_t st;
+	int error;
+
+	st.ss_sp = (void *)(uintptr_t)(c->stack - 16);
+	st.ss_size = 16;			/* the stack pointer comes out at the stack given (less what cpu_set_upcall keeps for a return address) */
+	error = cpu_set_upcall(td, (void (*)(void *))(uintptr_t)c->start, (void *)(uintptr_t)c->pthread, &st);
+	if (error != 0)
+		return (error);
+#if defined(__amd64__)
+	td->td_frame->tf_rdi = c->pthread;
+	td->td_frame->tf_rsi = td->td_tid;	/* the "kernel port" of the thread: its id */
+	td->td_frame->tf_rdx = c->func;
+	td->td_frame->tf_rcx = c->arg;
+	td->td_frame->tf_r8 = c->stack;
+	td->td_frame->tf_r9 = c->flags;
+	td->td_frame->tf_rip = c->start;
+	td->td_frame->tf_rsp = c->stack;
+#else
+	td->td_frame->tf_x[0] = c->pthread;
+	td->td_frame->tf_x[1] = td->td_tid;
+	td->td_frame->tf_x[2] = c->func;
+	td->td_frame->tf_x[3] = c->arg;
+	td->td_frame->tf_x[4] = c->stack;
+	td->td_frame->tf_x[5] = c->flags;
+	td->td_frame->tf_elr = c->start;
+	td->td_frame->tf_sp = c->stack;
+#endif
+	return (0);
+}
+
+static int
+darwin_bsdthread_create(struct thread *td, struct darwin_args *uap)
+{
+	struct pth_create c;
+	struct proc *p = td->td_proc;
+	int i;
+
+	c.start = 0;
+	mtx_lock(&pth_mtx);
+	for (i = 0; i < (int)nitems(pth_reg); i++)
+		if (pth_reg[i].p == p && pth_reg[i].pid == p->p_pid)
+			c.start = pth_reg[i].start;
+	mtx_unlock(&pth_mtx);
+	if (c.start == 0)
+		return (EINVAL);		/* bsdthread_register was not called */
+	c.func = uap->a[0];
+	c.arg = uap->a[1];
+	c.stack = uap->a[2];
+	c.pthread = uap->a[3];
+	c.flags = uap->a[4];
+	if (c.stack == 0 || c.pthread == 0)
+		return (EINVAL);
+	i = thread_create(td, NULL, pth_initthr, &c);
+	if (i == 0)
+		td->td_retval[0] = c.pthread;	/* the call gives the pthread back */
+	return (i);
+}
+
+static int
+darwin_bsdthread_terminate(struct thread *td, struct darwin_args *uap)
+{
+	struct munmap_args ma;
+
+	if (uap->a[1] != 0) {			/* the stack of the thread goes away with it */
+		ma.addr = (void *)uap->a[0];
+		ma.len = (size_t)uap->a[1];
+		(void)sys_munmap(td, &ma);
+	}
+	if (kern_thr_exit(td) == 0) {		/* the last thread of the process: the process ends */
+		struct exit_args ea = { .rval = 0 };
+
+		return (sys_exit(td, &ea));
+	}
+	return (0);				/* not reached */
+}
+
 static const struct {
 	int		num, nargs;
 	sy_call_t	*fn;
@@ -452,6 +570,9 @@ static const struct {
 	E(515, 4, darwin_ulock_wait,	AUE_NULL,		"ulock_wait"),
 	E(516, 3, darwin_ulock_wake,	AUE_NULL,		"ulock_wake"),
 	E(544, 5, darwin_ulock_wait2,	AUE_NULL,		"ulock_wait2"),
+	E(366, 6, darwin_bsdthread_register, AUE_NULL,	"bsdthread_register"),
+	E(360, 5, darwin_bsdthread_create, AUE_NULL,	"bsdthread_create"),
+	E(361, 4, darwin_bsdthread_terminate, AUE_NULL,	"bsdthread_terminate"),
 	E(372, 0, darwin_thread_selfid,	AUE_NULL,		"thread_selfid"),
 	E(328, 2, darwin_pthread_kill,	AUE_NULL,	"__pthread_kill"),
 	E(169, 4, darwin_csops,		AUE_NULL,		"csops"),
