@@ -21,8 +21,8 @@ struct darwin_args {
 	register_t a[8];
 };
 
-#define	DARWIN_NSYSCALLS	520		/* BSD class: numbers below 512; machdep class: 512 + number */
-#define	DARWIN_MACHDEP_BASE	512
+#define	DARWIN_NSYSCALLS	1088		/* BSD class: numbers below 1024 (xnu has them up to about 560); machdep class: 1024 + number */
+#define	DARWIN_MACHDEP_BASE	1024
 extern int darwin_debug;
 
 /* The Darwin system call number space: the top byte of the number selects a class. */
@@ -31,14 +31,18 @@ extern int darwin_debug;
 #define	DARWIN_CLASS_MACHDEP	3
 #define	DARWIN_CLASS_DIAG	4
 
+int	darwin_oflags(int);				/* Darwin open flags -> FreeBSD's */
 int	darwin_errno(int);				/* FreeBSD errno -> Darwin errno */
 void	darwin_machdep_syscalls_init(void);		/* per architecture */
 dev_t	darwin_to_dev(int32_t);				/* Darwin dev_t (major << 24 | minor) <-> FreeBSD's */
 int32_t	darwin_from_dev(dev_t);
 struct statfs;
+struct stat;
 int	darwin_statfs_out(const struct statfs *, void *);
 int	darwin_sigprocmask(struct thread *, struct darwin_args *);
+int	darwin_stat_out(struct thread *, const struct stat *, void *);
 void	darwin_event_syscalls_init(void);		/* syscalls_event.c */
+void	darwin_posix_syscalls_init(void);		/* syscalls_posix.c */
 void	darwin_more_syscalls_init(void);		/* syscalls_more.c */
 void	darwin_syscalls_init(void);			/* fills the unused entries with nosys */
 int	darwin_fetch_syscall_args(struct thread *);	/* per architecture (darwin_<arch>.c) */

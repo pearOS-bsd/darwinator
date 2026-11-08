@@ -49,10 +49,10 @@ darwin_errno(int e)
 
 /* ---- open ---- */
 
-static int
-darwin_open(struct thread *td, struct darwin_args *uap)
+int
+darwin_oflags(int d)
 {
-	int d = (int)uap->a[1], f = d & DARWIN_O_ACCMODE;
+	int f = d & DARWIN_O_ACCMODE;
 
 #define	MAPFLAG(dflag, fflag)	do { if (d & (dflag)) f |= (fflag); } while (0)
 	MAPFLAG(DARWIN_O_NONBLOCK, O_NONBLOCK);
@@ -70,7 +70,13 @@ darwin_open(struct thread *td, struct darwin_args *uap)
 	MAPFLAG(DARWIN_O_DSYNC, O_DSYNC);
 	MAPFLAG(DARWIN_O_CLOEXEC, O_CLOEXEC);
 #undef MAPFLAG
-	return (kern_openat(td, AT_FDCWD, (const char *)uap->a[0], UIO_USERSPACE, f, (int)uap->a[2]));
+	return (f);
+}
+
+static int
+darwin_open(struct thread *td, struct darwin_args *uap)
+{
+	return (kern_openat(td, AT_FDCWD, (const char *)uap->a[0], UIO_USERSPACE, darwin_oflags((int)uap->a[1]), (int)uap->a[2]));
 }
 
 /* ---- mmap ---- */
@@ -97,7 +103,7 @@ darwin_mmap(struct thread *td, struct darwin_args *uap)
 
 /* ---- stat64, fstat64, lstat64 ---- */
 
-static int
+int
 darwin_stat_out(struct thread *td, const struct stat *sb, void *ubuf)
 {
 	struct darwin_stat64 d;

@@ -72,7 +72,9 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
+	SYS_pthread_kill = 328, SYS_thread_selfid = 372, SYS_openat = 463, SYS_renameat = 465, SYS_faccessat = 466, SYS_fchmodat = 467, SYS_fstatat64 = 470, SYS_linkat = 471,
+	SYS_unlinkat = 472, SYS_readlinkat = 473, SYS_symlinkat = 474, SYS_mkdirat = 475, SYS_ulock_wait = 515, SYS_ulock_wake = 516, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
 	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
 };
 
@@ -269,6 +271,42 @@ int cmain(void)
 	  al.cmn = 0x80000000u; r = S(SYS_getattrlist, "/tmp/dsc/a", &al, ab, sizeof(ab), 0, 0);
 	  check("  an attribute that is not supported is EINVAL", r == -22, r);
 	  al.cmn = 1; r = S(SYS_getattrlist, "/tmp/dsc/none", &al, ab, sizeof(ab), 0, 0); check("  a missing file is ENOENT", r == -2, r); }
+
+	/* the *at family: AT_FDCWD is -2 on Darwin */
+	{ i64 dirfd = S(SYS_open, "/tmp/dsc", 0, 0, 0, 0, 0); struct dstat64 st; char lb[64]; for (i = 0; i < 64; i++) lb[i] = 0;
+	  check("open a directory for the *at calls", dirfd >= 0, dirfd);
+	  r = S(SYS_openat, dirfd, "at1", O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0); check("openat (relative to a directory)", r >= 0, r); if (r >= 0) S(SYS_close, r, 0, 0, 0, 0, 0);
+	  r = S(SYS_openat, -2, "/tmp/dsc/at2", O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0); check("openat (AT_FDCWD = -2)", r >= 0, r); if (r >= 0) S(SYS_close, r, 0, 0, 0, 0, 0);
+	  r = S(SYS_fstatat64, dirfd, "at1", &st, 0, 0, 0); check("fstatat64", r == 0 && (st.st_mode & 0170000) == 0100000, r);
+	  check("faccessat", S(SYS_faccessat, dirfd, "at1", 0, 0, 0, 0) == 0 && S(SYS_faccessat, dirfd, "none", 0, 0, 0, 0) == -2, 0);
+	  check("fchmodat", S(SYS_fchmodat, dirfd, "at1", 0600, 0, 0, 0) == 0, 0);
+	  check("symlinkat + readlinkat", S(SYS_symlinkat, "at1", dirfd, "atl", 0, 0, 0) == 0 && S(SYS_readlinkat, dirfd, "atl", lb, 63, 0, 0) == 3 && lb[0] == 'a', 0);
+	  r = S(SYS_fstatat64, dirfd, "atl", &st, 0x20, 0, 0); check("fstatat64 with AT_SYMLINK_NOFOLLOW (0x20) sees the link", r == 0 && (st.st_mode & 0170000) == 0120000, st.st_mode);
+	  check("linkat", S(SYS_linkat, dirfd, "at1", dirfd, "atk", 0, 0) == 0, 0);
+	  check("renameat", S(SYS_renameat, dirfd, "atk", dirfd, "atr", 0, 0) == 0, 0);
+	  check("mkdirat", S(SYS_mkdirat, dirfd, "atd", 0755, 0, 0, 0) == 0, 0);
+	  check("unlinkat (AT_REMOVEDIR = 0x80 on Darwin)", S(SYS_unlinkat, dirfd, "atd", 0x80, 0, 0, 0) == 0, 0);
+	  check("unlinkat of the files", S(SYS_unlinkat, dirfd, "atr", 0, 0, 0, 0) == 0 && S(SYS_unlinkat, dirfd, "atl", 0, 0, 0, 0) == 0 && S(SYS_unlinkat, dirfd, "at1", 0, 0, 0, 0) == 0 && S(SYS_unlinkat, -2, "/tmp/dsc/at2", 0, 0, 0, 0) == 0, 0);
+	  S(SYS_close, dirfd, 0, 0, 0, 0, 0); }
+
+	/* extended attributes (not on every file system: tmpfs has none) */
+	{ i64 sr = S(SYS_setxattr, "/tmp/dsc/a", "com.test.x", "value", 5, 0, 0);
+	  if (sr == -45 || sr == -102) out("skip extended attributes (not supported here)\n");
+	  else { char vb[16]; i64 gr; check("setxattr", sr == 0, sr);
+		  gr = S(SYS_getxattr, "/tmp/dsc/a", "com.test.x", vb, sizeof(vb), 0, 0); check("getxattr", gr == 5 && vb[0] == 'v' && vb[4] == 'e', gr);
+		  gr = S(SYS_getxattr, "/tmp/dsc/a", "com.test.x", 0, 0, 0, 0); check("  the size of an attribute (no buffer)", gr == 5, gr);
+		  { char nb[64]; gr = S(SYS_listxattr, "/tmp/dsc/a", nb, sizeof(nb), 0, 0, 0); check("listxattr (NUL terminated names)", gr == 11 && seq(nb, "com.test.x"), gr); }
+		  check("removexattr", S(SYS_removexattr, "/tmp/dsc/a", "com.test.x", 0, 0, 0, 0) == 0, 0);
+		  gr = S(SYS_getxattr, "/tmp/dsc/a", "com.test.x", vb, sizeof(vb), 0, 0); check("  gone: ENOATTR (93)", gr == -93, gr); } }
+
+	/* ulock: no waiting when the value is another; a timeout; thread id; kill by thread id; csops; the shared region */
+	{ static volatile unsigned lockword = 1; r = S(SYS_ulock_wait, 1, &lockword, 2, 0, 0, 0); check("ulock_wait with another value returns at once", r == 0, r);
+	  r = S(SYS_ulock_wait, 1, &lockword, 1, 20000, 0, 0); check("ulock_wait times out (ETIMEDOUT = 60)", r == -60, r);
+	  r = S(SYS_ulock_wait, 1 | 0x01000000, &lockword, 1, 20000, 0, 0); check("  with ULF_NO_ERRNO the error is the negative result", r == -60, r);
+	  r = S(SYS_ulock_wake, 1, &lockword, 0, 0, 0, 0); check("ulock_wake with nobody waiting", r == 0, r); }
+	{ i64 tid = S(SYS_thread_selfid, 0, 0, 0, 0, 0, 0); check("thread_selfid", tid > 0, tid); check("__pthread_kill (signal 0 to this thread)", S(SYS_pthread_kill, tid, 0, 0, 0, 0, 0) == 0, 0); }
+	{ unsigned cs = 7; r = S(SYS_csops, 0, 0, &cs, 4, 0, 0); check("csops (status)", r == 0 && cs == 0, cs); }
+	check("shared_region_check_np is ENOMEM (no shared region)", S(SYS_shared_region_check_np, &buf, 0, 0, 0, 0, 0) == -12, 0);
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
