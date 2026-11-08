@@ -27,6 +27,9 @@
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
 #include <vm/vm_extern.h>
+#if defined(__aarch64__)
+#include <machine/cpufunc.h>
+#endif
 
 #include "darwinator.h"
 #include "macho.h"
@@ -301,6 +304,11 @@ macho_map_segment(struct image_params *imgp, vm_map_t map, const struct macho_in
 			return (error);
 		}
 	}
+#if defined(__aarch64__)
+	/* the code was written with copyout: the instruction cache has to see it (the pages are not coming from a vnode, so the kernel does no sync of its own) */
+	if (s->prot & VM_PROT_EXECUTE)
+		(void)cpu_icache_sync_range_checked(s->vmaddr, s->filesize);
+#endif
 	if (s->prot != VM_PROT_RW) {
 		rv = vm_map_protect(map, s->start, s->end, s->prot, 0, VM_MAP_PROTECT_SET_PROT);
 		if (rv != KERN_SUCCESS) {
