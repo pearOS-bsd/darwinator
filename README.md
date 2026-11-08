@@ -10,6 +10,10 @@ Written from the public description of the Mach-O format and the system call con
 
 *`file` on a Mach-O program, then the program (`tests/c/machsh.c`) running interactively in the Terminal of the pearOS image (QEMU/KVM): it reads and writes files, maps memory, asks the time and the kernel's entropy with Darwin system calls only.*
 
+![Keka 1.6.8 (the unmodified Mac application) running in pearOS](docs/screenshot-keka-preferences.png)
+
+*The Preferences window of Keka, the original Mach-O application from its release, started through `machrun` in the pearOS image: GNUstep's AppKit on the window server, Apple's compiled nibs, Objective-C classes of the program in libobjc2.*
+
 ## State
 
 | | |

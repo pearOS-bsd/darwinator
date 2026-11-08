@@ -34,14 +34,22 @@ Not done: arm64 (and there the variadic calling convention of Darwin's arm64 dif
 
 ## The application: Objective-C and AppKit (state, pearOS image)
 
-`dyld/objc.c` turns the Objective-C 2 metadata of the file into calls of libobjc2: protocols, classes (with ivar offsets written back into the program's variables), categories, selector, class, super and protocol references, the 1444 constant strings (`__cfstring`, as instances of an NSString subclass that reads them in place), `+load`, and the `objc_msgSend` family as trampolines over `objc_msg_lookup`. Foundation and AppKit are GNUstep's. Run in the pearOS image (QEMU/KVM, the real `wsd`), `Keka`:
+**The application runs.** `dyld/objc.c` turns the Objective-C 2 metadata of the file into calls of libobjc2 (protocols, classes with the ivar offsets written back into the program's variables, categories, selector / class / super / protocol references, the 1444 constant strings, `+load`, the `objc_msgSend` family as trampolines over `objc_msg_lookup`). Foundation and AppKit are GNUstep's. In the pearOS image (QEMU/KVM, the real `wsd`) the original `Keka` starts, loads its compiled nibs, builds its menu bar, runs its launch code (bookmarks, defaults, dock tile, services) and shows its **Preferences window** with all the tabs, icons and controls (`docs/screenshot-keka-preferences.png`).
 
-* maps, binds (30 symbols still unresolved of 438: Security, some CoreFoundation, dispatch details, IOKit, ImageIO), registers 68 classes, 1 category, 18 protocols, runs `main()`;
-* GNUstep starts (`GSInitializeProcess`), connects to the window server, finds the application bundle (needs the GNUstep layout: `tools/wrapapp.sh`) and its `NSPrincipalClass`;
-* the compiled `.nib` files are **plain `NSKeyedArchiver` data** (`Base.lproj/main.nib/keyedobjects.nib`, classes `NSIBObjectData`, `NSWindowTemplate`, `NSNibOutletConnector`, ...): GNUstep's own nib loader reads them once two things are arranged: the localization (GNUstep looks in `en.lproj` / `English.lproj`, not in Apple's `Base.lproj`: `tools/wrapapp.sh` builds an `en.lproj` that merges `Base` and `en`) and the class `NSLocalizableString` (IB's localizable label, text stored inline in the archive, which GNUstep's decoder cannot read: `tools/nibfix.py` turns these objects into plain strings, and `dyld/objc.c` registers a class of that name as a safety net);
-* with that, **the nib is decoded and the model starts loading**, and then fails with `NSMenuItem(instance) does not recognize firstItem` (no `firstItem` in the program or the nib: it comes from the GNUstep side, the menu code; to be traced).
+Keka has no window at launch (the "Keka" tasks window of `main.nib` appears when there is an operation, the drop area is the Dock tile): a started Keka shows only its menu bar. `MACHRUN_ACTION=openPreferences:` sends an action as a menu item would.
 
-What is needed next: the cause of the `firstItem` failure, the other classes of the nibs that GNUstep may lack (`IBClassReference`, `NSIBUserDefinedRuntimeAttributesConnector`, `NSButtonImageSource`, `NSSegmentItem`, `_NSCornerView`, `CIMaskToAlpha`), the remaining 30 symbols, `SPUUpdater` (Sparkle) as a stub, and exceptions in Mach-O code (the unwind tables are `__unwind_info`: `@try`/C++ exceptions in the program do not unwind yet).
+What it took (all in `dyld/`, `tools/`):
+
+* the GNUstep layout of the bundle (`tools/wrapapp.sh`: launcher `Keka`, `Keka.macho`, `Info-gnustep.plist`, `Resources` with an `en.lproj` that merges Apple's `Base.lproj`), and `tools/nibfix.py` for the `NSLocalizableString` objects of the nibs;
+* fixes of GNUstep that Apple's programs trip over, applied at load (`gnustep_fixes` in `objc.c`): `-[NSLayoutConstraint isEqual:]` without a class check, `+[NSFont fontWithName:size:]` for Apple's system font names, attributed strings without a font (Helvetica 12 on the Mac), `NSUserDefaults initWithSuiteName:`, about forty AppKit methods of macOS 10.10+ that only matter for the look (`setTitlebarAppearsTransparent:` ...);
+* classes the system does not have (Sparkle, CAEmitter..., ) are **null objects**: placeholders that accept any message;
+* `MACHRUN_LENIENT=1`: a message that nothing implements is logged and answered with 0 instead of raising (`lenient: stubbed -[Class sel]` lists the Apple API still missing).
+
+Development loop (the pearOS image is the development machine: `ssh` into it with the `ssh.enable` file of the EFISYS partition; it has `clang19`, `ld64.lld19`, `lldb19`, `wswins`, `wsshot`): `dyld/libexctrace.so` (`LD_PRELOAD`) prints a stack trace for every Objective-C exception and for fatal signals, with the frame-pointer chain through the Mach-O code; `MACHRUN_SYMBOLS=file` writes the address of every method of the program; `tools/symbolize-trace.py` turns both into names; `MACHRUN_TRACEMSG=1` lists the messages that the program sends.
+
+**Known problem:** without `MALLOC_CONF=junk:true` about every other start fails in `-[kekaController awakeFromNib]` with a message to an object whose class pointer is garbage (the `tasksWindow` outlet): something is read from memory that is not initialized or was freed. With `junk:true` (the allocator fills new and freed memory) it did not fail in the runs made. The cause is not found yet.
+
+Still missing: the cause of that start-up failure, exceptions in Mach-O code (the unwind tables are `__unwind_info`), the 30 symbols still unresolved (Security, some CoreFoundation, dispatch details), real behaviour of Sparkle/QuartzCore classes (null objects now), the tasks window (needs an operation: opening an archive).
 
 ## The files, from the simplest
 
