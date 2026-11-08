@@ -105,14 +105,24 @@ static Class own_class(void *p) { int i; for (i = 0; i < nclsmap; i++) if (clsma
 static Class to_class(void *p) { Class k = own_class(p); return (k ? k : (Class)p); }
 static Protocol *to_proto(void *p) { int i; for (i = 0; i < npromap; i++) if (promap[i].p == p) return (promap[i].k); return ((Protocol *)p); }
 
+static FILE *symfile; static const char *sym_cls; static int sym_meta;
 struct sel_add { Class cls; int replace; };
 static void
 add_method_cb(const char *nm, const char *types, void *imp, void *arg)
 {
 	struct sel_add *a = arg; SEL sel = rt_registerName(nm);
+	if (symfile) fprintf(symfile, "%lx %c[%s %s]\n", (unsigned long)imp, sym_meta ? '+' : '-', sym_cls ? sym_cls : "?", nm);
 	if (a->replace) rt_replaceMethod(a->cls, sel, imp, types); else rt_addMethod(a->cls, sel, imp, types);
 }
-static void add_methods(Class cls, const void *list, int replace) { struct sel_add a = { cls, replace }; each_method(list, add_method_cb, &a); }
+static void
+add_methods(Class cls, const void *list, int replace)
+{
+	struct sel_add a = { cls, replace };
+	const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
+	sym_cls = cn ? cn(cls) : NULL; sym_meta = 0;
+	if (sym_cls && symfile && rt_object_getClass((id)cls) == cls) sym_meta = 1;
+	each_method(list, add_method_cb, &a);
+}
 static void
 add_protocols(Class cls, struct o_plist *pl)
 {
@@ -288,6 +298,315 @@ ib_register_classes(void)
 	VLOG("objc: class NSLocalizableString (for nibs)\n");
 }
 
+/* ---- fixes of GNUstep bugs that Apple's programs trip over ---- */
+/* -[NSLayoutConstraint isEqual:] asks the other object for firstItem, secondItem ... without checking its class; NSIBObjectData puts
+ * all the objects of a nib into a map table, which calls isEqual: with any object. */
+static BOOL (*orig_constraint_isEqual)(id, SEL, id);
+static BOOL
+safe_constraint_isEqual(id self, SEL _cmd, id other)
+{
+	Class cc = rt_getClass("NSLayoutConstraint"); SEL k = rt_registerName("isKindOfClass:");
+	if (self == other) return (1);
+	if (other == NULL || !((BOOL (*)(id, SEL, Class))machrun_objc_lookup(other, k))(other, k, cc)) return (0);
+	return (orig_constraint_isEqual(self, _cmd, other));
+}
+/* Apple's system font names (".AppleSystemUIFont", ".SFNS-Regular", "SFProText-Bold" ...) are not fonts of this system: fontWithName:size: answers nil and the text cannot be laid out.
+ * Fall back to the system font (bold when the name says so). */
+static id (*orig_fontWithName)(id, SEL, id, double);
+static id
+safe_fontWithName(id cls, SEL _cmd, id name, double size)
+{
+	id f = orig_fontWithName(cls, _cmd, name, size);
+	const char *n; SEL s; int bold;
+	if (f != NULL || name == NULL) return (f);
+	n = ((const char *(*)(id, SEL))machrun_objc_lookup(name, rt_registerName("UTF8String")))(name, rt_registerName("UTF8String"));
+	bold = n && (strstr(n, "Bold") || strstr(n, "Semibold") || strstr(n, "Heavy") || strstr(n, "Black"));
+	s = rt_registerName(bold ? "boldSystemFontOfSize:" : "systemFontOfSize:");
+	return (((id (*)(id, SEL, double))machrun_objc_lookup(cls, s))(cls, s, size > 0 ? size : 13.0));
+}
+
+/* On the Mac, text without a font attribute is laid out in Helvetica 12; GNUstep's typesetter raises "Glyph generation with no font".  Strings that miss the font get it before they are measured. */
+typedef struct { double w, h; } MSize;
+typedef struct { double x, y, w, h; } MRect;
+typedef struct { unsigned long loc, len; } MRange;
+static MRect (*orig_boundingRect)(id, SEL, MSize, unsigned long);
+static id
+with_default_font(id as)
+{
+	static id fontkey; id copy = NULL; unsigned long len, idx = 0; MRange r;
+	SEL attr = rt_registerName("attribute:atIndex:effectiveRange:");
+	if (fontkey == NULL) { void **p = dlsym(RTLD_DEFAULT, "NSFontAttributeName"); fontkey = p ? *p : NULL; if (fontkey == NULL) return (as); }
+	len = (unsigned long)msg0(as, "length");
+	while (idx < len) {
+		id f = ((id (*)(id, SEL, id, unsigned long, MRange *))machrun_objc_lookup(as, attr))(as, attr, fontkey, idx, &r);
+		Class cf = rt_getClass("NSFont"); SEL kind = rt_registerName("isKindOfClass:");
+		if (f != NULL && !((BOOL (*)(id, SEL, Class))machrun_objc_lookup(f, kind))(f, kind, cf)) {
+			/* something that is not a font in the font attribute (a font descriptor: a font that the system does not have): make a font from it, or the default one */
+			Class cd = rt_getClass("NSFontDescriptor"); id nf = NULL;
+			if (cd && ((BOOL (*)(id, SEL, Class))machrun_objc_lookup(f, kind))(f, kind, cd)) { SEL fd = rt_registerName("fontWithDescriptor:size:"); nf = ((id (*)(id, SEL, id, double))machrun_objc_lookup(cf, fd))(cf, fd, f, 0.0); }
+			if (nf != NULL) {
+				SEL add = rt_registerName("addAttribute:value:range:");
+				if (copy == NULL) copy = msg0(msg0(as, "mutableCopy"), "autorelease");
+				((void (*)(id, SEL, id, id, MRange))machrun_objc_lookup(copy, add))(copy, add, fontkey, nf, r);
+				f = nf;
+			} else f = NULL;
+		}
+		if (f == NULL) {
+			SEL u = rt_registerName("userFontOfSize:"), add = rt_registerName("addAttribute:value:range:");
+			id font = ((id (*)(id, SEL, double))machrun_objc_lookup(cf, u))(cf, u, 12.0);
+			if (copy == NULL) copy = msg0(msg0(as, "mutableCopy"), "autorelease");
+			((void (*)(id, SEL, id, id, MRange))machrun_objc_lookup(copy, add))(copy, add, fontkey, font, r);
+		}
+		if (r.len == 0) break;
+		idx = r.loc + r.len;
+	}
+	return (copy ? copy : as);
+}
+static MRect
+safe_boundingRect(id self, SEL _cmd, MSize size, unsigned long options)
+{
+	return (orig_boundingRect(with_default_font(self), _cmd, size, options));
+}
+
+/* MACHRUN_SHOWWINDOWS=1: one second after the application has launched, list its windows and order them front (a nib window that should be visible at launch is not shown by GNUstep) */
+static void (*orig_finishLaunching)(id, SEL);
+static void
+machrun_show_windows(id app, SEL _cmd, id arg)
+{
+	id wins, del = msg0(app, "delegate"); unsigned long n, i; SEL at = rt_registerName("objectAtIndex:");
+	if (del) {	/* what Apple's AppKit does for a launch without documents: ask the delegate, then let it open an untitled window */
+		SEL should = rt_registerName("applicationShouldOpenUntitledFile:"), open = rt_registerName("applicationOpenUntitledFile:");
+		SEL rsp = rt_registerName("respondsToSelector:"), reopen = rt_registerName("applicationShouldHandleReopen:hasVisibleWindows:");
+		fprintf(stderr, "delegate %p responds: shouldOpenUntitled %d openUntitled %d reopen %d\n", del,
+		    (int)(intptr_t)((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, should) & 0xff,
+		    (int)(intptr_t)((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, open) & 0xff,
+		    (int)(intptr_t)((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, reopen) & 0xff);
+		if (((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, should)) {
+			BOOL y = ((BOOL (*)(id, SEL, id))machrun_objc_lookup(del, should))(del, should, app);
+			fprintf(stderr, "applicationShouldOpenUntitledFile: -> %d\n", (int)y & 0xff);
+			if (y && ((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, open)) ((BOOL (*)(id, SEL, id))machrun_objc_lookup(del, open))(del, open, app);
+		}
+		if (((BOOL (*)(id, SEL, SEL))machrun_objc_lookup(del, rsp))(del, rsp, reopen)) {
+			BOOL y = ((BOOL (*)(id, SEL, id, BOOL))machrun_objc_lookup(del, reopen))(del, reopen, app, 0);
+			fprintf(stderr, "applicationShouldHandleReopen: -> %d\n", (int)y & 0xff);
+		}
+	}
+	if (getenv("MACHRUN_ACTION")) {	/* MACHRUN_ACTION=openPreferences:  sends that action to the application, as a menu item would */
+		SEL act = rt_registerName(getenv("MACHRUN_ACTION")), sa = rt_registerName("sendAction:to:from:");
+		BOOL ok = ((BOOL (*)(id, SEL, SEL, id, id))machrun_objc_lookup(app, sa))(app, sa, act, NULL, NULL);
+		fprintf(stderr, "action %s -> %d\n", getenv("MACHRUN_ACTION"), (int)ok & 0xff);
+	}
+	wins = msg0(app, "windows"); n = (unsigned long)msg0(wins, "count");
+	fprintf(stderr, "windows: %lu\n", n);
+	for (i = 0; i < n; i++) {
+		id w = ((id (*)(id, SEL, unsigned long))machrun_objc_lookup(wins, at))(wins, at, i);
+		id t = msg0(w, "title"); const char *u = t ? ((const char *(*)(id, SEL))machrun_objc_lookup(t, rt_registerName("UTF8String")))(t, rt_registerName("UTF8String")) : "";
+		Class k = rt_object_getClass(w); const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
+		fprintf(stderr, "window %lu: %s '%s' visible %d\n", i, cn ? cn(k) : "?", u ? u : "", (int)(intptr_t)msg0(w, "isVisible") & 0xff);
+		if (!getenv("MACHRUN_ACTION") || msg0(w, "isVisible")) msg1(w, "makeKeyAndOrderFront:", NULL);
+	}
+}
+static void
+safe_finishLaunching(id self, SEL _cmd)
+{
+	orig_finishLaunching(self, _cmd);
+	if (getenv("MACHRUN_SHOWWINDOWS")) {
+		SEL s = rt_registerName("machrunShowWindows:"), p = rt_registerName("performSelector:withObject:afterDelay:");
+		Class k = rt_object_getClass(self);
+		rt_addMethod(k, s, (IMP)machrun_show_windows, "v24@0:8@16");
+		((void (*)(id, SEL, SEL, id, double))machrun_objc_lookup(self, p))(self, p, s, NULL, 1.0);
+	}
+}
+
+static void
+gnustep_fixes(void)
+{
+	{	Class app = rt_getClass("NSApplication");
+		void *(*gim3)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod");
+		IMP (*smi3)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
+		void *m;
+		if (app && gim3 && smi3 && orig_finishLaunching == NULL) {
+			msg0((id)app, "self");
+			m = gim3(app, rt_registerName("finishLaunching"));
+			if (m) orig_finishLaunching = (void (*)(id, SEL))smi3(m, (IMP)safe_finishLaunching);
+		}
+	}
+	{	Class na = rt_getClass("NSAttributedString");
+		void *(*gim2)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod");
+		IMP (*smi2)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
+		void *m;
+		if (na && gim2 && smi2) {
+			msg0((id)na, "self");
+			m = gim2(na, rt_registerName("boundingRectWithSize:options:"));
+			VLOG("objc: NSAttributedString %p, boundingRectWithSize:options: method %p\n", (void *)na, m);
+			if (m && orig_boundingRect == NULL) { orig_boundingRect = (MRect (*)(id, SEL, MSize, unsigned long))smi2(m, (IMP)safe_boundingRect); VLOG("objc: NSAttributedString boundingRectWithSize:options: adds the default font\n"); }
+		}
+	}
+	{	Class nf = rt_getClass("NSFont");
+		void *(*gcm)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getClassMethod");
+		IMP (*smi)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
+		if (nf && gcm && smi) {
+			void *m; msg0((id)nf, "self");
+			m = gcm(nf, rt_registerName("fontWithName:size:"));
+			if (m && orig_fontWithName == NULL) { orig_fontWithName = (id (*)(id, SEL, id, double))smi(m, (IMP)safe_fontWithName); VLOG("objc: NSFont fontWithName:size: falls back to the system font\n"); }
+		}
+	}
+	Class cc = rt_getClass("NSLayoutConstraint");
+	if (cc == NULL || orig_constraint_isEqual != NULL) return;
+	msg0((id)cc, "self");			/* a message resolves and initializes a lazily registered class before its methods are changed */
+	{	void *(*gim)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod");
+		IMP (*smi)(void *, IMP) = dlsym(RTLD_DEFAULT, "method_setImplementation");
+		void *m = gim ? gim(cc, rt_registerName("isEqual:")) : NULL;
+		if (m && smi) orig_constraint_isEqual = (BOOL (*)(id, SEL, id))smi(m, (IMP)safe_constraint_isEqual);
+		else orig_constraint_isEqual = (BOOL (*)(id, SEL, id))rt_replaceMethod(cc, rt_registerName("isEqual:"), (IMP)safe_constraint_isEqual, "c24@0:8@16"); }
+	{	IMP (*cgmi)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getMethodImplementation");
+		VLOG("objc: fixed -[NSLayoutConstraint isEqual:] (class %p, original %p, now %p, ours %p)\n", (void *)cc, (void *)orig_constraint_isEqual,
+		    cgmi ? (void *)cgmi(cc, rt_registerName("isEqual:")) : NULL, (void *)safe_constraint_isEqual); }
+}
+
+/* ---- Apple API that GNUstep lacks: methods added to its classes when they are missing (found by running real programs) ---- */
+static id nsud_initWithSuiteName(id self, SEL _cmd, id suite) { return (msg0(self, "init")); }	/* the suite is the app group of the program: one set of defaults is enough here */
+
+static __attribute__((unused)) BOOL compat_yes(id self, SEL _cmd) { return (1); }
+static BOOL compat_yes1(id self, SEL _cmd, id a) { return (1); }
+static long compat_zero(id self, SEL _cmd) { return (0); }
+static long compat_zero1(id self, SEL _cmd, id a) { return (0); }
+static __attribute__((unused)) id compat_self(id self, SEL _cmd) { return (self); }
+static id compat_self1(id self, SEL _cmd, id a) { return (self); }
+static __attribute__((unused)) id compat_nil(id self, SEL _cmd) { return (NULL); }
+static id compat_nil1(id self, SEL _cmd, id a) { return (NULL); }
+static id compat_description(id self, SEL _cmd) { return (msg0(self, "description")); }
+static id compat_srgb(id self, SEL _cmd) { return (msg0(self, "genericRGBColorSpace")); }	/* +[NSColorSpace sRGBColorSpace] */
+
+static struct { const char *cls, *sel, *types; IMP imp; int meta; } compat_methods[] = {
+	{ "NSUserDefaults", "initWithSuiteName:", "@24@0:8@16", (IMP)nsud_initWithSuiteName, 0 },
+	{ "NSApplication", "setActivationPolicy:", "c24@0:8q16", (IMP)compat_yes1, 0 },
+	{ "NSApplication", "activationPolicy", "q16@0:8", (IMP)compat_zero, 0 },
+	{ "NSView", "addTrackingArea:", "v24@0:8@16", (IMP)compat_zero1, 0 },
+	{ "NSView", "removeTrackingArea:", "v24@0:8@16", (IMP)compat_zero1, 0 },
+	{ "NSColorSpace", "sRGBColorSpace", "@16@0:8", (IMP)compat_srgb, 1 },
+	{ "NSFontDescriptor", "fontDescriptorWithDesign:", "@24@0:8@16", (IMP)compat_self1, 0 },
+	{ "NSWorkspace", "URLForApplicationToOpenContentType:", "@24@0:8@16", (IMP)compat_nil1, 0 },
+	{ "NSObject", "debugDescription", "@16@0:8", (IMP)compat_description, 0 },
+	/* window and view appearance of macOS 10.10 - 14 that only matters for the look: accepted and ignored */
+	{ "NSWindow", "setStyleMask:", "v24@0:8Q16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "setTitlebarAppearsTransparent:", "v20@0:8c16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "titlebarAppearsTransparent", "c16@0:8", (IMP)compat_zero, 0 },
+	{ "NSWindow", "setTitleVisibility:", "v24@0:8q16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "titleVisibility", "q16@0:8", (IMP)compat_zero, 0 },
+	{ "NSWindow", "setToolbarStyle:", "v24@0:8q16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "setAppearance:", "v24@0:8@16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "appearance", "@16@0:8", (IMP)compat_nil, 0 },
+	{ "NSWindow", "setTabbingMode:", "v24@0:8q16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "setAllowsAutomaticWindowTabbing:", "v20@0:8c16", (IMP)compat_zero1, 1 },
+	{ "NSWindow", "setAnimationBehavior:", "v24@0:8q16", (IMP)compat_zero1, 0 },
+	{ "NSWindow", "setMovableByWindowBackground:", "v20@0:8c16", (IMP)compat_zero1, 0 },
+	{ "NSView", "setAppearance:", "v24@0:8@16", (IMP)compat_zero1, 0 },
+	{ "NSView", "appearance", "@16@0:8", (IMP)compat_nil, 0 },
+	{ "NSView", "setWantsLayer:", "v20@0:8c16", (IMP)compat_zero1, 0 },
+	{ "NSView", "setLayerContentsRedrawPolicy:", "v24@0:8q16", (IMP)compat_zero1, 0 },
+	{ "NSApplication", "setAppearance:", "v24@0:8@16", (IMP)compat_zero1, 0 },
+	{ "NSApplication", "appearance", "@16@0:8", (IMP)compat_nil, 0 },
+	{ "NSApplication", "effectiveAppearance", "@16@0:8", (IMP)compat_nil, 0 },
+	{ "NSApplication", "setAutomaticCustomizeTouchBarMenuItemEnabled:", "v20@0:8c16", (IMP)compat_zero1, 1 },
+};
+
+static void
+add_compat_methods(void)
+{
+	size_t i;
+	for (i = 0; i < sizeof(compat_methods) / sizeof(compat_methods[0]); i++) {
+		Class k = rt_getClass(compat_methods[i].cls);
+		if (k == NULL) continue;
+		msg0((id)k, "self");
+		if (rt_addMethod(compat_methods[i].meta ? rt_object_getClass((id)k) : k, rt_registerName(compat_methods[i].sel), compat_methods[i].imp, compat_methods[i].types))
+			VLOG("objc: added -[%s %s]\n", compat_methods[i].cls, compat_methods[i].sel);
+	}
+}
+
+/* ---- lenient mode (MACHRUN_LENIENT=1): a message that nothing implements is a logged no-op returning 0 instead of an exception; for bring-up,
+ * it lists in one run the Apple API that GNUstep lacks.  Selectors the frameworks themselves probe with are left alone. ---- */
+static long lenient_nop(id self, SEL _cmd) { return (0); }
+static int
+lenient_skip(const char *n)
+{
+	static const char *const deny[] = { "forwardInvocation:", "methodSignatureForSelector:", "forwardingTargetForSelector:", "doesNotRecognizeSelector:",
+	    "resolveInstanceMethod:", "resolveClassMethod:", "awakeAfterUsingCoder:", "replacementObjectForCoder:", "classForCoder", "classForKeyedArchiver",
+	    "replacementObjectForKeyedArchiver:", "initialize", "load", "copyWithZone:", "mutableCopyWithZone:", "encodeWithCoder:", "initWithCoder:", NULL };
+	int i;
+	if (n[0] == '_') return (1);
+	for (i = 0; deny[i]; i++) if (strcmp(n, deny[i]) == 0) return (1);
+	return (0);
+}
+static IMP (*lenient_class_gmi)(Class, SEL);
+static IMP (*lenient_orig_forward)(id, SEL);
+static IMP
+lenient_forward3(id obj, SEL sel)
+{
+	static char seen[1024][64]; static int nseen; int i; Class k; const char *n = rt_selName(sel), *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
+	static IMP nsobj_fi; static Class nsobj;
+	if (lenient_skip(n) || obj == NULL) return (lenient_orig_forward ? lenient_orig_forward(obj, sel) : NULL);
+	if (nsobj == NULL) { nsobj = rt_getClass("NSObject"); nsobj_fi = lenient_class_gmi(nsobj, rt_registerName("forwardInvocation:")); }
+	k = rt_object_getClass(obj);
+	if (k == NULL || (cn && cn(k) == NULL)) { fprintf(stderr, "lenient: -[%p %s]: the receiver has no class (isa %p); object words %p %p %p %p; isa words %p %p %p %p\n", obj, n, k, ((void **)obj)[0], ((void **)obj)[1], ((void **)obj)[2], ((void **)obj)[3], ((void **)k)[0], ((void **)k)[1], ((void **)k)[2], ((void **)k)[3]); return (lenient_orig_forward ? lenient_orig_forward(obj, sel) : NULL); }
+	if (lenient_class_gmi(k, rt_registerName("forwardInvocation:")) != nsobj_fi) return (lenient_orig_forward ? lenient_orig_forward(obj, sel) : NULL);	/* the class forwards messages itself (a proxy): leave it to GNUstep */
+	for (i = 0; i < nseen; i++) if (strcmp(seen[i], n) == 0) goto quiet;
+	if (nseen < 1024) { strlcpy(seen[nseen++], n, 64); fprintf(stderr, "lenient: stubbed %s%s %s\n", "-/+ [", cn ? cn(k) : "?", n); }
+quiet:
+	return ((IMP)lenient_nop);
+}
+static void
+setup_lenient(void)
+{
+	IMP (**f3)(id, SEL) = dlsym(RTLD_DEFAULT, "__objc_msg_forward3"), (**f2)(id, SEL) = dlsym(RTLD_DEFAULT, "__objc_msg_forward2");
+	lenient_class_gmi = dlsym(RTLD_DEFAULT, "class_getMethodImplementation");
+	if ((f2 == NULL && f3 == NULL) || lenient_class_gmi == NULL) { VLOG("objc: no forwarding hooks in this runtime: lenient mode is not available\n"); return; }
+	VLOG("objc: forwarding hooks: forward2 %p (%p), forward3 %p (%p)\n", (void *)f2, f2 ? (void *)*f2 : NULL, (void *)f3, f3 ? (void *)*f3 : NULL);
+	if (f2 && *f2) { lenient_orig_forward = *f2; *f2 = lenient_forward3; }
+	if (f3 && *f3) { if (lenient_orig_forward == NULL) lenient_orig_forward = *f3; *f3 = lenient_forward3; }
+	else if (f3) *f3 = lenient_forward3;
+	VLOG("objc: lenient mode: unknown messages are stubbed\n");
+}
+
+/* ---- audit: the selectors of the program that no class of the runtime implements (the Apple API that GNUstep lacks, or messages to classes that are not there) ---- */
+static void
+audit_selectors(void *(*find)(const char *, size_t *))
+{
+	Class *(*copylist)(unsigned *) = dlsym(RTLD_DEFAULT, "objc_copyClassList");
+	void *(*gim)(Class, SEL) = dlsym(RTLD_DEFAULT, "class_getInstanceMethod");
+	const char *(*cname)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
+	size_t n, i; unsigned nc, c, missing = 0; Class *all; uintptr_t *refs = find("__objc_selrefs", &n);
+	if (!copylist || !gim || !refs) return;
+	all = copylist(&nc);
+	for (i = 0; i < n / sizeof(void *); i++) {
+		SEL sel = (SEL)refs[i]; int found = 0;
+		for (c = 0; c < nc && !found; c++)
+			if (gim(all[c], sel) || gim(rt_object_getClass((id)all[c]), sel)) found = 1;
+		if (!found) { fprintf(stderr, "audit: no class implements %s\n", rt_selName(sel)); missing++; }
+	}
+	fprintf(stderr, "audit: %u of %zu selectors are implemented by no class (%u classes)\n", missing, n / sizeof(void *), nc);
+	(void)cname; free(all);
+}
+
+/* ---- MACHRUN_TRACEMSG=1: every message that the program's own code sends, to stderr ---- */
+void *machrun_arg2;
+static void *(*traced_lookup)(id, SEL);
+static void *
+trace_lookup(id obj, SEL sel)
+{
+	static long count;
+	if (obj != NULL && count < 20000) {
+		const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
+		Class k = rt_object_getClass(obj);
+		const char *n = cn && k ? cn(k) : "?";
+		count++;
+		const char *sn = rt_selName(sel);
+		if (strncmp(sn, "performSelector:", 16) == 0 || strncmp(sn, "performSelectorOnMainThread", 27) == 0) fprintf(stderr, "msg %s%s %s  [%s]\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn, machrun_arg2 ? rt_selName((SEL)machrun_arg2) : "?");
+		else fprintf(stderr, "msg %s%s %s\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn);
+	}
+	return (traced_lookup(obj, sel));
+}
+
 /* ---- the entry point ---- */
 typedef void *(*find_fn)(const char *sect, size_t *size);
 
@@ -301,9 +620,14 @@ objc_load_image(find_fn find, intptr_t slide)
 	cats = find("__objc_catlist", &n); ncat = n / sizeof(void *);
 	prs = find("__objc_protolist", &n); npr = n / sizeof(void *);
 	if (ncl + ncat + npr == 0 && find("__cfstring", &n) == NULL) return (0);
+	if (getenv("MACHRUN_SYMBOLS")) symfile = fopen(getenv("MACHRUN_SYMBOLS"), "w");
 	if (!rt_init()) { warnx("the program has Objective-C metadata but the Objective-C runtime (libobjc2) could not be used"); return (-1); }
 	VLOG("objc: %zu classes, %zu categories, %zu protocols\n", ncl, ncat, npr);
 	ib_register_classes();
+	gnustep_fixes();
+	add_compat_methods();
+	if (getenv("MACHRUN_LENIENT")) setup_lenient();
+	if (getenv("MACHRUN_TRACEMSG")) { traced_lookup = machrun_objc_lookup; machrun_objc_lookup = trace_lookup; }
 
 	g_classlist = cl; g_nclasses = ncl;
 	for (i = 0; i < npr; i++) make_protocol(prs[i]);
@@ -321,12 +645,14 @@ objc_load_image(find_fn find, intptr_t slide)
 	if ((refs = find("__objc_classrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_superrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_protorefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_proto((void *)refs[i]);
+	if (getenv("MACHRUN_AUDIT")) audit_selectors(find);
 	/* constant strings */
 	if ((p = find("__cfstring", &n)) != NULL) {
 		setup_cfstring_class();
 		if (cfs_class) for (i = 0; i < n / 32; i++) ((void **)p)[i * 4] = cfs_class;
 		VLOG("objc: %zu constant strings\n", n / 32);
 	}
+	if (symfile) fflush(symfile);
 	g_nlcls = find("__objc_nlclslist", &n); g_nnlcls = n / sizeof(void *); g_cl = cl; g_ncl = ncl;
 	return (1);
 }
@@ -351,6 +677,11 @@ struct pair machrun_super1(struct o_super *s, SEL sel)
 struct pair (*machrun_super2_p)(struct o_super *, SEL) = machrun_super2;
 struct pair (*machrun_super1_p)(struct o_super *, SEL) = machrun_super1;
 
+/* A class that the system does not have (Sparkle, CAEmitterLayer, UTType ...) is an empty placeholder; any message to it, or to its instances, is a no-op that returns 0 */
+static long placeholder_nop(id self, SEL _cmd) { return (0); }
+static BOOL placeholder_resolve_instance(Class self, SEL _cmd, SEL sel) { rt_addMethod(self, sel, (IMP)placeholder_nop, "@16@0:8"); return (1); }
+static BOOL placeholder_resolve_class(Class self, SEL _cmd, SEL sel) { rt_addMethod(rt_object_getClass((id)self), sel, (IMP)placeholder_nop, "@16@0:8"); return (1); }
+
 void *
 objc_shim_lookup(const char *name)
 {
@@ -367,7 +698,12 @@ objc_shim_lookup(const char *name)
 		if (k == NULL) {					/* a class that the system does not have: an empty placeholder, so that the program starts */
 			Class ns = rt_getClass("NSObject");
 			k = rt_allocateClassPair(ns, name + 14, 0);
-			if (k) { rt_registerClassPair(k); VLOG("placeholder class %s\n", name + 14); }
+			if (k) {
+				Class meta = rt_object_getClass((id)k);
+				rt_addMethod(meta, rt_registerName("resolveInstanceMethod:"), (IMP)placeholder_resolve_instance, "c24@0::16");
+				rt_addMethod(meta, rt_registerName("resolveClassMethod:"), (IMP)placeholder_resolve_class, "c24@0::16");
+				rt_registerClassPair(k); VLOG("placeholder class %s\n", name + 14);
+			}
 		}
 		return (k);
 	}
@@ -397,7 +733,7 @@ objc_shim_lookup(const char *name)
 __asm__(
 ".text\n"
 ".globl machrun_objc_msgSend\n.type machrun_objc_msgSend,@function\nmachrun_objc_msgSend:\n\t"
-"testq %rdi,%rdi\n\tjz 1f\n\t" SAVE_REGS "call *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
+"testq %rdi,%rdi\n\tjz 1f\n\tmovq %rdx,machrun_arg2(%rip)\n\t" SAVE_REGS "call *machrun_objc_lookup(%rip)\n\tmovq %rax,%r11\n\t" RESTORE_REGS "leave\n\tjmp *%r11\n"
 "1:\txorl %eax,%eax\n\txorl %edx,%edx\n\txorps %xmm0,%xmm0\n\txorps %xmm1,%xmm1\n\tret\n"
 
 ".globl machrun_objc_msgSend_stret\n.type machrun_objc_msgSend_stret,@function\nmachrun_objc_msgSend_stret:\n\t"

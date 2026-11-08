@@ -457,10 +457,6 @@ main(int argc, char **argv)
 		do_bind(&im, di->lazy_bind_off, di->lazy_bind_size, true);
 	}
 	VLOG("%u unresolved symbols\n", unresolved_count);
-	g_im = &im;
-	if (objc_load_image(find_sect, im.slide) < 0) errx(1, "Objective-C setup failed");
-	protect_image(&im);
-
 	if (realpath(launcher_real ? launcher_real : argv[ch], path) == NULL) strlcpy(path, argv[ch], sizeof(path));
 	{ char *ap = malloc(strlen(path) + 32); snprintf(ap, strlen(path) + 32, "executable_path=%s", path); apple[0] = ap; apple[1] = NULL; }
 	shim_set_process(argc - ch, argv + ch, environ, path);
@@ -468,6 +464,10 @@ main(int argc, char **argv)
 		void (*gsargs)(int, char **, char **) = dlsym(RTLD_DEFAULT, "GSInitializeProcess");
 		if (gsargs) { VLOG("GNUstep: GSInitializeProcess\n"); gsargs(argc - ch, argv + ch, environ); }
 	}
+	g_im = &im;
+	if (objc_load_image(find_sect, im.slide) < 0) errx(1, "Objective-C setup failed");
+	protect_image(&im);
+
 	objc_call_loads();
 	run_initializers(&im, argc - ch, argv + ch, environ, apple);
 	VLOG("main at %p\n", (void *)(im.text_vm + im.slide + im.entryoff));
