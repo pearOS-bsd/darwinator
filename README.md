@@ -41,7 +41,7 @@ dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
 
-The Unarchiver 3.11 (the original Mac application, Objective-C) shows its Preferences window and extracts zip, tar.gz, tar.bz2, tar.xz and 7z archives (`docs/UNARCHIVER.md`, `tests/unar.sh`).
+The Unarchiver 3.11 (the original Mac application, Objective-C) shows its Preferences window and extracts zip, tar.gz, tar.bz2, tar.xz and 7z archives, but crashes in about half of its runs (`docs/UNARCHIVER.md`, `tests/unar.sh`).
 
 ![The Unarchiver 3.11 (the unmodified Mac application) running in pearOS](docs/screenshot-unarchiver.png)
 
