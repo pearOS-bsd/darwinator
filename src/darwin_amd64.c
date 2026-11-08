@@ -10,6 +10,10 @@
 #include <sys/proc.h>
 #include <sys/sysent.h>
 #include <machine/frame.h>
+#include <machine/pcb.h>
+#include <x86/x86_var.h>
+
+#include <bsm/audit_kevents.h>
 
 #include "darwinator.h"
 
@@ -25,8 +29,19 @@ darwin_fetch_syscall_args(struct thread *td)
 
 	sa->original_code = (u_int)rax;
 	sa->code = (u_int)(rax & 0xffffff);
-	if (((rax >> 24) & 0xff) != DARWIN_CLASS_UNIX || sa->code >= (u_int)darwin_nsyscalls)
-		sa->callp = &nosys_sysent;	/* Mach traps, machdep and diag calls are not implemented yet */
+	switch ((rax >> 24) & 0xff) {
+	case DARWIN_CLASS_UNIX:
+		break;
+	case DARWIN_CLASS_MACHDEP:
+		sa->code += DARWIN_MACHDEP_BASE;
+		break;
+	default:				/* Mach traps and diag calls are not implemented yet */
+		sa->code = (u_int)darwin_nsyscalls;
+		break;
+	}
+	if (sa->code >= (u_int)darwin_nsyscalls || sa->code >= DARWIN_MACHDEP_BASE + 64 ||
+	    (sa->code >= 512 && sa->code < DARWIN_MACHDEP_BASE))
+		sa->callp = &nosys_sysent;
 	else
 		sa->callp = &darwin_sysent[sa->code];
 
@@ -40,4 +55,32 @@ darwin_fetch_syscall_args(struct thread *td)
 	td->td_retval[0] = 0;
 	td->td_retval[1] = frame->tf_rdx;
 	return (0);
+}
+
+/*
+ * Machdep class (3), number 3: thread_fast_set_cthread_self(base): the base of the thread's TSD block, which
+ * libpthread keeps in %gs (reads like %gs:0 are how userland finds its thread).  The same as FreeBSD's
+ * sysarch(AMD64_SET_GSBASE).
+ */
+static int
+darwin_set_tsd_base(struct thread *td, struct darwin_args *uap)
+{
+	uint64_t base = (uint64_t)uap->a[0];
+
+	if (base >= td->td_proc->p_sysent->sv_maxuser)
+		return (EINVAL);
+	set_pcb_flags(td->td_pcb, PCB_FULL_IRET);
+	td->td_pcb->pcb_gsbase = base;
+	td->td_frame->tf_gs = _ugssel;
+	return (0);
+}
+
+void
+darwin_machdep_syscalls_init(void)
+{
+	const int n = DARWIN_MACHDEP_BASE + 3;
+
+	darwin_sysent[n] = (struct sysent){ .sy_narg = 1, .sy_call = (sy_call_t *)darwin_set_tsd_base,
+	    .sy_auevent = AUE_NULL, .sy_thrcnt = SY_THR_STATIC };
+	darwin_syscallnames[n] = "thread_fast_set_cthread_self";
 }

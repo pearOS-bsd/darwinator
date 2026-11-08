@@ -31,3 +31,9 @@ darwin_fetch_syscall_args(struct thread *td)
 	td->td_retval[1] = 0;
 	return (0);
 }
+
+void
+darwin_machdep_syscalls_init(void)
+{
+	/* TPIDRRO_EL0 (the TSD base) is set through a Mach trap on arm64: not implemented yet */
+}

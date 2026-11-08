@@ -15,6 +15,7 @@
 #include <sys/sx.h>
 #include <sys/sysctl.h>
 #include <sys/sysent.h>
+#include <sys/errno.h>
 
 #include "darwinator.h"
 
@@ -25,6 +26,14 @@ SYSCTL_NODE(_kern, OID_AUTO, darwinator, CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Darwin
 SYSCTL_INT(_kern_darwinator, OID_AUTO, debug, CTLFLAG_RWTUN, &darwin_debug, 0, "log why a Mach-O file is refused");
 
 struct sysentvec darwin_sysvec;
+static void (*native_set_syscall_retval)(struct thread *, int);
+
+/* the results of a call are FreeBSD's; the errno numbers are translated to Darwin's before they reach the registers */
+static void
+darwin_set_syscall_retval(struct thread *td, int error)
+{
+	native_set_syscall_retval(td, error > 0 ? darwin_errno(error) : error);
+}
 
 static const struct execsw macho_execsw = {
 	.ex_imgact = macho_imgact,
@@ -48,6 +57,8 @@ darwin_sysvec_init(void)
 	darwin_sysvec.sv_table = darwin_sysent;
 	darwin_sysvec.sv_syscallnames = darwin_syscallnames;
 	darwin_sysvec.sv_fetch_syscall_args = darwin_fetch_syscall_args;
+	native_set_syscall_retval = native->sv_set_syscall_retval;
+	darwin_sysvec.sv_set_syscall_retval = darwin_set_syscall_retval;
 	darwin_sysvec.sv_flags = (native->sv_flags & ~(SV_ABI_MASK | SV_SIGSYS)) | SV_ABI_UNDEF;
 	darwin_sysvec.sv_coredump = NULL;	/* a core file written with the ELF layout would be wrong */
 }

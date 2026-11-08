@@ -18,6 +18,19 @@ python3 tools/mkmacho.py --arch $ARCH --entry main       -o $T/main       && che
 python3 tools/mkmacho.py --arch $ARCH --entry unixthread -o $T/unixthread && check "LC_UNIXTHREAD ($ARCH)" $T/unixthread
 python3 tools/mkmacho.py --fat                           -o $T/fat        && check "universal file"        $T/fat
 
+# a C program (machsh) that uses the Darwin system calls: files, memory, time, entropy, the thread pointer
+if sh tests/build-c.sh $T/machsh; then
+	out="$(printf 'calc 6*7\ncalc (1+2)*(3+4)-5\ncalc 1/0\npid\nwrite /tmp/darwinator-t hello darwin\ncat /tmp/darwinator-t\nstat /tmp/darwinator-t\nstat /nonexistent\nmem 64\nrand\ntime\ntls\nrm /tmp/darwinator-t\nexit 3\n' | $T/machsh 2>&1)"; st=$?
+	echo "$out" | sed 's/^/     | /'
+	ok=1
+	for want in '= 42' '= 16' 'division by zero' 'wrote 13 bytes' 'hello darwin' 'size 13  mode 0644 (file)' 'error 2' 'contents ok' 'removed'; do
+		echo "$out" | grep -qF -- "$want" || { echo "FAIL machsh: missing '$want'"; ok=0; }
+	done
+	[ "$(uname -p)" = amd64 ] && { echo "$out" | grep -qF 'tls ok' || { echo "FAIL machsh: tls"; ok=0; }; }
+	[ $st -eq 3 ] || { echo "FAIL machsh: exit status $st"; ok=0; }
+	[ $ok -eq 1 ] && echo "ok   machsh (interactive Mach-O program)" || fail=1
+else echo "FAIL building machsh"; fail=1; fi
+
 # a Mach-O file of the other architecture is refused, ELF programs and scripts still run
 OTHER=arm64; [ $ARCH = arm64 ] && OTHER=x86_64
 python3 tools/mkmacho.py --arch $OTHER -o $T/other
