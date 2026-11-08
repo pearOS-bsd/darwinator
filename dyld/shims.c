@@ -466,6 +466,25 @@ dw_dispatch_sync(void *q, void *blk)
 /* Frameworks of macOS that a program asks and that have no meaning here (code signatures, IOKit registry, DiskArbitration, login items, authorization, the Apple System Log):
  * calls that find nothing (NULL / 0) or fail with the error that "there is none" (a program that asks for a signature gets "unsigned") */
 static long dw_zero(void) { return (0); }
+
+/* LSCopyDefaultRoleHandlerForContentType: the application asks which program opens a type; the answer is itself (its bundle identifier), the only program this system knows by that name */
+static void *
+dw_ls_default_handler(void)
+{
+	void *(*gc)(const char *) = dlsym(RTLD_DEFAULT, "objc_getClass");
+	void *(*sr)(const char *) = dlsym(RTLD_DEFAULT, "sel_registerName");
+	void *(*lookup)(void *, void *) = dlsym(RTLD_DEFAULT, "objc_msg_lookup");
+	void *cls, *bundle, *(*imp)(void *, void *);
+
+	if (gc == NULL || sr == NULL || lookup == NULL || (cls = gc("NSBundle")) == NULL)
+		return (NULL);
+	imp = (void *(*)(void *, void *))lookup(cls, sr("mainBundle"));
+	bundle = imp != NULL ? imp(cls, sr("mainBundle")) : NULL;
+	if (bundle == NULL)
+		return (NULL);
+	imp = (void *(*)(void *, void *))lookup(bundle, sr("bundleIdentifier"));
+	return (imp != NULL ? imp(bundle, sr("bundleIdentifier")) : NULL);
+}
 static long dw_sec_unsigned(void) { return (-67062); }		/* errSecCSUnsigned */
 static long dw_auth_internal(void) { return (-60008); }	/* errAuthorizationInternal */
 static long dw_kern_failure(void) { return (5); }		/* KERN_FAILURE */
@@ -556,6 +575,8 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_IOServiceGetMatchingService", dw_zero }, { "_IOObjectRelease", dw_zero }, { "_IOObjectConformsTo", dw_zero }, { "_IORegistryEntryCreateCFProperties", dw_kern_failure },
 	{ "_IORegistryEntryGetParentEntry", dw_kern_failure },
 	{ "_DASessionCreate", dw_zero }, { "_DADiskCreateFromVolumePath", dw_zero }, { "_DADiskCopyDescription", dw_zero }, { "_DADiskUnmount", dw_zero },
+	{ "_LSCopyAllRoleHandlersForContentType", dw_zero }, { "_LSCopyApplicationURLsForURL", dw_zero }, { "_LSCopyDefaultRoleHandlerForContentType", dw_ls_default_handler },
+	{ "_LSSetDefaultRoleHandlerForContentType", dw_zero }, { "_GetCurrentKeyModifiers", dw_zero }, { "_UTTypeCopyPreferredTagWithClass", dw_zero },
 	{ "_LSSharedFileListCreate", dw_zero }, { "_LSSharedFileListCopySnapshot", dw_zero }, { "_LSSharedFileListItemRemove", dw_minus_one }, { "_LSSharedFileListItemResolve", dw_minus_one },
 	{ "_asl_open", dw_zero }, { "_asl_new", dw_zero }, { "_asl_set", dw_zero }, { "_asl_send", dw_zero }, { "_asl_free", dw_zero }, { "_asl_release", dw_zero }, { "_asl_search", dw_zero },
 	{ "_asl_next", dw_zero }, { "_asl_get", dw_zero }, { "_asl_set_query", dw_zero },

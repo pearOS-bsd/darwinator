@@ -1,6 +1,6 @@
 #!/bin/sh
 # macapp-install NAME|URL ...: downloads Mac applications from their own sites into /Applications (the image cannot carry them: they are not ours to give away).
-#   macapp-install keka appcleaner xld         the applications that are tested here
+#   macapp-install keka appcleaner xld unarchiver   the applications that are tested here
 #   macapp-install https://example.com/App.dmg  any .dmg or .zip with a .app in it
 # A .dmg is read with dmgtool (HFS+ in UDIF), a .zip with unzip/tar.  Needs the network and a writable /Applications (sudo when it is not).
 DEST="${APPLICATIONS:-/Applications}"
@@ -9,11 +9,12 @@ url_of() {
 	keka) echo "https://github.com/aonez/Keka/releases/download/v1.6.8/Keka-1.6.8.zip" ;;
 	appcleaner) echo "https://freemacsoft.net/downloads/AppCleaner_3.7.zip" ;;
 	xld) echo "https://tmkk.undo.jp/xld/xld-20250302.dmg" ;;
+	unarchiver) echo "https://cdn.theunarchiver.com/downloads/TheUnarchiver.zip" ;;      # 3.11.1: Objective-C; the newer 4.x of MacPaw uses Swift
 	http://*|https://*) echo "$1" ;;
 	*) return 1 ;;
 	esac
 }
-[ $# -gt 0 ] || { echo "usage: macapp-install keka|appcleaner|xld|URL ..." >&2; exit 64; }
+[ $# -gt 0 ] || { echo "usage: macapp-install keka|appcleaner|xld|unarchiver|URL ..." >&2; exit 64; }
 T="$(mktemp -d /var/tmp/macapp.XXXXXX)" || exit 1; trap 'rm -rf "$T"' EXIT
 rc=0
 for a in "$@"; do
@@ -27,9 +28,10 @@ for a in "$@"; do
 	*) echo "$a: .dmg or .zip expected" >&2; rc=1; continue ;;
 	esac
 	found=0
-	for app in $(find "$T/x" -maxdepth 3 -name '*.app' -type d | grep -v '__MACOSX'); do
+	find "$T/x" -maxdepth 3 -name '*.app' -type d | grep -v '__MACOSX' > "$T/list"
+	while IFS= read -r app; do		# (names with spaces: The Unarchiver.app)
 		mkdir -p "$DEST" && rm -rf "$DEST/$(basename "$app")" && cp -R "$app" "$DEST/" && { echo "installed $DEST/$(basename "$app")"; found=1; }
-	done
+	done < "$T/list"
 	[ "$found" = 1 ] || { echo "$a: no application in it" >&2; rc=1; }
 done
 exit $rc
