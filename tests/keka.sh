@@ -26,4 +26,19 @@ for fmt in 7z zip; do
 	rm -rf $T/out; mkdir $T/out; (cd $T/out && $M $K/keka7zz x -y $T/arc.$fmt >/dev/null) && diff -r $T/src $T/out >/dev/null && ok "keka7zz extract $fmt, identical tree" || bad "keka7zz extract $fmt"
 done
 unzip -tq $T/arc.zip >/dev/null 2>&1 && ok "system unzip accepts the zip of keka7zz" || echo "note: system unzip did not test the zip (not installed or different)"
+# kekatar (bsdtar / libarchive): formats and filters, read back by the system tar and the other way round; encrypted zip (CommonCrypto)
+TAR=$M" "$K/kekatar
+for f in ustar pax gnutar zip 7zip; do
+	rm -f $T/t.$f; (cd $T/src && $M $K/kekatar --format $f -cf $T/t.$f .) 2>/dev/null && ok "kekatar create $f" || bad "kekatar create $f"
+	tar -tf $T/t.$f >/dev/null 2>&1 && ok "system tar reads the $f archive" || bad "system tar reads $f"
+	rm -rf $T/x; mkdir $T/x; (cd $T/x && $M $K/kekatar -xf $T/t.$f) && diff -r $T/src $T/x >/dev/null && ok "kekatar extracts its own $f, identical tree" || bad "kekatar extract $f"
+done
+for f in z:gz j:bz2 J:xz; do
+	o=${f%%:*}; e=${f##*:}
+	(cd $T/src && $M $K/kekatar -c${o}f $T/f.tar.$e .) && tar -xOf $T/f.tar.$e ./text.txt 2>/dev/null | cmp - $T/src/text.txt && ok "kekatar -c$o ($e), system tar reads" || bad "kekatar -c$o"
+done
+(cd $T/src && tar -cf $T/sys.tar .) && rm -rf $T/x && mkdir $T/x && (cd $T/x && $M $K/kekatar -xf $T/sys.tar) && diff -r $T/src $T/x >/dev/null && ok "kekatar extracts a system tar" || bad "kekatar extracts system tar"
+(cd $T/src && $M $K/kekatar --format zip --options zip:encryption=aes256 --passphrase s3cret -cf $T/enc.zip .) 2>/dev/null && ok "kekatar creates an AES-256 zip" || bad "kekatar AES zip"
+rm -rf $T/x; mkdir $T/x; (cd $T/x && $M $K/kekatar --passphrase s3cret -xf $T/enc.zip) 2>/dev/null && diff -r $T/src $T/x >/dev/null && ok "kekatar decrypts its AES zip, identical tree" || bad "kekatar decrypt AES zip"
+rm -rf $T/x; mkdir $T/x; (cd $T/x && $M $K/kekatar --passphrase wrong -xf $T/enc.zip) >/dev/null 2>&1 && bad "wrong passphrase accepted" || ok "wrong passphrase refused"
 rm -rf $T; exit $fail
