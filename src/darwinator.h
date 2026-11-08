@@ -33,6 +33,7 @@ extern int darwin_debug;
 
 int	darwin_errno(int);				/* FreeBSD errno -> Darwin errno */
 void	darwin_machdep_syscalls_init(void);		/* per architecture */
+void	darwin_more_syscalls_init(void);		/* syscalls_more.c */
 void	darwin_syscalls_init(void);			/* fills the unused entries with nosys */
 int	darwin_fetch_syscall_args(struct thread *);	/* per architecture (darwin_<arch>.c) */
 int	macho_imgact(struct image_params *);		/* the image activator */

@@ -31,6 +31,14 @@ if sh tests/build-c.sh $T/machsh; then
 	[ $ok -eq 1 ] && echo "ok   machsh (interactive Mach-O program)" || fail=1
 else echo "FAIL building machsh"; fail=1; fi
 
+# the other BSD calls (fork, execve, pipe, fcntl, ioctl, getdirentries64, statfs64, sigprocmask, getrlimit, sysctl, sockets ...)
+if sh tests/build-c.sh $T/syscalls "" tests/c/syscalls.c; then
+	out="$($T/syscalls 2>&1)"; st=$?
+	echo "$out" | grep -v '^ok ' | sed 's/^/     | /'
+	echo "$out" | grep -c '^ok ' | sed 's/^/     | checks passed: /'
+	[ $st -eq 0 ] && echo "ok   syscalls (the other BSD calls)" || { echo "FAIL syscalls: $st failure(s)"; fail=1; }
+else echo "FAIL building syscalls"; fail=1; fi
+
 # a Mach-O file of the other architecture is refused, ELF programs and scripts still run
 OTHER=arm64; [ $ARCH = arm64 ] && OTHER=x86_64
 python3 tools/mkmacho.py --arch $OTHER -o $T/other

@@ -1,0 +1,193 @@
+/*
+ * syscalls: checks the BSD calls of the Darwin class that are not in machsh (fork, wait4, execve, pipe, fcntl, ioctl,
+ * getdirentries64, statfs64, sigprocmask, getrlimit, sysctl, sysctlbyname, sockets, links, locks, select, poll ...).
+ * A freestanding Mach-O program with the Darwin convention (no libSystem).  Prints "ok NAME" or "FAIL NAME ..." for each
+ * check; the exit status is the number of failures.
+ */
+#include "dsys.h"
+
+__attribute__((used)) void *memcpy(void *d, const void *s, u64 n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
+__attribute__((used)) void *memset(void *d, int c, u64 n) { char *a = d; while (n--) *a++ = (char)c; return d; }
+
+static u64 slen(const char *s) { u64 n = 0; while (s[n]) n++; return n; }
+static void out(const char *s) { dsys(SYS_write, 1, (i64)s, (i64)slen(s), 0, 0, 0); }
+static int seq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
+static void num(i64 v)
+{
+	char b[24]; int i = 23; int neg = v < 0; u64 u = neg ? -(u64)v : (u64)v;
+	b[i] = 0;
+	do { b[--i] = '0' + u % 10; u /= 10; } while (u);
+	if (neg) b[--i] = '-';
+	out(b + i);
+}
+
+/* a call that also gives the second result register (rdx on x86-64, x1 on arm64): pipe */
+static i64 dsys_2(i64 n, i64 *second)
+{
+#if defined(__x86_64__)
+	i64 ret = 0x2000000 | n, rdx = 0; unsigned char err;
+	__asm__ volatile("syscall; setc %1" : "+a"(ret), "=q"(err), "+d"(rdx) : : "rcx", "r11", "rdi", "rsi", "r8", "r9", "r10", "memory", "cc");
+	*second = rdx; return err ? -ret : ret;
+#else
+	register i64 x0 __asm__("x0") = 0, x1 __asm__("x1") = 0, x16 __asm__("x16") = n; unsigned long err;
+	__asm__ volatile("svc #0x80\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1) : "r"(x16) : "memory", "cc");
+	*second = x1; return err ? -x0 : x0;
+#endif
+}
+
+static int fails;
+static void check(const char *name, int cond, i64 detail)
+{
+	if (cond) { out("ok   "); out(name); out("\n"); }
+	else { out("FAIL "); out(name); out(" ("); num(detail); out(")\n"); fails++; }
+}
+
+#define	S(n, a, b, c, d, e, f)	dsys(n, (i64)(a), (i64)(b), (i64)(c), (i64)(d), (i64)(e), (i64)(f))
+
+enum {
+	SYS_fork = 2, SYS_wait4 = 7, SYS_link = 9, SYS_chmod = 15, SYS_sync = 36, SYS_pipe = 42, SYS_sigprocmask = 48, SYS_ioctl = 54,
+	SYS_symlink = 57, SYS_readlink = 58, SYS_execve = 59, SYS_getgroups = 79, SYS_getpgrp = 81, SYS_getdtablesize = 89,
+	SYS_fcntl = 92, SYS_select = 93, SYS_socket = 97, SYS_connect = 98, SYS_bind = 104, SYS_setsockopt = 105,
+	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
+	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
+	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
+	SYS_write_nocancel = 397, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
+};
+
+struct dflock { i64 start, len; int pid; short type, whence; };
+struct dpollfd { int fd; short events, revents; };
+struct drlimit { u64 cur, max; };
+struct dstatfs { unsigned bsize; int iosize; u64 blocks, bfree, bavail, files, ffree; int fsid[2]; unsigned owner, type, flags, sub; char fstype[16], on[1024], from[1024]; unsigned res[8]; };
+
+static void cleanup(void)
+{
+	S(SYS_unlink, "/tmp/dsc/a", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/bb", 0, 0, 0, 0, 0);
+	S(SYS_unlink, "/tmp/dsc/ln", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/sl", 0, 0, 0, 0, 0);
+	S(SYS_unlink, "/tmp/dsc/ren", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/fifo", 0, 0, 0, 0, 0);
+	S(SYS_rmdir, "/tmp/dsc", 0, 0, 0, 0, 0);
+}
+
+int cmain(void)
+{
+	char buf[4096]; i64 r, r2; int fd, i;
+
+	cleanup();
+	check("mkdir", S(SYS_mkdir, "/tmp/dsc", 0755, 0, 0, 0, 0) == 0, 0);
+
+	/* fork, execve, wait4 */
+	r = S(SYS_fork, 0, 0, 0, 0, 0, 0);
+	if (r == 0) { S(SYS_exit, 5, 0, 0, 0, 0, 0); }
+	{ int st = 0; i64 w = S(SYS_wait4, r, &st, 0, 0, 0, 0);
+	  check("fork + wait4 (status of exit(5))", r > 0 && w == r && st == (5 << 8), st); }
+	r = S(SYS_fork, 0, 0, 0, 0, 0, 0);
+	if (r == 0) { char *argv[] = { "true", 0 }; char *envp[] = { 0 }; S(SYS_execve, "/usr/bin/true", argv, envp, 0, 0, 0); S(SYS_exit, 99, 0, 0, 0, 0, 0); }
+	{ int st = -1; i64 w = S(SYS_wait4, r, &st, 0, 0, 0, 0); check("fork + execve + wait4", w == r && st == 0, st); }
+
+	/* pipe (two results), read/write nocancel, select, poll, FIONREAD */
+	{ i64 p1; i64 p0 = dsys_2(SYS_pipe, &p1); char c[4];
+	  check("pipe", p0 >= 0 && p1 > 0 && p0 != p1, p0);
+	  check("write_nocancel", S(SYS_write_nocancel, p1, "abc", 3, 0, 0, 0) == 3, 0);
+	  { int arg = 0; r = S(SYS_ioctl, p0, 0x4004667fUL, &arg, 0, 0, 0); check("ioctl FIONREAD", r == 0 && arg == 3, arg); }
+	  { struct dpollfd pf = { (int)p0, 1, 0 }; r = S(SYS_poll, &pf, 1, 0, 0, 0, 0); check("poll (readable pipe)", r == 1 && (pf.revents & 1), r); }
+	  { unsigned long set[16]; for (i = 0; i < 16; i++) set[i] = 0; set[0] = 1UL << p0; struct dtimeval tv = { 0, 0, 0 };
+	    r = S(SYS_select, p0 + 1, set, 0, 0, &tv, 0); check("select (readable pipe)", r == 1, r); }
+	  check("read_nocancel", S(SYS_read_nocancel, p0, c, 3, 0, 0, 0) == 3 && c[0] == 'a' && c[2] == 'c', 0);
+	  { unsigned char t[72]; r = S(SYS_ioctl, p0, 0x40487413UL, t, 0, 0, 0); check("ioctl TIOCGETA on a pipe is ENOTTY", r == -25, r); }
+	  S(SYS_close_nocancel, p0, 0, 0, 0, 0, 0); S(SYS_close_nocancel, p1, 0, 0, 0, 0, 0); }
+
+	/* files: open_nocancel, fcntl, F_GETPATH, locks */
+	fd = (int)S(SYS_open_nocancel, "/tmp/dsc/a", O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0, 0);
+	check("open_nocancel", fd >= 0, fd);
+	check("write", S(SYS_write, fd, "hello", 5, 0, 0, 0) == 5, 0);
+	r = S(SYS_fcntl, fd, 3, 0, 0, 0, 0); check("fcntl F_GETFL (O_WRONLY)", r == 1, r);
+	check("fcntl F_SETFL O_NONBLOCK", S(SYS_fcntl, fd, 4, 4, 0, 0, 0) == 0 && (S(SYS_fcntl, fd, 3, 0, 0, 0, 0) & 4), 0);
+	r = S(SYS_fcntl, fd, 67, 10, 0, 0, 0); check("fcntl F_DUPFD_CLOEXEC", r >= 10, r);
+	if (r >= 0) { check("  its FD_CLOEXEC", S(SYS_fcntl, r, 1, 0, 0, 0, 0) == 1, 0); S(SYS_close, r, 0, 0, 0, 0, 0); }
+	for (i = 0; i < (int)sizeof(buf); i++) buf[i] = 0;
+	{ int fd2 = (int)S(SYS_open, "/tmp/dsc/a", 0, 0, 0, 0, 0);	/* opened by name: the name cache of the kernel knows the path (a file just created may not be there yet) */
+	  r = S(SYS_fcntl, fd2, 50, buf, 0, 0, 0); check("fcntl F_GETPATH", r == 0 && seq(buf, "/tmp/dsc/a"), r); S(SYS_close, fd2, 0, 0, 0, 0, 0); }
+	{ struct dflock fl = { 0, 0, 0, 3, 0 }; r = S(SYS_fcntl, fd, 8, &fl, 0, 0, 0); check("fcntl F_SETLK (write lock)", r == 0, r);
+	  fl.type = 2; r = S(SYS_fcntl, fd, 8, &fl, 0, 0, 0); check("fcntl F_SETLK (unlock)", r == 0, r); }
+	check("fcntl F_FULLFSYNC", S(SYS_fcntl, fd, 51, 0, 0, 0, 0) == 0, 0);
+	check("fcntl unknown command is EINVAL", S(SYS_fcntl, fd, 9999, 0, 0, 0, 0) == -22, 0);
+	check("flock (LOCK_EX)", S(SYS_flock, fd, 2, 0, 0, 0, 0) == 0 && S(SYS_flock, fd, 8, 0, 0, 0, 0) == 0, 0);
+	check("fchmod", S(SYS_fchmod, fd, 0600, 0, 0, 0, 0) == 0, 0);
+	S(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	/* names: link, symlink, readlink, rename, chmod, truncate, mkfifo */
+	check("link", S(SYS_link, "/tmp/dsc/a", "/tmp/dsc/ln", 0, 0, 0, 0) == 0, 0);
+	check("symlink", S(SYS_symlink, "/tmp/dsc/a", "/tmp/dsc/sl", 0, 0, 0, 0) == 0, 0);
+	for (i = 0; i < 64; i++) buf[i] = 0;
+	r = S(SYS_readlink, "/tmp/dsc/sl", buf, 63, 0, 0, 0); check("readlink", r == 10 && seq(buf, "/tmp/dsc/a"), r);
+	check("rename", S(SYS_rename, "/tmp/dsc/ln", "/tmp/dsc/ren", 0, 0, 0, 0) == 0, 0);
+	check("chmod", S(SYS_chmod, "/tmp/dsc/ren", 0640, 0, 0, 0, 0) == 0, 0);
+	check("truncate", S(SYS_truncate, "/tmp/dsc/ren", 2, 0, 0, 0, 0) == 0, 0);
+	{ struct dstat64 st; r = S(SYS_stat64, "/tmp/dsc/ren", &st, 0, 0, 0, 0); check("  size after truncate, mode after chmod", r == 0 && st.st_size == 2 && (st.st_mode & 0777) == 0640, st.st_size); }
+	check("mkfifo", S(SYS_mkfifo, "/tmp/dsc/fifo", 0600, 0, 0, 0, 0) == 0, 0);
+	S(SYS_unlink, "/tmp/dsc/ren", 0, 0, 0, 0, 0);
+	fd = (int)S(SYS_open, "/tmp/dsc/bb", O_WRONLY | O_CREAT, 0644, 0, 0, 0); S(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	/* getdirentries64 */
+	fd = (int)S(SYS_open, "/tmp/dsc", 0, 0, 0, 0, 0);
+	{ i64 pos = 0; int seen_a = 0, seen_bb = 0, seen_dot = 0, bad = 0; i64 n = S(SYS_getdirentries64, fd, buf, sizeof(buf), &pos, 0, 0), o = 0;
+	  while (o < n) {
+		  unsigned short reclen = *(unsigned short *)(buf + o + 16), namlen = *(unsigned short *)(buf + o + 18); const char *name = buf + o + 21;
+		  if (reclen % 4 || reclen < 22 || name[namlen] != 0) bad = 1;
+		  if (seq(name, "a")) seen_a = 1; else if (seq(name, "bb") && namlen == 2) seen_bb = 1; else if (seq(name, ".")) seen_dot = 1;
+		  o += reclen; }
+	  check("getdirentries64 (names, reclen, namlen)", n > 0 && seen_a && seen_bb && seen_dot && !bad, n); }
+	S(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	/* statfs64, fstatfs64 */
+	{ static struct dstatfs sf; r = S(SYS_statfs64, "/", &sf, 0, 0, 0, 0);
+	  check("statfs64 /", r == 0 && sf.bsize > 0 && sf.blocks > 0 && sf.fstype[0] && sf.on[0] == '/', r);
+	  fd = (int)S(SYS_open, "/", 0, 0, 0, 0, 0); r = S(SYS_fstatfs64, fd, &sf, 0, 0, 0, 0);
+	  check("fstatfs64", r == 0 && sf.blocks > 0, r); S(SYS_close, fd, 0, 0, 0, 0, 0); }
+
+	/* signals' mask, limits, ids */
+	{ unsigned set = 1U << 29, old = 0, cur = 0; r = S(SYS_sigprocmask, 1, &set, &old, 0, 0, 0);
+	  check("sigprocmask (SIG_BLOCK SIGUSR1)", r == 0 && !(old & set), r);
+	  r = S(SYS_sigprocmask, 1, 0, &cur, 0, 0, 0); check("  the mask has it", r == 0 && (cur & set), cur);
+	  S(SYS_sigprocmask, 3, &old, 0, 0, 0, 0); }
+	{ struct drlimit rl = { 0, 0 }; r = S(SYS_getrlimit, 8, &rl, 0, 0, 0, 0); check("getrlimit (RLIMIT_NOFILE)", r == 0 && rl.cur > 0 && rl.max >= rl.cur, r);
+	  check("getrlimit with a bad resource is EINVAL", S(SYS_getrlimit, 99, &rl, 0, 0, 0, 0) == -22, 0); }
+	check("getpgrp", S(SYS_getpgrp, 0, 0, 0, 0, 0, 0) > 0, 0);
+	check("getsid", S(SYS_getsid, 0, 0, 0, 0, 0, 0) > 0, 0);
+	check("getdtablesize", S(SYS_getdtablesize, 0, 0, 0, 0, 0, 0) > 0, 0);
+	{ long ru[18]; r = S(SYS_getrusage, 0, ru, 0, 0, 0, 0); check("getrusage", r == 0, r); }
+	{ unsigned g[16]; r = S(SYS_getgroups, 16, g, 0, 0, 0, 0); check("getgroups", r >= 0, r); }
+
+	/* sysctl */
+	{ int mib[2] = { 6, 3 }; int ncpu = 0; u64 len = sizeof(ncpu); r = S(SYS_sysctl, mib, 2, &ncpu, &len, 0, 0); check("sysctl hw.ncpu", r == 0 && ncpu > 0 && len == 4, ncpu); }
+	{ int ncpu = 0; u64 len = sizeof(ncpu); r = S(SYS_sysctlbyname, "hw.ncpu", 7, &ncpu, &len, 0, 0); check("sysctlbyname hw.ncpu", r == 0 && ncpu > 0, r); }
+	{ u64 mem = 0, len = sizeof(mem); r = S(SYS_sysctlbyname, "hw.memsize", 10, &mem, &len, 0, 0); check("sysctlbyname hw.memsize", r == 0 && mem > (64UL << 20) && len == 8, r); }
+	{ char t[32]; u64 len = sizeof(t); r = S(SYS_sysctlbyname, "kern.ostype", 11, t, &len, 0, 0); check("sysctlbyname kern.ostype is Darwin", r == 0 && seq(t, "Darwin") && len == 7, r); }
+	{ char t[3]; u64 len = sizeof(t); r = S(SYS_sysctlbyname, "kern.ostype", 11, t, &len, 0, 0); check("  too small a buffer is ENOMEM", r == -12, r); }
+	{ u64 len = 0; r = S(SYS_sysctlbyname, "kern.hostname", 13, 0, &len, 0, 0); check("  size query (no buffer)", r == 0 && len > 1, len); }
+	{ char t[8]; u64 len = sizeof(t); r = S(SYS_sysctlbyname, "no.such.name", 12, t, &len, 0, 0); check("  unknown name is ENOENT", r == -2, r); }
+
+	/* sockets */
+	{ int sv[2] = { -1, -1 }; char c[4]; r = S(SYS_socketpair, 1, 1, 0, sv, 0, 0); check("socketpair (AF_UNIX)", r == 0 && sv[0] >= 0, r);
+	  if (r == 0) { S(SYS_write, sv[0], "xyz", 3, 0, 0, 0); check("  data crosses", S(SYS_read, sv[1], c, 3, 0, 0, 0) == 3 && c[1] == 'y', 0);
+		  int one = 1; check("setsockopt SO_NOSIGPIPE (Darwin's number)", S(SYS_setsockopt, sv[0], 0xffff, 0x1022, &one, 4, 0) == 0, 0);
+		  int v = 0; unsigned vl = 4; r = S(SYS_getsockopt, sv[0], 0xffff, 0x1022, &v, &vl, 0); check("getsockopt SO_NOSIGPIPE", r == 0 && v != 0, r);
+		  S(SYS_close, sv[0], 0, 0, 0, 0, 0); S(SYS_close, sv[1], 0, 0, 0, 0, 0); } }
+	r = S(SYS_socket, 30, 2, 0, 0, 0, 0); check("socket (AF_INET6 = 30 on Darwin)", r >= 0, r); if (r >= 0) S(SYS_close, r, 0, 0, 0, 0, 0);
+	r = S(SYS_socket, 2, 1, 0, 0, 0, 0);
+	if (r >= 0) {	/* bind a TCP socket to 127.0.0.1:0 and listen */
+		unsigned char sa[16] = { 16, 2, 0, 0, 127, 0, 0, 1, 0 }; check("bind (127.0.0.1)", S(SYS_bind, r, sa, 16, 0, 0, 0) == 0, 0);
+		check("listen", S(SYS_listen, r, 1, 0, 0, 0, 0) == 0, 0); S(SYS_close, r, 0, 0, 0, 0, 0); }
+	else check("socket (AF_INET)", 0, r);
+
+	cleanup();
+	check("cleanup", S(SYS_stat64, "/tmp/dsc", buf, 0, 0, 0, 0) == -2, 0);
+	out(fails ? "FAILED: " : "all passed: "); num(fails); out(" failure(s)\n");
+	S(SYS_exit, fails > 100 ? 100 : fails, 0, 0, 0, 0, 0);
+	return fails;
+}
+
+#if defined(__x86_64__)
+__asm__(".globl _start\n_start:\n\tandq $-16, %rsp\n\tcall cmain\n");
+#else
+__asm__(".globl _start\n_start:\n\tmov x0, sp\n\tand sp, x0, #-16\n\tbl cmain\n");
+#endif

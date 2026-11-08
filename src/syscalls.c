@@ -210,6 +210,7 @@ struct sysent darwin_sysent[DARWIN_NSYSCALLS] = {
 	ENTRY(338, 2, darwin_stat64,	AUE_STAT),
 	ENTRY(339, 2, darwin_fstat64,	AUE_FSTAT),
 	ENTRY(340, 2, darwin_lstat64,	AUE_LSTAT),
+	ENTRY(398, 3, darwin_open,	AUE_OPEN_RWTC),
 	ENTRY(500, 2, darwin_getentropy, AUE_NULL),
 };
 
@@ -221,7 +222,7 @@ const char *darwin_syscallnames[DARWIN_NSYSCALLS] = {
 	NAME(116, "gettimeofday"), NAME(120, "readv"), NAME(121, "writev"), NAME(136, "mkdir"), NAME(137, "rmdir"),
 	NAME(153, "pread"), NAME(154, "pwrite"), NAME(197, "mmap"), NAME(199, "lseek"), NAME(201, "ftruncate"),
 	NAME(327, "issetugid"), NAME(338, "stat64"), NAME(339, "fstat64"), NAME(340, "lstat64"),
-	NAME(500, "getentropy"),
+	NAME(398, "open_nocancel"), NAME(500, "getentropy"),
 };
 
 const int darwin_nsyscalls = DARWIN_NSYSCALLS;
@@ -231,6 +232,7 @@ darwin_syscalls_init(void)
 {
 	int i;
 
+	darwin_more_syscalls_init();		/* syscalls_more.c */
 	darwin_machdep_syscalls_init();		/* the entries of the machdep class (per architecture) */
 	for (i = 0; i < DARWIN_NSYSCALLS; i++) {
 		if (darwin_sysent[i].sy_call == NULL) {
