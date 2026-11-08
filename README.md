@@ -11,10 +11,11 @@ Written from the public description of the Mach-O format and the system call con
 | | |
 |---|---|
 | Mach-O loader (`src/macho.c`) | thin and fat (universal) 64 bit files for the architecture of the kernel; `LC_SEGMENT_64` segments are mapped (`__PAGEZERO` skipped), entry point from `LC_MAIN` or `LC_UNIXTHREAD`, executable stack setup by the kernel (`argc`, `argv`, `envp`) |
-| System calls (`src/syscalls.c`) | BSD class: `exit`, `read`, `write`, `close`, `getpid`; everything else fails with `ENOSYS` |
+| System calls (`src/syscalls.c`) | BSD class, 36 calls: `exit read write open close unlink chdir getpid getuid geteuid access kill getppid dup getegid getgid umask munmap mprotect dup2 fsync gettimeofday readv writev mkdir rmdir pread pwrite mmap lseek ftruncate issetugid stat64 fstat64 lstat64 getentropy`; `open` (flags), `mmap` (flags), `stat64` (structure) and errno numbers are translated to Darwin's, the rest goes straight to FreeBSD's code. Machdep class: `thread_fast_set_cthread_self` (amd64). Everything else fails with `ENOSYS` |
 | x86-64 convention (`src/darwin_amd64.c`) | `syscall`, class in the top byte of `rax` (BSD = `0x2000000 + n`), arguments `rdi rsi rdx r10 r8 r9`, carry flag = error |
 | arm64 convention (`src/darwin_aarch64.c`) | `svc #0x80`, number in `x16`, arguments `x0-x7`, carry flag = error |
-| Not yet | **dyld** (files with `LC_LOAD_DYLINKER` / `LC_LOAD_DYLIB` are refused with a message), Mach traps and Mach IPC (ports, `bootstrap`), `commpage`, `psynch`, signals in the Darwin layout, arm64e (PAC), the other BSD calls (their flags and structures differ from FreeBSD's: open, stat, mmap, sigaction, kevent64 ...) |
+| Test programs | `tests/c/machsh.c`: an interactive shell written as a Mach-O program (calculator, files, `stat64`, `mmap`, time, entropy, thread pointer), built on FreeBSD with clang + lld and `tools/elf2macho.py` (`tests/build-c.sh`); `tools/mkmacho.py` writes the minimal ones by hand |
+| Not yet | **dyld** (files with `LC_LOAD_DYLINKER` / `LC_LOAD_DYLIB` are refused with a message), arm64 thread pointer (TPIDRRO_EL0), Mach traps and Mach IPC (ports, `bootstrap`), `commpage`, `psynch`, signals in the Darwin layout, arm64e (PAC), the other BSD calls (their flags and structures differ from FreeBSD's: open, stat, mmap, sigaction, kevent64 ...) |
 
 Tested on FreeBSD 14.5 amd64 under KVM (`tools/vm-test.sh`): the module builds with `-Werror`, loads, runs the Mach-O test files (`LC_MAIN`, `LC_UNIXTHREAD`, a universal file), refuses a file of the other architecture, and ELF programs and scripts still run; `kldunload` works. **arm64 compiles (syntax check against the 14.5 headers) but has not been run yet** (needs an arm64 FreeBSD: the Mac's HVF VM, or CI). The GitHub-hosted FreeBSD VMs of the CI job (`.github/workflows/ci.yml`) were unreachable at the time of writing (HTTP 504 when the action downloads its VM image).
 
@@ -50,5 +51,5 @@ clang -nostdlib -Wl,-e,_start -o hello hello.s       # code that calls write/exi
 1. Run the CI, fix what the real kernel shows.
 2. More BSD calls with their Darwin flags and structures (`open`, `fstat64`, `mmap`, `sigaction`, `sysctl`, `ioctl`) and the errno differences (`sv_errtbl`).
 3. `commpage`, thread-local storage (`thread_fast_set_cthread_self`), `psynch` for pthread.
-4. Mach traps and Mach IPC (port rights, messages, a bootstrap server) as a part of this module.
+4. arm64 thread pointer (TPIDRRO_EL0), Mach traps and Mach IPC (port rights, messages, a bootstrap server) as a part of this module.
 5. dyld: the shared region and the dyld shared cache, then a real `dyld`.
