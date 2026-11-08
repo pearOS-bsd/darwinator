@@ -33,6 +33,8 @@ darwin_fetch_syscall_args(struct thread *td)
 	sa->code = (u_int)(rax & 0xffffff);
 	switch ((rax >> 24) & 0xff) {
 	case DARWIN_CLASS_UNIX:
+		if (sa->code >= DARWIN_MACHDEP_BASE)	/* the numbers from the base up are the machdep calls' */
+			sa->code = (u_int)darwin_nsyscalls;
 		break;
 	case DARWIN_CLASS_MACHDEP:
 		sa->code += DARWIN_MACHDEP_BASE;
@@ -49,8 +51,7 @@ darwin_fetch_syscall_args(struct thread *td)
 	}
 	if (native_sigreturn)
 		sa->callp = &sysent[SYS_sigreturn];
-	else if (sa->code >= (u_int)darwin_nsyscalls || sa->code >= DARWIN_MACHDEP_BASE + 64 ||
-	    (sa->code >= 512 && sa->code < DARWIN_MACHDEP_BASE))
+	else if (sa->code >= (u_int)darwin_nsyscalls || sa->code >= DARWIN_MACHDEP_BASE + 64)
 		sa->callp = &nosys_sysent;
 	else
 		sa->callp = &darwin_sysent[sa->code];

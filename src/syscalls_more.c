@@ -737,6 +737,7 @@ darwin_more_syscalls_init(void)
 		darwin_syscallnames[n] = darwin_more[i].name;
 	}
 	darwin_event_syscalls_init();		/* syscalls_event.c: replaces some of the above */
+	darwin_posix_syscalls_init();		/* syscalls_posix.c */
 }
 
 /* open_nocancel (398) is the open of syscalls.c: filled by darwin_syscalls_init */
