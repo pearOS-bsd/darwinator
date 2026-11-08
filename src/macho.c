@@ -3,8 +3,7 @@
  * running kernel: LC_SEGMENT_64 segments are mapped, the entry point comes from LC_MAIN or LC_UNIXTHREAD,
  * and the process gets the Darwin system call vector.
  *
- * Not done yet (the file is refused with ENOEXEC and a message when kern.darwinator.debug is set):
- * files that name a dynamic linker or libraries (LC_LOAD_DYLINKER, LC_LOAD_DYLIB).  dyld is the next step.
+ * Files that name a dynamic linker (almost every Mac program) are not handled here: the activator answers "not mine" and imgact_binmisc can hand them to dyld/machrun:
  *
  * Like imgact_elf.c, the activator returns -1 for a file that is not a Mach-O file, so that the other
  * activators get their turn, and an error number for a file that is one but cannot be run.
@@ -334,9 +333,9 @@ macho_imgact(struct image_params *imgp)
 		goto out;
 	if (mi->needs_dyld) {
 		DPRINTF("%s: refused, it needs dyld and its libraries\n", imgp->execpath != NULL ? imgp->execpath : "?");
-		uprintf("darwinator: %s needs dyld (not implemented): only files without dylibs run\n",
-		    imgp->execpath != NULL ? imgp->execpath : "this file");
-		error = ENOEXEC;
+		/* not ours: -1 lets the next activator try; with imgact_binmisc set up for Mach-O files (binmiscctl add ... --interpreter machrun) the file runs
+		 * through machrun, otherwise the exec fails with ENOEXEC as for any unknown format */
+		error = -1;
 		goto out;
 	}
 

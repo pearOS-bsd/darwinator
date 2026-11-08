@@ -448,6 +448,17 @@ main(int argc, char **argv)
 	parse(&im, launcher_real ? launcher_real : argv[ch]);
 	if (im.chained) errx(1, "%s: chained fixups (LC_DYLD_CHAINED_FIXUPS) are not supported yet", launcher_real ? launcher_real : argv[ch]);
 	if (!im.have_main) errx(1, "%s: no LC_MAIN (only programs that start at main() are supported)", launcher_real ? launcher_real : argv[ch]);
+	{	/* an Objective-C program (a Mac application): the settings that made them run in the tests.  MALLOC_CONF=junk:true has to be in the environment before the allocator
+		 * starts, so the process starts itself again once; MACHRUN_STRICT=1 turns the leniency off (messages that nothing implements raise as GNUstep's do) */
+		int objc = 0, i; uint32_t j;
+		for (i = 0; i < im.nseg; i++) for (j = 0; j < im.seg[i].nsects; j++) if (strncmp(im.seg[i].sects[j].sectname, "__objc_classlist", 16) == 0) objc = 1;
+		if (objc && getenv("MACHRUN_STRICT") == NULL) setenv("MACHRUN_LENIENT", "1", 0);
+		if (objc && getenv("MALLOC_CONF") == NULL && getenv("MACHRUN_NOREEXEC") == NULL) {
+			char self[PATH_MAX]; size_t n = sizeof(self); int mib[4] = { 1, 14, 12, -1 };
+			setenv("MALLOC_CONF", "junk:true", 1);
+			if (sysctl(mib, 4, self, &n, NULL, 0) == 0) { execv(self, argv); }
+		}
+	}
 	map_image(&im);
 	open_libs(&im);
 	if (im.dyld_info) {

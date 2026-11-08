@@ -37,6 +37,10 @@ dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
 
+## In the pearOS image
+
+`wsbsd/iso/build.sh` fetches this repository, builds `dyld/` (machrun, `libmachcompat.so`, `libexctrace.so`) and the kernel module, and installs them: `/usr/local/bin/machrun`, `/usr/local/bin/macapp`, `/usr/local/libexec/wrapapp.sh`, `/usr/local/lib/libmachcompat.so`, `/boot/modules/darwinator.ko` (not loaded by default). `loader.conf` loads `imgact_binmisc`; the rc script `wsbsd_machrun` registers the Mach-O magic numbers (thin and universal) with it, so a Mach-O executable runs like any program (`./kekaxz --version`); `macapp /path/App.app` starts a whole application (the bundle is wrapped in `~/Library/Caches/machrun`, as GNUstep wants it). `machrun` sets what Objective-C programs need by itself (`MACHRUN_LENIENT`, `MALLOC_CONF=junk:true`; `MACHRUN_STRICT=1` turns the first off).
+
 ## Build and use
 
 On FreeBSD 14 with the kernel sources (`/usr/src/sys`):
