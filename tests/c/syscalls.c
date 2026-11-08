@@ -30,7 +30,7 @@ static i64 dsys_2(i64 n, i64 *second)
 	*second = rdx; return err ? -ret : ret;
 #else
 	register i64 x0 __asm__("x0") = 0, x1 __asm__("x1") = 0, x16 __asm__("x16") = n; unsigned long err;
-	__asm__ volatile("svc #0x80\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1) : "r"(x16) : "memory", "cc");
+	__asm__ volatile("svc #0\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1) : "r"(x16) : "memory", "cc");
 	*second = x1; return err ? -x0 : x0;
 #endif
 }
@@ -51,7 +51,7 @@ static i64 dsys7(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g)
 #else
 	register i64 x0 __asm__("x0") = a, x1 __asm__("x1") = b, x2 __asm__("x2") = c, x3 __asm__("x3") = d, x4 __asm__("x4") = e, x5 __asm__("x5") = f, x6 __asm__("x6") = g, x16 __asm__("x16") = n;
 	unsigned long err;
-	__asm__ volatile("svc #0x80\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6) : "r"(x16) : "memory", "cc");
+	__asm__ volatile("svc #0\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6) : "r"(x16) : "memory", "cc");
 	return err ? -x0 : x0;
 #endif
 }
