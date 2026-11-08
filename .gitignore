@@ -1,0 +1,11 @@
+*.ko
+*.o
+*.kld
+*.debug
+*.symbols
+export_syms
+machine
+x86
+@
+vnode_if*.h
+opt_*.h
