@@ -233,8 +233,10 @@ build_class(struct o_class *c)
 	return (k);
 }
 
-static struct o_class **g_classlist; static size_t g_nclasses;
-int objc_is_own(void *p) { size_t i; for (i = 0; i < g_nclasses; i++) if (g_classlist[i] == p) return (1); return (0); }
+/* the Objective-C metadata of every image that has some: the program and its dylibs */
+struct oimg { struct o_class **cl; size_t ncl; struct o_class **nl; size_t nnl; char *done; };
+static struct oimg oimgs[128]; static int noimgs;
+int objc_is_own(void *p) { int k; size_t i; for (k = 0; k < noimgs; k++) for (i = 0; i < oimgs[k].ncl; i++) if (oimgs[k].cl[i] == p) return (1); return (0); }
 
 /* ---- constant strings: the 32 byte CFString constants become instances of a NSString subclass that reads them in place ---- */
 static uint64_t cfs_len(id s) { return (((uint64_t *)s)[3]); }
@@ -272,7 +274,6 @@ setup_cfstring_class(void)
 }
 
 /* ---- +load, called after the segments have their final protections (the program's code runs) ---- */
-static struct o_class **g_nlcls, **g_cl; static size_t g_nnlcls, g_ncl;
 static IMP
 find_load(struct o_class *cc)
 {
@@ -288,18 +289,25 @@ find_load(struct o_class *cc)
 void
 objc_call_loads(void)
 {
-	static char done[MAXCLS]; SEL load; size_t i, j;
-	if (g_nnlcls == 0 || !rt_ready) return;
+	SEL load; size_t i, j; int k;
+	if (noimgs == 0 || !rt_ready) return;
 	load = rt_registerName("load");
-	for (i = 0; i < g_nnlcls; i++) {
-		struct o_class *chain[32], *c = g_nlcls[i]; int depth = 0;
-		while (c && objc_is_own(c) && depth < 32) { chain[depth++] = c; c = c->superclass; }
-		while (depth--) {
-			struct o_class *cc = chain[depth]; Class k = own_class(cc); IMP imp;
-			for (j = 0; j < g_ncl; j++) if (g_cl[j] == cc) break;
-			if (j == g_ncl || done[j] || k == NULL) continue;
-			done[j] = 1;
-			if ((imp = find_load(cc)) != NULL) { VLOG("+load of %s\n", RO(cc)->name); ((void (*)(id, SEL))imp)((id)k, load); }
+	for (k = 0; k < noimgs; k++) {
+		struct oimg *im = &oimgs[k];
+		if (im->done == NULL) im->done = calloc(im->ncl + 1, 1);
+		for (i = 0; i < im->nnl; i++) {
+			struct o_class *chain[32], *c = im->nl[i]; int depth = 0;
+			while (c && objc_is_own(c) && depth < 32) { chain[depth++] = c; c = c->superclass; }
+			while (depth--) {
+				struct o_class *cc = chain[depth]; Class kk = own_class(cc); IMP imp; int ki; size_t jj = 0; struct oimg *owner = NULL;
+				for (ki = 0; ki < noimgs && owner == NULL; ki++) for (jj = 0; jj < oimgs[ki].ncl; jj++) if (oimgs[ki].cl[jj] == cc) { owner = &oimgs[ki]; break; }
+				(void)j;
+				if (owner == NULL || kk == NULL) continue;
+				if (owner->done == NULL) owner->done = calloc(owner->ncl + 1, 1);
+				if (owner->done[jj]) continue;
+				owner->done[jj] = 1;
+				if ((imp = find_load(cc)) != NULL) { VLOG("+load of %s\n", RO(cc)->name); ((void (*)(id, SEL))imp)((id)kk, load); }
+			}
 		}
 	}
 }
@@ -750,14 +758,23 @@ typedef void *(*find_fn)(const char *sect, size_t *size);
 int
 objc_load_image(find_fn find, intptr_t slide)
 {
+	return (objc_load_image2(find, slide, 1));
+}
+
+int
+objc_load_image2(find_fn find, intptr_t slide, int is_main)
+{
+	static int objc_inited;
 	size_t n, i; void **p; struct o_class **cl; struct o_cat **cats; struct o_proto **prs; uintptr_t *refs;
 	size_t ncl = 0, ncat = 0, npr = 0;
 
-	{ void *dp = find("__objc_data", &n); if (dp && getenv("MACHRUN_NOFIX") == NULL) { machrun_cls_lo = (uintptr_t)dp; machrun_cls_hi = (uintptr_t)dp + n; } }	/* class structures in the program: see machrun_fix_recv */
+	{ void *dp = find("__objc_data", &n); if (dp && getenv("MACHRUN_NOFIX") == NULL) { if (machrun_cls_lo == 0 || (uintptr_t)dp < machrun_cls_lo) machrun_cls_lo = (uintptr_t)dp; if ((uintptr_t)dp + n > machrun_cls_hi) machrun_cls_hi = (uintptr_t)dp + n; } }	/* class structures in the program: see machrun_fix_recv */
 	cl = find("__objc_classlist", &n); ncl = n / sizeof(void *);
 	cats = find("__objc_catlist", &n); ncat = n / sizeof(void *);
 	prs = find("__objc_protolist", &n); npr = n / sizeof(void *);
 	if (ncl + ncat + npr == 0 && find("__cfstring", &n) == NULL) return (0);
+	if (!objc_inited) {
+	objc_inited = 1;
 	if (getenv("MACHRUN_SYMBOLS")) symfile = fopen(getenv("MACHRUN_SYMBOLS"), "w");
 	if (!rt_init()) { warnx("the program has Objective-C metadata but the Objective-C runtime (libobjc2) could not be used"); return (-1); }
 	VLOG("objc: %zu classes, %zu categories, %zu protocols\n", ncl, ncat, npr);
@@ -771,7 +788,8 @@ objc_load_image(find_fn find, intptr_t slide)
 	if (getenv("MACHRUN_TRACE_AFTER_INVOKE")) trace_on = 0;
 	if (getenv("MACHRUN_TRACEMSG")) { traced_lookup = machrun_objc_lookup; machrun_objc_lookup = trace_lookup; }
 
-	g_classlist = cl; g_nclasses = ncl;
+	}
+	if (noimgs < 128) { oimgs[noimgs].cl = cl; oimgs[noimgs].ncl = ncl; noimgs++; }
 	for (i = 0; i < npr; i++) make_protocol(prs[i]);
 	for (i = 0; i < npr; i++) finish_protocol(prs[i]);
 	for (i = 0; i < ncl; i++) build_class(cl[i]);
@@ -787,8 +805,8 @@ objc_load_image(find_fn find, intptr_t slide)
 	if ((refs = find("__objc_classrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_superrefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_class((void *)refs[i]);
 	if ((refs = find("__objc_protorefs", &n))) for (i = 0; i < n / sizeof(void *); i++) refs[i] = (uintptr_t)to_proto((void *)refs[i]);
-	if (getenv("MACHRUN_AUDIT")) audit_selectors(find);
-	program_patches();
+	if (is_main && getenv("MACHRUN_AUDIT")) audit_selectors(find);
+	if (is_main) program_patches();
 	/* constant strings */
 	if ((p = find("__cfstring", &n)) != NULL) {
 		setup_cfstring_class();
@@ -796,7 +814,7 @@ objc_load_image(find_fn find, intptr_t slide)
 		VLOG("objc: %zu constant strings\n", n / 32);
 	}
 	if (symfile) fflush(symfile);
-	g_nlcls = find("__objc_nlclslist", &n); g_nnlcls = n / sizeof(void *); g_cl = cl; g_ncl = ncl;
+	{ struct o_class **nl = find("__objc_nlclslist", &n); if (noimgs > 0) { oimgs[noimgs - 1].nl = nl; oimgs[noimgs - 1].nnl = n / sizeof(void *); } }
 	return (1);
 }
 
