@@ -441,6 +441,132 @@ darwin_recvfrom(struct thread *td, struct darwin_args *uap)
 	return (error);
 }
 
+
+/* ---- getattrlist(path, attrlist, buffer, size, options): the common and file attributes that come from stat ---- */
+
+struct darwin_attrlist {
+	uint16_t	bitmapcount, reserved;
+	uint32_t	commonattr, volattr, dirattr, fileattr, forkattr;
+};
+
+#define	DA_CMN_NAME		0x00000001
+#define	DA_CMN_DEVID		0x00000002
+#define	DA_CMN_FSID		0x00000004
+#define	DA_CMN_OBJTYPE		0x00000008
+#define	DA_CMN_OBJTAG		0x00000010
+#define	DA_CMN_OBJID		0x00000020
+#define	DA_CMN_CRTIME		0x00000200
+#define	DA_CMN_MODTIME		0x00000400
+#define	DA_CMN_CHGTIME		0x00000800
+#define	DA_CMN_ACCTIME		0x00001000
+#define	DA_CMN_OWNERID		0x00008000
+#define	DA_CMN_GRPID		0x00010000
+#define	DA_CMN_ACCESSMASK	0x00020000
+#define	DA_CMN_FLAGS		0x00040000
+#define	DA_CMN_FILEID		0x02000000
+#define	DA_CMN_SUPPORTED	(DA_CMN_NAME | DA_CMN_DEVID | DA_CMN_FSID | DA_CMN_OBJTYPE | DA_CMN_OBJTAG | DA_CMN_OBJID | \
+	DA_CMN_CRTIME | DA_CMN_MODTIME | DA_CMN_CHGTIME | DA_CMN_ACCTIME | DA_CMN_OWNERID | DA_CMN_GRPID | \
+	DA_CMN_ACCESSMASK | DA_CMN_FLAGS | DA_CMN_FILEID)
+#define	DA_FILE_LINKCOUNT	0x00000001
+#define	DA_FILE_TOTALSIZE	0x00000002
+#define	DA_FILE_ALLOCSIZE	0x00000004
+#define	DA_FILE_IOBLOCKSIZE	0x00000008
+#define	DA_FILE_DATALENGTH	0x00000200
+#define	DA_FILE_DATAALLOCSIZE	0x00000400
+#define	DA_FILE_SUPPORTED	(DA_FILE_LINKCOUNT | DA_FILE_TOTALSIZE | DA_FILE_ALLOCSIZE | DA_FILE_IOBLOCKSIZE | \
+	DA_FILE_DATALENGTH | DA_FILE_DATAALLOCSIZE)
+
+static int
+darwin_getattrlist(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_attrlist al;
+	struct stat sb;
+	char path[MAXPATHLEN], *out, *p;
+	const char *name;
+	size_t bufsize = (size_t)uap->a[3], len, namelen, copy;
+	uint32_t cmn, file, objtype;
+	int error;
+
+	error = copyin((void *)uap->a[1], &al, sizeof(al));
+	if (error != 0)
+		return (error);
+	if (al.bitmapcount != 5)
+		return (EINVAL);
+	cmn = al.commonattr;
+	file = al.fileattr;
+	if ((cmn & ~DA_CMN_SUPPORTED) || al.volattr || al.dirattr || al.forkattr || (file & ~DA_FILE_SUPPORTED))
+		return (EINVAL);
+	error = copyinstr((void *)uap->a[0], path, sizeof(path), NULL);
+	if (error != 0)
+		return (error);
+	error = kern_statat(td, ((uint32_t)uap->a[4] & 1) ? AT_SYMLINK_NOFOLLOW : 0, AT_FDCWD, path, UIO_SYSSPACE, &sb);
+	if (error != 0)
+		return (error);
+	if (S_ISDIR(sb.st_mode) && file != 0)
+		return (EINVAL);			/* file attributes of a directory */
+	name = strrchr(path, '/');
+	name = (name != NULL && name[1] != '\0') ? name + 1 : path;
+	namelen = strlen(name) + 1;
+	out = malloc(4 + 256 + roundup2(namelen, 4) + 8, M_DARWIN, M_WAITOK | M_ZERO);
+	p = out + 4;				/* the length comes first */
+#define	PUT32(v)	do { uint32_t t_ = (uint32_t)(v); memcpy(p, &t_, 4); p += 4; } while (0)
+#define	PUT64(v)	do { uint64_t t_ = (uint64_t)(v); memcpy(p, &t_, 8); p += 8; } while (0)
+#define	PUTTS(ts)	do { PUT64((ts).tv_sec); PUT64((ts).tv_nsec); } while (0)
+	switch (sb.st_mode & S_IFMT) {
+	case S_IFREG: objtype = 1; break;
+	case S_IFDIR: objtype = 2; break;
+	case S_IFBLK: objtype = 3; break;
+	case S_IFCHR: objtype = 4; break;
+	case S_IFLNK: objtype = 5; break;
+	case S_IFSOCK: objtype = 6; break;
+	default: objtype = 7; break;		/* FIFO */
+	}
+	{
+		char *nameref = NULL;
+
+		if (cmn & DA_CMN_NAME) { nameref = p; p += 8; }		/* attrreference: offset (from itself), length */
+		if (cmn & DA_CMN_DEVID)		PUT32(darwin_from_dev(sb.st_dev));
+		if (cmn & DA_CMN_FSID)		{ PUT32(darwin_from_dev(sb.st_dev)); PUT32(0); }
+		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
+		if (cmn & DA_CMN_OBJTAG)	PUT32(0);
+		if (cmn & DA_CMN_OBJID)		{ PUT32(sb.st_ino); PUT32(sb.st_gen); }
+		if (cmn & DA_CMN_CRTIME)	PUTTS(sb.st_birthtim);
+		if (cmn & DA_CMN_MODTIME)	PUTTS(sb.st_mtim);
+		if (cmn & DA_CMN_CHGTIME)	PUTTS(sb.st_ctim);
+		if (cmn & DA_CMN_ACCTIME)	PUTTS(sb.st_atim);
+		if (cmn & DA_CMN_OWNERID)	PUT32(sb.st_uid);
+		if (cmn & DA_CMN_GRPID)		PUT32(sb.st_gid);
+		if (cmn & DA_CMN_ACCESSMASK)	PUT32(sb.st_mode);
+		if (cmn & DA_CMN_FLAGS)		PUT32(sb.st_flags);
+		if (cmn & DA_CMN_FILEID)	PUT64(sb.st_ino);
+		if (file & DA_FILE_LINKCOUNT)	PUT32(sb.st_nlink);
+		if (file & DA_FILE_TOTALSIZE)	PUT64(sb.st_size);
+		if (file & DA_FILE_ALLOCSIZE)	PUT64(sb.st_blocks * 512);
+		if (file & DA_FILE_IOBLOCKSIZE)	PUT32(sb.st_blksize);
+		if (file & DA_FILE_DATALENGTH)	PUT64(sb.st_size);
+		if (file & DA_FILE_DATAALLOCSIZE) PUT64(sb.st_blocks * 512);
+		if (nameref != NULL) {		/* the name follows the fixed part, padded to 4 */
+			int32_t off = (int32_t)(p - nameref);
+			uint32_t l = (uint32_t)namelen;
+
+			memcpy(nameref, &off, 4);
+			memcpy(nameref + 4, &l, 4);
+			memcpy(p, name, namelen);
+			p += roundup2(namelen, 4);
+		}
+	}
+	len = p - out;
+	{
+		uint32_t total = (uint32_t)len;
+
+		memcpy(out, &total, 4);
+	}
+	copy = len < bufsize ? len : bufsize;
+	error = copyout(out, (void *)uap->a[2], copy);
+	free(out, M_DARWIN);
+	return (error);
+}
+
 /* ---- the entries ---- */
 
 static const struct {
@@ -450,6 +576,7 @@ static const struct {
 	const char	*name;
 } darwin_event[] = {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
+	E(220, 5, darwin_getattrlist,	AUE_GETATTRLIST,	"getattrlist"),
 	E(14,  3, darwin_mknod,		AUE_MKNOD,		"mknod"),
 	E(347, 3, darwin_getfsstat64,	AUE_GETFSSTAT,		"getfsstat64"),
 	E(362, 0, sys_kqueue,		AUE_KQUEUE,		"kqueue"),

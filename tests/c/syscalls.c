@@ -72,7 +72,7 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
 	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
 };
 
@@ -256,6 +256,19 @@ int cmain(void)
 	  { struct ditimer it = { { 0, 0, 0 }, { 100, 0, 0 } }, cur; r = S(SYS_setitimer, 0, &it, 0, 0, 0, 0); check("setitimer", r == 0, r);
 	    r = S(SYS_getitimer, 0, &cur, 0, 0, 0, 0); check("  getitimer", r == 0 && cur.value.sec >= 99 && cur.value.sec <= 100, cur.value.sec);
 	    it.value.sec = 0; S(SYS_setitimer, 0, &it, 0, 0, 0, 0); } }
+
+	/* getattrlist: name, type, times, mode, file id, data length */
+	{ struct { unsigned short n, res; unsigned cmn, vol, dir, file, fork; } al = { 5, 0, 0x1 | 0x8 | 0x400 | 0x20000 | 0x02000000, 0, 0, 0x200, 0 };
+	  static char ab[512]; int fd3 = (int)S(SYS_open, "/tmp/dsc/a", O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0, 0);
+	  S(SYS_write, fd3, "hello", 5, 0, 0, 0); S(SYS_close, fd3, 0, 0, 0, 0, 0);
+	  r = S(SYS_getattrlist, "/tmp/dsc/a", &al, ab, sizeof(ab), 0, 0);
+	  if (r == 0) { unsigned total = *(unsigned *)ab; int off = *(int *)(ab + 4); unsigned nl = *(unsigned *)(ab + 8); unsigned type = *(unsigned *)(ab + 12);
+		  const char *nm = ab + 4 + off; unsigned mode = *(unsigned *)(ab + 12 + 4 + 16); u64 fid = *(u64 *)(ab + 12 + 4 + 16 + 4); u64 dl = *(u64 *)(ab + 12 + 4 + 16 + 4 + 8);
+		  check("getattrlist (name, objtype, modtime, mode, fileid, datalength)", seq(nm, "a") && nl == 2 && type == 1 && (mode & 0777) == 0640 && fid != 0 && dl == 5 && total == 56, (i64)dl); }
+	  else check("getattrlist", 0, r);
+	  al.cmn = 0x80000000u; r = S(SYS_getattrlist, "/tmp/dsc/a", &al, ab, sizeof(ab), 0, 0);
+	  check("  an attribute that is not supported is EINVAL", r == -22, r);
+	  al.cmn = 1; r = S(SYS_getattrlist, "/tmp/dsc/none", &al, ab, sizeof(ab), 0, 0); check("  a missing file is ENOENT", r == -2, r); }
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
