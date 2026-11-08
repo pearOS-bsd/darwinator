@@ -10,11 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the module and run the Mach-O tests on FreeBSD ${{ matrix.arch }}
-        uses: cross-platform-actions/action@v0.25.0
+        uses: cross-platform-actions/action@v1.7.0
         with:
           operating_system: freebsd
           architecture: ${{ matrix.arch }}
-          version: '14.2'
+          version: '14.5'
           memory: 4G
           shell: sh
           run: |
