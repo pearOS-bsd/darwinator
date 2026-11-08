@@ -49,6 +49,10 @@ Development loop (the pearOS image is the development machine: `ssh` into it wit
 
 **Known problem:** without `MALLOC_CONF=junk:true` about every other start fails in `-[kekaController awakeFromNib]` with a message to an object whose class pointer is garbage (the `tasksWindow` outlet): something is read from memory that is not initialized or was freed. With `junk:true` (the allocator fills new and freed memory) it did not fail in the runs made. The cause is not found yet.
 
+Opening an archive (`MACHRUN_OPENFILE=/path/archive.zip` calls the delegate as a double click does): Keka goes through `openFiles:` -> `performAction:` -> `callExtraction:` -> `newTask:type:`, builds the `KTask` and the task view and puts the task on its queue (`setOnQueueStatus`). Things that were needed on the way: Mach-O programs that Keka starts with `NSTask` (`keka7zz`, `kekaxz` ...) run through `machrun` when the kernel's `imgact_binmisc` is told so (`binmiscctl add macho64 --interpreter /var/tmp/machrun --magic "\xcf\xfa\xed\xfe" --mask "\xff\xff\xff\xff" --size 4`, and the same for the fat magic), so that they run directly from a shell as well; `tools/wrapapp.sh` links the helper programs next to the launcher (`pathForAuxiliaryExecutable:`); `dyld/compat.m` (`libmachcompat.so`, written in Objective-C because it needs `@try`) catches the "Objective function is unbounded" of GNUstep's Cassowary solver and drains GCD's main queue from a run loop timer.
+
+**Where it stops:** the task is queued but the tasks window does not appear and nothing is extracted. Not yet known whether the queue is not started (it is driven by a timer or by a GCD block of the program), whether `NSTask launch` of the helper fails, or whether the window is not ordered front.
+
 Still missing: the cause of that start-up failure, exceptions in Mach-O code (the unwind tables are `__unwind_info`), the 30 symbols still unresolved (Security, some CoreFoundation, dispatch details), real behaviour of Sparkle/QuartzCore classes (null objects now), the tasks window (needs an operation: opening an archive).
 
 ## The files, from the simplest
