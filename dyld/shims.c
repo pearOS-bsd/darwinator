@@ -452,6 +452,7 @@ static long dw_kern_failure(void) { return (5); }		/* KERN_FAILURE */
 static long dw_minus_one(void) { return (-1); }
 static int dw_pthread_threadid_np(void *thr, unsigned long long *id) { if (id) *id = (unsigned long long)(uintptr_t)pthread_self(); return (0); }
 static int dw_qos_class_self(void) { return (0x15); }	/* QOS_CLASS_DEFAULT */
+extern void *machrun_tlv_thunk_addr(void), *machrun_chkstk_addr(void);
 /* System Integrity Protection: nothing protected, nothing disabled (the configuration is empty) */
 static int dw_csr_get_active_config(unsigned *config) { if (config) *config = 0; return (0); }
 static int dw_csr_check(unsigned mask) { return (0); }
@@ -539,6 +540,8 @@ shim_lookup(void *lib, const char *name)
 	for (i = 0; i < sizeof(overrides) / sizeof(overrides[0]); i++)
 		if (strcmp(overrides[i].name, name) == 0)
 			return (overrides[i].addr);
+	if (strcmp(name, "__tlv_bootstrap") == 0) return (machrun_tlv_thunk_addr());
+	if (strcmp(name, "____chkstk_darwin") == 0) return (machrun_chkstk_addr());
 	if (strcmp(name, "__DefaultRuneLocale") == 0)
 		return (runelocale());
 	{ void *objc_cf_key_cell(const char *); void *kc = objc_cf_key_cell(name); if (kc != NULL) return (kc); }
