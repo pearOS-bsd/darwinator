@@ -22,6 +22,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/endian.h>
+#include <sys/sysctl.h>
 
 #include "macho.h"
 #include "machrun.h"
@@ -81,6 +82,7 @@ struct image {
 };
 
 int machrun_verbose;
+static const char *launcher_real;			/* set in launcher mode: the Mach-O file to load */
 static unsigned unresolved_count;
 
 /* ---- stubs for symbols that nothing implements: the call says which one and stops ---- */
@@ -377,6 +379,22 @@ protect_image(struct image *im)
 	if (stubarea) mprotect(stubarea, stubsize, PROT_READ | PROT_EXEC);
 }
 
+static struct image *g_im;
+static void *
+find_sect(const char *name, size_t *size)
+{
+	int i; uint32_t j;
+	for (i = 0; i < g_im->nseg; i++)
+		for (j = 0; j < g_im->seg[i].nsects; j++) {
+			const struct section_64 *sc = &g_im->seg[i].sects[j];
+			if (strncmp(sc->sectname, name, 16) == 0) { *size = sc->size; return ((void *)(sc->addr + g_im->slide)); }
+		}
+	*size = 0;
+	return (NULL);
+}
+int objc_load_image(void *(*find)(const char *, size_t *), intptr_t slide);
+void objc_call_loads(void);
+
 typedef void (*initfn)(int, char **, char **, char **);
 
 static void
@@ -406,17 +424,30 @@ main(int argc, char **argv)
 	extern char **environ;
 
 	if (getenv("MACHRUN_DEBUG")) machrun_verbose = 1;
-	while (ch < argc && argv[ch][0] == '-') {
+	{	/* launcher mode: started under another name (e.g. as Keka.app/Contents/MacOS/Keka), it runs the Mach-O file next to it,
+		 * NAME.macho, so that the process, and with it the main bundle of the program, is the application's own */
+		const char *base = strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0];
+		if (strcmp(base, "machrun") != 0) {
+			static char real[PATH_MAX + 8]; char self[PATH_MAX]; size_t n = sizeof(self);
+			int mib[4] = { 1 /* CTL_KERN */, 14 /* KERN_PROC */, 12 /* KERN_PROC_PATHNAME */, -1 };
+			if (sysctl(mib, 4, self, &n, NULL, 0) != 0) strlcpy(self, argv[0], sizeof(self));
+			snprintf(real, sizeof(real), "%s.macho", self);
+			if (access(real, R_OK) != 0) errx(66, "launcher mode: %s not found", real);
+			launcher_real = real;
+			ch = 0;					/* argv[0] is the program's own name, the arguments follow */
+		}
+	}
+	while (launcher_real == NULL && ch < argc && argv[ch][0] == '-') {
 		if (strcmp(argv[ch], "-v") == 0) machrun_verbose = 1;
 		else if (strcmp(argv[ch], "--") == 0) { ch++; break; }
 		else errx(64, "usage: machrun [-v] PROGRAM [arguments]");
 		ch++;
 	}
-	if (ch >= argc) errx(64, "usage: machrun [-v] PROGRAM [arguments]");
+	if (launcher_real == NULL && ch >= argc) errx(64, "usage: machrun [-v] PROGRAM [arguments]");
 	memset(&im, 0, sizeof(im));
-	parse(&im, argv[ch]);
-	if (im.chained) errx(1, "%s: chained fixups (LC_DYLD_CHAINED_FIXUPS) are not supported yet", argv[ch]);
-	if (!im.have_main) errx(1, "%s: no LC_MAIN (only programs that start at main() are supported)", argv[ch]);
+	parse(&im, launcher_real ? launcher_real : argv[ch]);
+	if (im.chained) errx(1, "%s: chained fixups (LC_DYLD_CHAINED_FIXUPS) are not supported yet", launcher_real ? launcher_real : argv[ch]);
+	if (!im.have_main) errx(1, "%s: no LC_MAIN (only programs that start at main() are supported)", launcher_real ? launcher_real : argv[ch]);
 	map_image(&im);
 	open_libs(&im);
 	if (im.dyld_info) {
@@ -426,11 +457,18 @@ main(int argc, char **argv)
 		do_bind(&im, di->lazy_bind_off, di->lazy_bind_size, true);
 	}
 	VLOG("%u unresolved symbols\n", unresolved_count);
+	g_im = &im;
+	if (objc_load_image(find_sect, im.slide) < 0) errx(1, "Objective-C setup failed");
 	protect_image(&im);
 
-	if (realpath(argv[ch], path) == NULL) strlcpy(path, argv[ch], sizeof(path));
+	if (realpath(launcher_real ? launcher_real : argv[ch], path) == NULL) strlcpy(path, argv[ch], sizeof(path));
 	{ char *ap = malloc(strlen(path) + 32); snprintf(ap, strlen(path) + 32, "executable_path=%s", path); apple[0] = ap; apple[1] = NULL; }
 	shim_set_process(argc - ch, argv + ch, environ, path);
+	{	/* GNUstep wants to see the arguments and the environment of the process (its own main() macro does this) */
+		void (*gsargs)(int, char **, char **) = dlsym(RTLD_DEFAULT, "GSInitializeProcess");
+		if (gsargs) { VLOG("GNUstep: GSInitializeProcess\n"); gsargs(argc - ch, argv + ch, environ); }
+	}
+	objc_call_loads();
 	run_initializers(&im, argc - ch, argv + ch, environ, apple);
 	VLOG("main at %p\n", (void *)(im.text_vm + im.slide + im.entryoff));
 	ret = ((int (*)(int, char **, char **, char **))(im.text_vm + im.slide + im.entryoff))(argc - ch, argv + ch, environ, apple);
