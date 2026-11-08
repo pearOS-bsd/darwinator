@@ -10,6 +10,7 @@
  * dlsym, so machrun runs without libobjc2 when the program has no Objective-C.
  */
 #include <dlfcn.h>
+#include <pthread.h>
 #include <err.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -456,12 +457,49 @@ machrun_show_windows(id app, SEL _cmd, id arg)
 		if (!getenv("MACHRUN_ACTION") || msg0(w, "isVisible")) msg1(w, "makeKeyAndOrderFront:", NULL);
 	}
 }
+/* MACHRUN_KVC=key.path (with MACHRUN_KVC_DELAY=seconds, 20 by default): prints [NSApp.delegate valueForKeyPath:] to stderr, for the tests of programs (what the application holds after it did something) */
+static void
+machrun_kvc(id app, SEL _cmd, id arg)
+{
+	id del = msg0(app, "delegate"), v, d; const char *path = getenv("MACHRUN_KVC"), *u;
+	SEL vk = rt_registerName("valueForKeyPath:"), ds = rt_registerName("description"), us = rt_registerName("UTF8String");
+	if (!del || !path) return;
+	v = ((id (*)(id, SEL, id))machrun_objc_lookup(del, vk))(del, vk, nsstr(path));
+	d = v ? ((id (*)(id, SEL))machrun_objc_lookup(v, ds))(v, ds) : NULL;
+	u = d ? ((const char *(*)(id, SEL))machrun_objc_lookup(d, us))(d, us) : "(nil)";
+	fprintf(stderr, "KVC %s = %s\nKVC end\n", path, u);
+}
+static volatile int trace_on = 1;	/* MACHRUN_TRACE_AFTER_INVOKE=1: the trace starts when MACHRUN_INVOKE sends its action */
+/* MACHRUN_INVOKE="key.path action:" (with MACHRUN_INVOKE_DELAY, 30 by default): sends the action to that object of the application with a nil sender, as a click on a button would */
+static void
+machrun_invoke(id app, SEL _cmd, id arg)
+{
+	char *spec = getenv("MACHRUN_INVOKE") ? strdup(getenv("MACHRUN_INVOKE")) : NULL, *sp; id del = msg0(app, "delegate"), target; SEL vk = rt_registerName("valueForKeyPath:"), act;
+	if (!spec || !del || (sp = strchr(spec, ' ')) == NULL) return;
+	*sp++ = 0;
+	target = ((id (*)(id, SEL, id))machrun_objc_lookup(del, vk))(del, vk, nsstr(spec));
+	act = rt_registerName(sp);
+	fprintf(stderr, "INVOKE %s %s -> target %p\n", spec, sp, (void *)target);
+	trace_on = 1;
+	if (target) ((void (*)(id, SEL, id))machrun_objc_lookup(target, act))(target, act, NULL);
+	fprintf(stderr, "INVOKE done\n");
+}
 static void
 safe_finishLaunching(id self, SEL _cmd)
 {
 	VLOG("objc: finishLaunching\n");
 	orig_finishLaunching(self, _cmd);
 	VLOG("objc: finishLaunching done\n");
+	if (getenv("MACHRUN_INVOKE")) {
+		SEL s = rt_registerName("machrunInvoke:"), p = rt_registerName("performSelector:withObject:afterDelay:");
+		rt_addMethod(rt_object_getClass(self), s, (IMP)machrun_invoke, "v24@0:8@16");
+		((void (*)(id, SEL, SEL, id, double))machrun_objc_lookup(self, p))(self, p, s, NULL, getenv("MACHRUN_INVOKE_DELAY") ? atof(getenv("MACHRUN_INVOKE_DELAY")) : 30.0);
+	}
+	if (getenv("MACHRUN_KVC")) {
+		SEL s = rt_registerName("machrunKVC:"), p = rt_registerName("performSelector:withObject:afterDelay:");
+		rt_addMethod(rt_object_getClass(self), s, (IMP)machrun_kvc, "v24@0:8@16");
+		((void (*)(id, SEL, SEL, id, double))machrun_objc_lookup(self, p))(self, p, s, NULL, getenv("MACHRUN_KVC_DELAY") ? atof(getenv("MACHRUN_KVC_DELAY")) : 20.0);
+	}
 	if (getenv("MACHRUN_SHOWWINDOWS")) {
 		SEL s = rt_registerName("machrunShowWindows:"), p = rt_registerName("performSelector:withObject:afterDelay:");
 		Class k = rt_object_getClass(self);
@@ -646,7 +684,7 @@ program_patches(void)
 	  void *m = k ? g(k, rt_registerName("setDestination:")) : NULL; if (m) orig_setdest = sm(m, (IMP)dbg_setdest); }
 	static const struct { const char *cls, *sel; } p[] = {
 		{ "sandboxHelpers", "hasAccess:" }, { "sandboxHelpers", "hasAccess:askIfNeeded:" }, { "sandboxHelpers", "hasFullAccess" },
-		{ "sandboxHelpers", "hasHomeAccess" }, { "sandboxHelpers", "hasVolumesAccess" }, { "sandboxHelpers", "hasReadAccess:" }, { "Globals", "isPathWritable:" }, { "Globals", "isPathWritable:canCreateFile:" },
+		{ "sandboxHelpers", "hasHomeAccess" }, { "sandboxHelpers", "hasVolumesAccess" }, { "sandboxHelpers", "hasReadAccess:" }, { "Globals", "isPathWritable:" }, { "Globals", "isPathWritable:canCreateFile:" }, { "NSFileManager", "hasFullDiskAccess" },
 	};
 	/* views that draw with Core Animation layers (the activity indicator of AppCleaner): their layer code has nothing to work on here, so the setters that only change layers do nothing */
 	static const struct { const char *cls, *sel; } nop[] = { { "DJActivityIndicator", "setColor:" } };
@@ -691,13 +729,15 @@ static void *(*traced_lookup)(id, SEL);
 static void *
 trace_lookup(id obj, SEL sel)
 {
-	static long count;
-	if (obj != NULL && count < 20000) {
+	static long count; static pthread_t mainthr; static int init, bg;
+	if (!init) { mainthr = pthread_self(); init = 1; bg = getenv("MACHRUN_TRACEBG") != NULL; }
+	if (obj != NULL && trace_on && count < 20000 && (!bg || !pthread_equal(pthread_self(), mainthr))) {
 		const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
 		Class k = rt_object_getClass(obj);
 		const char *n = cn && k ? cn(k) : "?";
-		count++;
 		const char *sn = rt_selName(sel);
+		{ static const char *g; static int gi; if (!gi) { g = getenv("MACHRUN_TRACEGREP"); gi = 1; } if (g && !strstr(sn, g) && !strstr(n ? n : "", g)) return (traced_lookup(obj, sel)); }
+		count++;
 		if (strncmp(sn, "performSelector:", 16) == 0 || strncmp(sn, "performSelectorOnMainThread", 27) == 0) fprintf(stderr, "msg %s%s %s  [%s]\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn, machrun_arg2 ? rt_selName((SEL)machrun_arg2) : "?");
 		else fprintf(stderr, "msg %s%s %s\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn);
 	}
@@ -728,6 +768,7 @@ objc_load_image(find_fn find, intptr_t slide)
 	}
 	add_compat_methods();
 	if (getenv("MACHRUN_LENIENT")) setup_lenient();
+	if (getenv("MACHRUN_TRACE_AFTER_INVOKE")) trace_on = 0;
 	if (getenv("MACHRUN_TRACEMSG")) { traced_lookup = machrun_objc_lookup; machrun_objc_lookup = trace_lookup; }
 
 	g_classlist = cl; g_nclasses = ncl;
@@ -906,7 +947,7 @@ objc_shim_lookup(const char *name)
 	    || strcmp(name, "_OBJC_EHTYPE_$_NSException") == 0 || strcmp(name, "__objc_ehtype_vtable") == 0) return (zero16);
 	if (strncmp(name, "_OBJC_CLASS_$_", 14) == 0 && rt_init()) {
 		Class k = rt_getClass(name + 14);
-		if (k == NULL && strncmp(name + 14, "NSConstant", 10) == 0) {		/* the constant literals of the compiler: classes of libmachcompat.so */
+		if (k == NULL && (strncmp(name + 14, "NSConstant", 10) == 0 || strcmp(name + 14, "UTType") == 0)) {		/* the constant literals of the compiler: classes of libmachcompat.so */
 			static int tried;
 			if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); }
 			k = rt_getClass(name + 14);
@@ -988,6 +1029,25 @@ void machrun_objc_msgSendSuper_stret(void) {}
 
 /* A constant that no library has (NSFileBusy, kSecClass, kUTTag...): a variable that holds an NSString with the name of the constant,
  * which is what such constants are on the Mac.  Only for names that look like constants: _NS<Upper>... and _k<Upper>... */
+/* kCFBundleExecutableKey and the other keys of the Info.plist of CoreFoundation: variables that hold the NSString "CFBundleExecutable" (GNUstep corebase has them as CFString structures that its
+ * own runtime has to initialize, which are no objects for the GNUstep Foundation) */
+void *
+objc_cf_key_cell(const char *name)
+{
+	static struct { char *name; void **cell; } seen[32]; static int nseen; int i; Class cls; SEL sel; id str; void **cell; char buf[96]; size_t n = strlen(name);
+	if (strncmp(name, "_kCFBundle", 10) != 0 || n < 14 || strcmp(name + n - 3, "Key") != 0 || n > 90) return (NULL);
+	if (!rt_init() || (cls = rt_getClass("NSString")) == NULL) return (NULL);
+	for (i = 0; i < nseen; i++) if (strcmp(seen[i].name, name) == 0) return (seen[i].cell);
+	if (nseen == 32) return (NULL);
+	memcpy(buf, name + 2, n - 5); buf[n - 5] = 0;				/* "_kCFBundleExecutableKey" -> "CFBundleExecutable" */
+	sel = rt_registerName("stringWithUTF8String:");
+	str = ((id (*)(id, SEL, const char *))machrun_objc_lookup(cls, sel))(cls, sel, buf);
+	{ SEL r = rt_registerName("retain"); ((id (*)(id, SEL))machrun_objc_lookup(str, r))(str, r); }
+	cell = malloc(sizeof(void *)); *cell = str;
+	seen[nseen].name = strdup(name); seen[nseen++].cell = cell;
+	return (cell);
+}
+
 void *
 objc_constant_fallback(const char *name)
 {
@@ -1004,8 +1064,17 @@ objc_constant_fallback(const char *name)
 		}
 		return (objs[k]);
 	}
-	if (strcmp(name, "__os_log_default") == 0) { static char blk[128]; return (blk); }
-	if (strncmp(name, "_UTType", 7) == 0 && name[7] >= 'A' && name[7] <= 'Z') { static void *nilcell[1]; return (nilcell); }	/* UTType constants: nil objects (the type system of macOS is not here) */
+	if (strcmp(name, "__os_log_default") == 0) { static id lo; if (lo == NULL && rt_init()) { id (*ci)(Class, size_t) = dlsym(RTLD_DEFAULT, "class_createInstance"); if (ci) lo = ci(rt_getClass("NSObject"), 0); } return (lo ? (void *)lo : (void *)zero16); }
+	if (strncmp(name, "_UTType", 7) == 0 && name[7] >= 'A' && name[7] <= 'Z') {	/* UTType constants: a variable that holds the UTType of libmachcompat.so */
+		static void *cells[64]; static char *names[64]; static int n; int q; id (*mk)(const char *);
+		for (q = 0; q < n; q++) if (strcmp(names[q], name) == 0) return (&cells[q]);
+		{ static int tried; if (!tried) { const char *cp = getenv("MACHRUN_COMPAT") ? getenv("MACHRUN_COMPAT") : "libmachcompat.so"; tried = 1; dlopen(cp, RTLD_NOW | RTLD_GLOBAL); } }
+		mk = dlsym(RTLD_DEFAULT, "MachoUTConstant");
+		if (n == 64) return (NULL);
+		cells[n] = mk ? (void *)mk(name + 7) : NULL; names[n] = strdup(name);
+		if (cells[n]) { SEL r = rt_registerName("retain"); ((id (*)(id, SEL))machrun_objc_lookup((id)cells[n], r))((id)cells[n], r); }
+		return (&cells[n++]);
+	}
 	if (!((name[1] == 'N' && name[2] == 'S') || (name[1] == 'k' && name[2] >= 'A' && name[2] <= 'Z'))) return (NULL);
 	if (name[1] == 'N' && !(name[3] >= 'A' && name[3] <= 'Z')) return (NULL);
 	if (!rt_init() || (cls = rt_getClass("NSString")) == NULL) return (NULL);

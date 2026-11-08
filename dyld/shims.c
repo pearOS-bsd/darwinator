@@ -361,9 +361,115 @@ void cf_CFRelease(void *);
 
 /* ---- the table of what is not simply the same name ---- */
 /* setattrlist(): macOS file attributes (creation date, Finder info, flags); a file system of this system has none of them, so the call succeeds and does nothing */
+/* dispatch_async of a block of the program: the block is copied here (it lives on the stack of the caller) and run by dispatch_async_f, with a trace when MACHRUN_DEBUG is set */
+static void
+dw_dispatch_run(void *ctx)
+{
+	void (*rel)(void *) = dlsym(RTLD_DEFAULT, "_Block_release");
+	VLOG("dispatch: block %p runs\n", ctx);
+	((void (*)(void *))((void **)ctx)[2])(ctx);
+	VLOG("dispatch: block %p done\n", ctx);
+	if (rel) rel(ctx);
+}
+static void
+dw_dispatch_async(void *q, void *blk)
+{
+	void *(*cp)(void *) = dlsym(RTLD_DEFAULT, "_Block_copy");
+	void (*af)(void *, void *, void (*)(void *)) = dlsym(RTLD_DEFAULT, "dispatch_async_f");
+	void *c = cp ? cp(blk) : blk;
+	VLOG("dispatch_async(queue %p, block %p -> %p)\n", q, blk, c);
+	af(q, c, dw_dispatch_run);
+}
+static void
+dw_dispatch_barrier_async(void *q, void *blk)
+{
+	void *(*cp)(void *) = dlsym(RTLD_DEFAULT, "_Block_copy");
+	void (*af)(void *, void *, void (*)(void *)) = dlsym(RTLD_DEFAULT, "dispatch_barrier_async_f");
+	af(q, cp ? cp(blk) : blk, dw_dispatch_run);
+}
+static void
+dw_dispatch_group_async(void *g, void *q, void *blk)
+{
+	void *(*cp)(void *) = dlsym(RTLD_DEFAULT, "_Block_copy");
+	void (*af)(void *, void *, void *, void (*)(void *)) = dlsym(RTLD_DEFAULT, "dispatch_group_async_f");
+	VLOG("dispatch_group_async(group %p, queue %p)\n", g, q);
+	af(g, q, cp ? cp(blk) : blk, dw_dispatch_run);
+}
+/* dispatch_group_wait blocks in _dispatch_ulock_wait, which this libdispatch does not have (and its wait, once given one, is not woken): the wait is a poll of the group, one millisecond apart */
+static long
+dw_dispatch_group_wait(void *g, unsigned long long t)
+{
+	long (*w)(void *, unsigned long long) = dlsym(RTLD_DEFAULT, "dispatch_group_wait");
+	unsigned long long (*dt)(unsigned long long, long long) = dlsym(RTLD_DEFAULT, "dispatch_time");
+	long r;
+	VLOG("dispatch_group_wait(group %p, timeout %llx)\n", g, t);
+	for (;;) {
+		r = w(g, 0);					/* DISPATCH_TIME_NOW: does not wait */
+		if (r == 0) break;
+		if (t == 0) break;
+		if (t != ~0ULL && dt && dt(0, 0) >= t) break;
+		usleep(1000);
+	}
+	VLOG("dispatch_group_wait(group %p) -> %ld\n", g, r);
+	return (r);
+}
+static void
+dw_dispatch_group_notify(void *g, void *q, void *blk)
+{
+	void *(*cp)(void *) = dlsym(RTLD_DEFAULT, "_Block_copy");
+	void (*af)(void *, void *, void *, void (*)(void *)) = dlsym(RTLD_DEFAULT, "dispatch_group_notify_f");
+	af(g, q, cp ? cp(blk) : blk, dw_dispatch_run);
+}
+static void
+dw_dispatch_after(unsigned long long when, void *q, void *blk)
+{
+	void *(*cp)(void *) = dlsym(RTLD_DEFAULT, "_Block_copy");
+	void (*af)(unsigned long long, void *, void *, void (*)(void *)) = dlsym(RTLD_DEFAULT, "dispatch_after_f");
+	af(when, q, cp ? cp(blk) : blk, dw_dispatch_run);
+}
+static void
+dw_dispatch_source_set_event_handler(void *src, void *blk)
+{
+	void *(*cp)(void *) = dlsym(RTLD_DEFAULT, "_Block_copy");
+	void (*real)(void *, void *) = dlsym(RTLD_NEXT, "dispatch_source_set_event_handler");
+	if (!real) real = dlsym(RTLD_DEFAULT, "dispatch_source_set_event_handler");
+	real(src, cp ? cp(blk) : blk);
+}
+static void
+dw_dispatch_sync(void *q, void *blk)
+{
+	void (*sf)(void *, void *, void (*)(void *)) = dlsym(RTLD_DEFAULT, "dispatch_sync_f");
+	VLOG("dispatch_sync(queue %p, block %p)\n", q, blk);
+	sf(q, blk, (void (*)(void *))((void **)blk)[2]);
+	VLOG("dispatch_sync(queue %p) returns\n", q);
+}
+/* Frameworks of macOS that a program asks and that have no meaning here (code signatures, IOKit registry, DiskArbitration, login items, authorization, the Apple System Log):
+ * calls that find nothing (NULL / 0) or fail with the error that "there is none" (a program that asks for a signature gets "unsigned") */
+static long dw_zero(void) { return (0); }
+static long dw_sec_unsigned(void) { return (-67062); }		/* errSecCSUnsigned */
+static long dw_auth_internal(void) { return (-60008); }	/* errAuthorizationInternal */
+static long dw_kern_failure(void) { return (5); }		/* KERN_FAILURE */
+static long dw_minus_one(void) { return (-1); }
+static int dw_pthread_threadid_np(void *thr, unsigned long long *id) { if (id) *id = (unsigned long long)(uintptr_t)pthread_self(); return (0); }
+static int dw_qos_class_self(void) { return (0x15); }	/* QOS_CLASS_DEFAULT */
+/* System Integrity Protection: nothing protected, nothing disabled (the configuration is empty) */
+static int dw_csr_get_active_config(unsigned *config) { if (config) *config = 0; return (0); }
+static int dw_csr_check(unsigned mask) { return (0); }
 /* os_log: logging of macOS (nothing listens) */
 static void dw_os_log_impl(void *a, void *b, int c, const char *d, void *e, unsigned f) { }
-static void *dw_os_log_create(const char *s, const char *c) { static char blk[128]; return (blk); }
+/* an os_log_t is an Objective-C object on a Mac (the program retains and releases it): a plain object */
+static void *
+dw_os_log_object(void)
+{
+	static void *o;
+	if (o == NULL) {
+		void *(*gc)(const char *) = dlsym(RTLD_DEFAULT, "objc_getClass"); void *(*ci)(void *, size_t) = dlsym(RTLD_DEFAULT, "class_createInstance");
+		void *k = gc ? gc("NSObject") : NULL;
+		if (k && ci) o = ci(k, 0);
+	}
+	return (o);
+}
+static void *dw_os_log_create(const char *s, const char *c) { return (dw_os_log_object()); }
 static unsigned char dw_os_log_type_enabled(void *l, int t) { return (0); }
 static int dw_setattrlist(const char *path, void *attrs, void *buf, size_t size, unsigned opts) { (void)path; (void)attrs; (void)buf; (void)size; (void)opts; return (0); }
 static const struct { const char *name; void *addr; } overrides[] = {
@@ -403,7 +509,18 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_fsetxattr", dw_fsetxattr }, { "_fgetxattr", dw_fgetxattr }, { "_flistxattr", dw_flistxattr }, { "_fremovexattr", dw_fremovexattr },
 	{ "_copyfile", dw_copyfile }, { "_mbr_uid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_gid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_uuid_to_id", dw_mbr_uuid_to_id },
 	{ "_iconv_open", dw_iconv_open }, { "_iconv", dw_iconv }, { "_iconv_close", dw_iconv_close },
-	{ "_setattrlist", dw_setattrlist }, { "__os_log_impl", dw_os_log_impl }, { "__os_log_debug_impl", dw_os_log_impl }, { "__os_log_error_impl", dw_os_log_impl },
+	{ "_setattrlist", dw_setattrlist }, { "_csr_get_active_config", dw_csr_get_active_config },
+	{ "_SecStaticCodeCreateWithPath", dw_sec_unsigned }, { "_SecCodeCopySigningInformation", dw_sec_unsigned }, { "_SecStaticCodeCheckValidity", dw_sec_unsigned },
+	{ "_AuthorizationCreate", dw_auth_internal }, { "_AuthorizationCopyRights", dw_auth_internal }, { "_AuthorizationFree", dw_zero },
+	{ "_IOServiceGetMatchingService", dw_zero }, { "_IOObjectRelease", dw_zero }, { "_IOObjectConformsTo", dw_zero }, { "_IORegistryEntryCreateCFProperties", dw_kern_failure },
+	{ "_IORegistryEntryGetParentEntry", dw_kern_failure },
+	{ "_DASessionCreate", dw_zero }, { "_DADiskCreateFromVolumePath", dw_zero }, { "_DADiskCopyDescription", dw_zero }, { "_DADiskUnmount", dw_zero },
+	{ "_LSSharedFileListCreate", dw_zero }, { "_LSSharedFileListCopySnapshot", dw_zero }, { "_LSSharedFileListItemRemove", dw_minus_one }, { "_LSSharedFileListItemResolve", dw_minus_one },
+	{ "_asl_open", dw_zero }, { "_asl_new", dw_zero }, { "_asl_set", dw_zero }, { "_asl_send", dw_zero }, { "_asl_free", dw_zero }, { "_asl_release", dw_zero }, { "_asl_search", dw_zero },
+	{ "_asl_next", dw_zero }, { "_asl_get", dw_zero }, { "_asl_set_query", dw_zero },
+	{ "_notify_register_dispatch", dw_minus_one }, { "_notify_cancel", dw_zero },
+	{ "_pthread_threadid_np", dw_pthread_threadid_np }, { "_qos_class_self", dw_qos_class_self }, { "_removexattr", dw_minus_one }, { "_csr_check", dw_csr_check }, { "_dispatch_async", dw_dispatch_async }, { "_dispatch_sync", dw_dispatch_sync }, { "_dispatch_barrier_async", dw_dispatch_barrier_async }, { "_dispatch_group_async", dw_dispatch_group_async },
+	{ "_dispatch_group_notify", dw_dispatch_group_notify }, { "_dispatch_group_wait", dw_dispatch_group_wait }, { "_dispatch_after", dw_dispatch_after }, { "_dispatch_source_set_event_handler", dw_dispatch_source_set_event_handler }, { "__os_log_impl", dw_os_log_impl }, { "__os_log_debug_impl", dw_os_log_impl }, { "__os_log_error_impl", dw_os_log_impl },
 	{ "_os_log_create", dw_os_log_create }, { "_os_log_type_enabled", dw_os_log_type_enabled },
 	{ "_CFStringCreateWithCString", cf_CFStringCreateWithCString }, { "_CFStringCreateWithCharacters", cf_CFStringCreateWithCharacters },
 	{ "_CFStringGetLength", cf_CFStringGetLength }, { "_CFStringGetCharacterAtIndex", cf_CFStringGetCharacterAtIndex },
@@ -424,6 +541,7 @@ shim_lookup(void *lib, const char *name)
 			return (overrides[i].addr);
 	if (strcmp(name, "__DefaultRuneLocale") == 0)
 		return (runelocale());
+	{ void *objc_cf_key_cell(const char *); void *kc = objc_cf_key_cell(name); if (kc != NULL) return (kc); }
 	if (strstr(name, "objc") != NULL || strstr(name, "OBJC") != NULL || strcmp(name, "___CFConstantStringClassReference") == 0) {
 		void *o = objc_shim_lookup(name);
 		if (o != NULL) return (o);

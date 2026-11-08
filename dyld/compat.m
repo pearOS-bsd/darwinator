@@ -4,6 +4,7 @@
  */
 #import <Foundation/Foundation.h>
 #include <objc/runtime.h>
+#include <sys/stat.h>
 
 /* The auto layout solver of GNUstep raises "Objective function is unbounded" for some constraint sets that Apple's engine solves; the solver and
  * the views keep what they had and the program goes on (the exception would otherwise end it in Keka's "Critical Error" dialog).  Every way into
@@ -101,6 +102,14 @@ w_fmt_getObjectValue(id self, SEL _cmd, id *obj, NSString *string, NSString **er
 	if (!tried) { tried = 1; drain = (void (*)(void *))dlsym(RTLD_DEFAULT, "_dispatch_main_queue_callback_4CF"); }
 	{ static int n; if (getenv("MACHRUN_DEBUG") && n++ < 3) fprintf(stderr, "machrun: GCD main queue pump %p\n", (void *)drain); }
 	if (drain) drain(NULL);
+	/* what the main queue did (a view that was added or a mode that changed) is shown: a window that needs display gets it now, not at the next event */
+	{ static Class ak; static id (*shared)(id, SEL); id app, wins;
+	  if (ak == Nil) ak = NSClassFromString(@"NSApplication");
+	  if (ak != Nil && (app = ((id (*)(id, SEL))class_getMethodImplementation(object_getClass(ak), @selector(sharedApplication)))(ak, @selector(sharedApplication))) != nil) {
+		wins = ((id (*)(id, SEL))class_getMethodImplementation(object_getClass(app), @selector(windows)))(app, @selector(windows));
+		[wins makeObjectsPerformSelector:@selector(displayIfNeeded)];
+	  }
+	  (void)shared; }
 }
 @end
 
@@ -460,6 +469,7 @@ w_imageNamed(id self, SEL _cmd, NSString *name)
 __attribute__((constructor)) static void
 images_init(void)
 {
+	if (getenv("MACHRUN_NOIMAGES")) return;
 	Class k = NSClassFromString(@"NSImage"); Method m;
 	if (k == Nil) return;
 	(void)[k class];
@@ -475,7 +485,383 @@ static void w_selTab(id self, SEL _cmd, NSInteger i) { if (i >= 0) ((void (*)(id
 __attribute__((constructor)) static void
 selection_init(void)
 {
+	if (getenv("MACHRUN_NOSEL")) return;
 	Class k; Method m;
 	if ((k = NSClassFromString(@"NSSegmentedControl")) != Nil) { (void)[k class]; if ((m = class_getInstanceMethod(k, @selector(setSelectedSegment:))) != NULL) o_selSeg = method_setImplementation(m, (IMP)w_selSeg); }
 	if ((k = NSClassFromString(@"NSTabView")) != Nil) { (void)[k class]; if ((m = class_getInstanceMethod(k, @selector(selectTabViewItemAtIndex:))) != NULL) o_selTab = method_setImplementation(m, (IMP)w_selTab); }
+}
+
+/* NSAnimationContext: GNUstep has no block based animations; the changes are made at once and the completion handler runs at once, as for an animation of zero duration (a program that
+ * shows its next view in the handler would wait for ever). */
+typedef struct { void *isa; int flags, reserved; void (*invoke)(void *, ...); void *desc; } MBlock;
+static id
+anim_current(id self, SEL _cmd)
+{
+	Class k = NSClassFromString(@"NSObject");
+	static id ctx; if (ctx == nil) ctx = [[k alloc] init];
+	return ctx;
+}
+static void
+anim_run(id self, SEL _cmd, void *changes, void *completion)
+{
+	if (changes) ((void (*)(void *, id))((MBlock *)changes)->invoke)(changes, anim_current(self, _cmd));
+	if (completion) ((void (*)(void *))((MBlock *)completion)->invoke)(completion);
+}
+static void
+anim_begin(id self, SEL _cmd) { }
+static void
+anim_setduration(id self, SEL _cmd, double d) { }
+static void
+anim_setbool(id self, SEL _cmd, BOOL b) { }
+static void
+anim_perform(id self, SEL _cmd, void *changes)
+{
+	if (changes) ((void (*)(void *, id))((MBlock *)changes)->invoke)(changes, anim_current(self, _cmd));
+}
+__attribute__((constructor)) static void
+animation_init(void)
+{
+	if (getenv("MACHRUN_NOANIM")) return;
+	Class k = NSClassFromString(@"NSAnimationContext"); Class m;
+	if (k == Nil) return;
+	(void)[k class]; m = object_getClass(k);
+	class_addMethod(m, @selector(runAnimationGroup:completionHandler:), (IMP)anim_run, "v32@0:8@?16@?24");
+	class_addMethod(m, @selector(runAnimationGroup:), (IMP)anim_perform, "v24@0:8@?16");
+	class_addMethod(m, @selector(beginGrouping), (IMP)anim_begin, "v16@0:8");
+	class_addMethod(m, @selector(endGrouping), (IMP)anim_begin, "v16@0:8");
+	class_addMethod(m, @selector(currentContext), (IMP)anim_current, "@16@0:8");
+	class_addMethod(k, @selector(setDuration:), (IMP)anim_setduration, "v24@0:8d16");
+	class_addMethod(k, @selector(setAllowsImplicitAnimation:), (IMP)anim_setbool, "v20@0:8c16");
+}
+
+/* ---- UTType (the type system of macOS 11, which a program of macOS 15 uses everywhere): identifiers and the conformance between them, for the types that programs ask about; a URL gets its
+ * type from what it is on the disk (NSURLContentTypeKey) ---- */
+static const struct { const char *id, *parents; const char *ext; } uttab[] = {
+	{ "public.item", "", "" }, { "public.data", "public.item", "" }, { "public.content", "public.item", "" }, { "public.directory", "public.item", "" },
+	{ "public.folder", "public.directory", "" }, { "public.volume", "public.folder", "" }, { "com.apple.package", "public.directory", "" }, { "com.apple.bundle", "public.directory", "" },
+	{ "com.apple.application", "public.executable", "" }, { "com.apple.application-bundle", "com.apple.application com.apple.bundle com.apple.package", "app" },
+	{ "com.apple.framework", "com.apple.bundle", "framework" }, { "public.executable", "public.data", "" }, { "public.unix-executable", "public.executable", "" },
+	{ "com.apple.resolvable", "public.item", "" }, { "public.symlink", "public.data com.apple.resolvable", "" }, { "com.apple.alias-file", "public.data com.apple.resolvable", "" },
+	{ "public.text", "public.data public.content", "" }, { "public.plain-text", "public.text", "txt" }, { "public.utf8-plain-text", "public.plain-text", "" },
+	{ "public.xml", "public.text", "xml" }, { "com.apple.property-list", "public.xml", "plist" }, { "public.json", "public.text", "json" }, { "public.source-code", "public.text", "" },
+	{ "public.image", "public.data public.content", "" }, { "public.png", "public.image", "png" }, { "public.jpeg", "public.image", "jpg" }, { "public.tiff", "public.image", "tiff" },
+	{ "com.compuserve.gif", "public.image", "gif" }, { "com.apple.icns", "public.image", "icns" }, { "com.adobe.pdf", "public.data public.content", "pdf" },
+	{ "public.audiovisual-content", "public.data public.content", "" }, { "public.audio", "public.audiovisual-content", "" }, { "public.movie", "public.audiovisual-content", "" },
+	{ "public.mp3", "public.audio", "mp3" }, { "public.mpeg-4", "public.movie", "mp4" }, { "public.archive", "public.data", "" }, { "public.zip-archive", "public.archive", "zip" },
+	{ "org.gnu.gnu-zip-archive", "public.archive", "gz" }, { "com.apple.disk-image", "public.data", "dmg" },
+};
+#define	NUT	(sizeof(uttab) / sizeof(uttab[0]))
+
+@interface UTType : NSObject { @public NSString *_ident; }
++ (UTType *)typeWithIdentifier:(NSString *)i;
++ (UTType *)typeWithFilenameExtension:(NSString *)e;
++ (UTType *)typeWithFilenameExtension:(NSString *)e conformingToType:(UTType *)t;
++ (UTType *)typeWithMIMEType:(NSString *)m;
+- (NSString *)identifier;
+- (BOOL)conformsToType:(UTType *)t;
+@end
+@implementation UTType
++ (UTType *)typeWithIdentifier:(NSString *)i
+{
+	static NSMutableDictionary *cache; UTType *t;
+	if (i == nil) return nil;
+	if (cache == nil) cache = [[NSMutableDictionary alloc] init];
+	if ((t = [cache objectForKey:i]) != nil) return t;
+	t = [[UTType alloc] init]; t->_ident = [i copy]; [cache setObject:t forKey:i];
+	return t;
+}
++ (UTType *)typeWithFilenameExtension:(NSString *)e
+{
+	size_t k; NSString *l = [e lowercaseString];
+	for (k = 0; k < NUT; k++) if (uttab[k].ext[0] && [l isEqualToString:[NSString stringWithUTF8String:uttab[k].ext]]) return [self typeWithIdentifier:[NSString stringWithUTF8String:uttab[k].id]];
+	if ([l isEqualToString:@"jpeg"]) return [self typeWithIdentifier:@"public.jpeg"];
+	if ([l length] == 0) return nil;
+	return [self typeWithIdentifier:[@"dyn.ext." stringByAppendingString:l]];
+}
++ (UTType *)typeWithFilenameExtension:(NSString *)e conformingToType:(UTType *)t
+{
+	UTType *r = [self typeWithFilenameExtension:e];
+	return (t == nil || [r conformsToType:t]) ? r : nil;
+}
++ (UTType *)typeWithMIMEType:(NSString *)m
+{
+	if ([m hasPrefix:@"image/"]) return [self typeWithIdentifier:@"public.image"];
+	if ([m hasPrefix:@"text/"]) return [self typeWithIdentifier:@"public.text"];
+	if ([m hasPrefix:@"audio/"]) return [self typeWithIdentifier:@"public.audio"];
+	if ([m hasPrefix:@"video/"]) return [self typeWithIdentifier:@"public.movie"];
+	return [self typeWithIdentifier:@"public.data"];
+}
+- (NSString *)identifier { return _ident; }
+static BOOL
+ut_conforms(NSString *from, NSString *to, int depth)
+{
+	size_t k;
+	if ([from isEqualToString:to]) return YES;
+	if (depth > 12) return NO;
+	for (k = 0; k < NUT; k++) if ([from isEqualToString:[NSString stringWithUTF8String:uttab[k].id]]) {
+		NSArray *ps = [[NSString stringWithUTF8String:uttab[k].parents] componentsSeparatedByString:@" "]; NSUInteger q;
+		for (q = 0; q < [ps count]; q++) if ([[ps objectAtIndex:q] length] && ut_conforms([ps objectAtIndex:q], to, depth + 1)) return YES;
+	}
+	return NO;
+}
+- (BOOL)conformsToType:(UTType *)t { return t != nil && ut_conforms(_ident, [t identifier], 0); }
+- (BOOL)isSupertypeOfType:(UTType *)t { return [t conformsToType:self]; }
+- (BOOL)isSubtypeOfType:(UTType *)t { return [self conformsToType:t]; }
+- (BOOL)isEqual:(id)o { return [o isKindOfClass:[UTType class]] && [_ident isEqualToString:((UTType *)o)->_ident]; }
+- (NSUInteger)hash { return [_ident hash]; }
+- (NSString *)description { return _ident; }
+- (NSString *)preferredFilenameExtension { size_t k; for (k = 0; k < NUT; k++) if ([_ident isEqualToString:[NSString stringWithUTF8String:uttab[k].id]] && uttab[k].ext[0]) return [NSString stringWithUTF8String:uttab[k].ext]; return nil; }
+- (NSString *)preferredMIMEType { return nil; }
+- (NSString *)localizedDescription { return _ident; }
+- (BOOL)isDynamic { return [_ident hasPrefix:@"dyn."]; }
+- (BOOL)isDeclared { return ![self isDynamic]; }
+- (id)copyWithZone:(NSZone *)z { return self; }
+@end
+
+/* the constant UTTypeXxx (a variable that holds a UTType): called by machrun for the symbol */
+id
+MachoUTConstant(const char *name)
+{
+	static const struct { const char *n, *i; } c[] = {
+		{ "Application", "com.apple.application" }, { "ApplicationBundle", "com.apple.application-bundle" }, { "Bundle", "com.apple.bundle" }, { "Folder", "public.folder" },
+		{ "Directory", "public.directory" }, { "Framework", "com.apple.framework" }, { "Resolvable", "com.apple.resolvable" }, { "Image", "public.image" }, { "Audio", "public.audio" },
+		{ "Movie", "public.movie" }, { "Text", "public.text" }, { "Executable", "public.executable" }, { "PlainText", "public.plain-text" }, { "PNG", "public.png" }, { "JPEG", "public.jpeg" },
+		{ "PDF", "com.adobe.pdf" }, { "Data", "public.data" }, { "Item", "public.item" }, { "Content", "public.content" }, { "Package", "com.apple.package" }, { "Archive", "public.archive" },
+		{ "Symlink", "public.symlink" }, { "AliasFile", "com.apple.alias-file" }, { "UnixExecutable", "public.unix-executable" }, { "Volume", "public.volume" }, { "PropertyList", "com.apple.property-list" },
+		{ "XML", "public.xml" }, { "JSON", "public.json" }, { "ZIP", "public.zip-archive" }, { "DiskImage", "com.apple.disk-image" },
+	}; size_t k;
+	for (k = 0; k < sizeof(c) / sizeof(c[0]); k++) if (strcmp(c[k].n, name) == 0) return [UTType typeWithIdentifier:[NSString stringWithUTF8String:c[k].i]];
+	return [UTType typeWithIdentifier:[@"public." stringByAppendingString:[[NSString stringWithUTF8String:name] lowercaseString]]];
+}
+
+/* NSURLContentTypeKey for a file URL: what the file is on the disk */
+static IMP o_getRV;
+static BOOL
+w_getRV(id self, SEL _cmd, id *value, NSString *key, NSError **err)
+{
+	if (getenv("MACHRUN_DEBUG_RV")) fprintf(stderr, "machrun: getResourceValue key '%s' url %s\n", [key UTF8String], [[(NSURL *)self description] UTF8String]);
+	if ([key isEqualToString:@"NSURLContentTypeKey"] || [key isEqualToString:@"NSURLTypeIdentifierKey"]) {
+		NSString *path = [(NSURL *)self path]; struct stat st; UTType *t = nil;
+		if (path && [(NSURL *)self isFileURL] && lstat([path fileSystemRepresentation], &st) == 0) {
+			if (S_ISLNK(st.st_mode)) t = [UTType typeWithIdentifier:@"public.symlink"];
+			else if (S_ISDIR(st.st_mode)) {
+				NSString *e = [[path pathExtension] lowercaseString];
+				if ([e isEqualToString:@"app"]) t = [UTType typeWithIdentifier:@"com.apple.application-bundle"];
+				else if ([e isEqualToString:@"framework"]) t = [UTType typeWithIdentifier:@"com.apple.framework"];
+				else if ([e length] && ([[NSFileManager defaultManager] fileExistsAtPath:[path stringByAppendingPathComponent:@"Contents/Info.plist"]] || [[NSFileManager defaultManager] fileExistsAtPath:[path stringByAppendingPathComponent:@"Info.plist"]]))
+					t = [UTType typeWithIdentifier:@"com.apple.bundle"];
+				else t = [UTType typeWithIdentifier:@"public.folder"];
+			} else { t = [UTType typeWithFilenameExtension:[path pathExtension]]; if (t == nil) t = [UTType typeWithIdentifier:@"public.data"]; }
+		}
+		if (getenv("MACHRUN_DEBUG_RV")) fprintf(stderr, "machrun:   path %s -> %s (value %p)\n", [path UTF8String], t ? [[t identifier] UTF8String] : "nil", (void *)value);
+		if ([key isEqualToString:@"NSURLTypeIdentifierKey"]) { if (value) *value = [t identifier]; } else { if (value) *value = t; }
+		return t != nil;
+	}
+	return ((BOOL (*)(id, SEL, id *, NSString *, NSError **))o_getRV)(self, _cmd, value, key, err);
+}
+__attribute__((constructor)) static void
+uttype_init(void)
+{
+	if (getenv("MACHRUN_NOUT")) return;
+	Method m; Class k = objc_getClass("NSURL");
+	if (k == Nil) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(getResourceValue:forKey:error:))) != NULL) o_getRV = method_setImplementation(m, (IMP)w_getRV);
+}
+
+/* NSViewController without a nib of its own (a controller that builds its view in code, like AppCleaner's HelpViewController): AppKit gives it an empty view, GNUstep raises an exception. */
+static IMP o_loadView;
+static void
+w_loadView(id self, SEL _cmd)
+{
+	@try { ((void (*)(id, SEL))o_loadView)(self, _cmd); }
+	@catch (NSException *e) {
+		Class vk = NSClassFromString(@"NSView"); id v;
+		if (getenv("MACHRUN_DEBUG")) fprintf(stderr, "machrun: loadView of %s: %s (an empty view is used)\n", class_getName(object_getClass(self)), [[e reason] UTF8String]);
+		v = [vk alloc];
+		v = ((id (*)(id, SEL, NSRect))class_getMethodImplementation(vk, @selector(initWithFrame:)))(v, @selector(initWithFrame:), NSMakeRect(0, 0, 300, 200));
+		((void (*)(id, SEL, id))class_getMethodImplementation(object_getClass(self), @selector(setView:)))(self, @selector(setView:), [v autorelease]);
+	}
+}
+__attribute__((constructor)) static void
+viewcontroller_init(void)
+{
+	Class k = NSClassFromString(@"NSViewController"); Method m;
+	if (k == Nil) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(loadView))) != NULL) o_loadView = method_setImplementation(m, (IMP)w_loadView);
+}
+
+/* The folders of a Mac: GNUstep answers NSLibraryDirectory with ~/GNUstep/Library; a Mac application looks in ~/Library, /Library and /System/Library (AppCleaner looks for the files of an
+ * application there). */
+static IMP o_urlsForDir;
+static id
+w_urlsForDir(id self, SEL _cmd, NSUInteger dir, NSUInteger mask)
+{
+	NSString *home = NSHomeDirectory(); NSMutableArray *r = [NSMutableArray array]; NSString *sub = nil; BOOL sys = NO, apps = NO;
+	switch (dir) {
+	case 5: sub = @"Library"; sys = YES; break;
+	case 14: sub = @"Library/Application Support"; break;
+	case 13: sub = @"Library/Caches"; break;
+	case 1: apps = YES; break;
+	default: return ((id (*)(id, SEL, NSUInteger, NSUInteger))o_urlsForDir)(self, _cmd, dir, mask);
+	}
+	if (getenv("MACHRUN_DEBUG_RV")) fprintf(stderr, "machrun: URLsForDirectory %lu mask %lu -> home %s\n", (unsigned long)dir, (unsigned long)mask, [home UTF8String]);
+	if (apps) {
+		if (mask & 1) [r addObject:[NSURL fileURLWithPath:[home stringByAppendingPathComponent:@"Applications"] isDirectory:YES]];
+		if (mask & 2) [r addObject:[NSURL fileURLWithPath:@"/Applications" isDirectory:YES]];
+		return r;
+	}
+	if (mask & 1) [r addObject:[NSURL fileURLWithPath:[home stringByAppendingPathComponent:sub] isDirectory:YES]];
+	if (mask & 2) [r addObject:[NSURL fileURLWithPath:[@"/" stringByAppendingString:sub] isDirectory:YES]];
+	if ((mask & 8) && sys) [r addObject:[NSURL fileURLWithPath:@"/System/Library" isDirectory:YES]];
+	return r;
+}
+__attribute__((constructor)) static void
+dirs_init(void)
+{
+	if (getenv("MACHRUN_NODIRS")) return;
+	Class k = NSClassFromString(@"NSFileManager"); Method m;
+	if (k == Nil) return;
+	(void)[k class];
+	m = class_getInstanceMethod(k, @selector(URLsForDirectory:inDomains:));
+	if (getenv("MACHRUN_DEBUG")) fprintf(stderr, "machrun: NSFileManager URLsForDirectory:inDomains: method %p\n", (void *)m);
+	if (m != NULL) o_urlsForDir = method_setImplementation(m, (IMP)w_urlsForDir);
+}
+
+/* The Info.plist of a bundle of macOS (Contents/Info.plist): GNUstep reads Resources/Info-gnustep.plist (and the Info.plist of its own layout) only, so a Mac application that looks at the
+ * bundle of another application (AppCleaner, the Finder ...) gets no bundle identifier and no name. */
+static IMP o_infoDict, o_infoObj, o_bundleId;
+#include <pthread.h>
+static NSDictionary *
+mac_info(id self)
+{
+	static NSMutableDictionary *cache; static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+	NSString *path = [(NSBundle *)self bundlePath], *f; NSDictionary *d, *r;
+	if (path == nil) return nil;
+	pthread_mutex_lock(&mu);
+	if (cache == nil) cache = [[NSMutableDictionary alloc] init];
+	if ((d = [cache objectForKey:path]) == nil) {
+		f = [path stringByAppendingPathComponent:@"Contents/Info.plist"];
+		d = [NSDictionary dictionaryWithContentsOfFile:f];
+		if (d == nil) d = [NSDictionary dictionaryWithContentsOfFile:[path stringByAppendingPathComponent:@"Info.plist"]];
+		[cache setObject:(d ? d : [NSDictionary dictionary]) forKey:path];
+	}
+	r = [d count] ? [[d retain] autorelease] : nil;
+	pthread_mutex_unlock(&mu);
+	return r;
+}
+static id
+w_infoDict(id self, SEL _cmd)
+{
+	NSDictionary *d = ((id (*)(id, SEL))o_infoDict)(self, _cmd), *m;
+	if ([d objectForKey:@"CFBundleIdentifier"] != nil) return d;
+	if ((m = mac_info(self)) == nil) return d;
+	if ([d count] == 0) return m;
+	{ NSMutableDictionary *r = [NSMutableDictionary dictionaryWithDictionary:m]; [r addEntriesFromDictionary:d]; return r; }
+}
+static id
+w_infoObj(id self, SEL _cmd, NSString *key)
+{
+	id v = ((id (*)(id, SEL, id))o_infoObj)(self, _cmd, key);
+	return v != nil ? v : [mac_info(self) objectForKey:key];
+}
+static id
+w_bundleId(id self, SEL _cmd)
+{
+	id v = ((id (*)(id, SEL))o_bundleId)(self, _cmd);
+	return v != nil ? v : [mac_info(self) objectForKey:@"CFBundleIdentifier"];
+}
+__attribute__((constructor)) static void
+bundleinfo_init(void)
+{
+	if (getenv("MACHRUN_NOBUNDLEINFO")) return;
+	Class k = NSClassFromString(@"NSBundle"); Method m;
+	if (k == Nil) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(infoDictionary))) != NULL) o_infoDict = method_setImplementation(m, (IMP)w_infoDict);
+	if ((m = class_getInstanceMethod(k, @selector(objectForInfoDictionaryKey:))) != NULL) o_infoObj = method_setImplementation(m, (IMP)w_infoObj);
+	if ((m = class_getInstanceMethod(k, @selector(bundleIdentifier))) != NULL) o_bundleId = method_setImplementation(m, (IMP)w_bundleId);
+}
+
+/* This libdispatch calls _dispatch_ulock_wait and _dispatch_ulock_wake (the locks of Darwin's kernel) for dispatch_group_wait and the like, and leaves them undefined on FreeBSD: the program would end
+ * at the first wait ("Undefined symbol").  They are made here with FreeBSD's umtx (what libdispatch itself uses elsewhere). */
+#include <sys/umtx.h>
+#include <errno.h>
+#include <limits.h>
+int
+_dispatch_ulock_wait(uint32_t *uaddr, uint32_t val, uint32_t timeout_us, uint32_t flags)
+{
+	struct _umtx_time ut; void *ts = NULL; size_t sz = 0; int r;
+	(void)flags;
+	if (timeout_us != 0) { ut._timeout.tv_sec = timeout_us / 1000000; ut._timeout.tv_nsec = (long)(timeout_us % 1000000) * 1000; ut._flags = 0; ut._clockid = CLOCK_MONOTONIC; ts = &ut; sz = sizeof(ut); }
+	r = _umtx_op(uaddr, UMTX_OP_WAIT_UINT_PRIVATE, val, (void *)sz, ts);
+	return r == 0 ? 0 : -errno;
+}
+int
+_dispatch_ulock_wake(uint32_t *uaddr, uint32_t flags)
+{
+	int r = _umtx_op(uaddr, UMTX_OP_WAKE_PRIVATE, (flags & 0x100) ? INT_MAX : 1, NULL, NULL);
+	return r == 0 ? 0 : -errno;
+}
+
+/* NSFileManager enumeratorAtURL:...: GNUstep's enumerator makes the URLs of what it finds from the relative names (resolved against the working directory, not against the folder that is
+ * enumerated).  The folder is remembered for the enumerator and the URLs are made from it. */
+#include <objc/runtime.h>
+static IMP o_enumAtURL, o_urlEnumNext;
+static char enum_root_key;
+static id
+w_enumAtURL(id self, SEL _cmd, id url, id keys, NSUInteger opts, id handler)
+{
+	id e = ((id (*)(id, SEL, id, id, NSUInteger, id))o_enumAtURL)(self, _cmd, url, keys, opts, handler);
+	if (e != nil && url != nil) objc_setAssociatedObject(e, &enum_root_key, [(NSURL *)url path], OBJC_ASSOCIATION_RETAIN);
+	return e;
+}
+static id
+w_urlEnumNext(id self, SEL _cmd)
+{
+	id u = ((id (*)(id, SEL))o_urlEnumNext)(self, _cmd);
+	NSString *root = objc_getAssociatedObject(self, &enum_root_key), *p;
+	if (u == nil || root == nil) return u;
+	p = [(NSURL *)u path];
+	{ NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+	  if (cwd != nil && [p hasPrefix:cwd] && ![p hasPrefix:root]) {
+		NSString *rel = [p substringFromIndex:[cwd length]];
+		while ([rel hasPrefix:@"/"]) rel = [rel substringFromIndex:1];
+		return [NSURL fileURLWithPath:[root stringByAppendingPathComponent:rel] isDirectory:[[(NSURL *)u absoluteString] hasSuffix:@"/"]];
+	  } }
+	return u;
+}
+__attribute__((constructor)) static void
+urlenum_init(void)
+{
+	if (getenv("MACHRUN_NOURLENUM")) return;
+	Class k = NSClassFromString(@"NSFileManager"), e; Method m;
+	if (k == Nil) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(enumeratorAtURL:includingPropertiesForKeys:options:errorHandler:))) != NULL) o_enumAtURL = method_setImplementation(m, (IMP)w_enumAtURL);
+	if ((e = NSClassFromString(@"GSURLEnumerator")) != Nil) { (void)[e class]; if ((m = class_getInstanceMethod(e, @selector(nextObject))) != NULL) o_urlEnumNext = method_setImplementation(m, (IMP)w_urlEnumNext); }
+}
+
+/* -[NSFileManager trashItemAtURL:resultingItemURL:error:] (macOS 10.8): the file goes to ~/.Trash (the name is made unique when it is there already) */
+static BOOL
+fm_trashItem(id self, SEL _cmd, NSURL *url, NSURL **result, NSError **error)
+{
+	NSFileManager *fm = [NSFileManager defaultManager]; NSString *trash = [NSHomeDirectory() stringByAppendingPathComponent:@".Trash"], *name, *dst; int n = 1;
+	if (url == nil) return NO;
+	[fm createDirectoryAtPath:trash withIntermediateDirectories:YES attributes:nil error:NULL];
+	name = [[url path] lastPathComponent]; dst = [trash stringByAppendingPathComponent:name];
+	while ([fm fileExistsAtPath:dst]) dst = [trash stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ %d.%@", [name stringByDeletingPathExtension], ++n, [name pathExtension]]];
+	if (![fm moveItemAtPath:[url path] toPath:dst error:error]) return NO;
+	if (result) *result = [NSURL fileURLWithPath:dst];
+	return YES;
+}
+__attribute__((constructor)) static void
+trash_init(void)
+{
+	if (getenv("MACHRUN_NOTRASH")) return;
+	Class k = NSClassFromString(@"NSFileManager");
+	if (k == Nil) return;
+	(void)[k class];
+	class_addMethod(k, @selector(trashItemAtURL:resultingItemURL:error:), (IMP)fm_trashItem, "c40@0:8@16^@24^@32");
 }
