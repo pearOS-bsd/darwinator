@@ -525,12 +525,14 @@ animation_init(void)
 	Class k = NSClassFromString(@"NSAnimationContext"); Class m;
 	if (k == Nil) return;
 	(void)[k class]; m = object_getClass(k);
-	class_addMethod(m, @selector(runAnimationGroup:completionHandler:), (IMP)anim_run, "v32@0:8@?16@?24");
-	class_addMethod(m, @selector(runAnimationGroup:), (IMP)anim_perform, "v24@0:8@?16");
-	class_addMethod(m, @selector(beginGrouping), (IMP)anim_begin, "v16@0:8");
-	class_addMethod(m, @selector(endGrouping), (IMP)anim_begin, "v16@0:8");
-	class_addMethod(m, @selector(currentContext), (IMP)anim_current, "@16@0:8");
-	class_addMethod(k, @selector(setDuration:), (IMP)anim_setduration, "v24@0:8d16");
+#define	SETCLS(sel, imp, enc) do { Method mm = class_getClassMethod(k, sel); if (mm != NULL) method_setImplementation(mm, (IMP)imp); else class_addMethod(m, sel, (IMP)imp, enc); } while (0)
+	SETCLS(@selector(runAnimationGroup:completionHandler:), anim_run, "v32@0:8@?16@?24");
+	SETCLS(@selector(runAnimationGroup:), anim_perform, "v24@0:8@?16");
+	SETCLS(@selector(beginGrouping), anim_begin, "v16@0:8");
+	SETCLS(@selector(endGrouping), anim_begin, "v16@0:8");
+	SETCLS(@selector(currentContext), anim_current, "@16@0:8");
+	if (getenv("MACHRUN_DEBUG")) fprintf(stderr, "machrun: NSAnimationContext methods set\n");
+	{ Method im = class_getInstanceMethod(k, @selector(setDuration:)); if (im) method_setImplementation(im, (IMP)anim_setduration); else class_addMethod(k, @selector(setDuration:), (IMP)anim_setduration, "v24@0:8d16"); }
 	class_addMethod(k, @selector(setAllowsImplicitAnimation:), (IMP)anim_setbool, "v20@0:8c16");
 }
 
@@ -1022,4 +1024,22 @@ fontenum_init(void)
 	if (k == Nil) return;
 	(void)[k class];
 	if ((m = class_getClassMethod(k, @selector(sharedEnumerator))) != NULL) o_fontEnumShared = method_setImplementation(m, (IMP)w_fontEnumShared);
+}
+
+/* -[NSView animator] and -[NSWindow animator] (the proxy whose setters animate): here the proxy is the object itself, so animator.frame = x sets the frame at once.  AppCleaner pushes its list view in
+ * from x = 450 with it: without this the view stays outside of the window. */
+static id anim_self(id self, SEL _cmd) { return self; }
+static void anim_setanimations(id self, SEL _cmd, id d) { }
+__attribute__((constructor)) static void
+animator_init(void)
+{
+	const char *names[] = { "NSView", "NSWindow", "NSControl", "NSLayoutConstraint" }; int i;
+	for (i = 0; i < 4; i++) {
+		Class k = NSClassFromString([NSString stringWithUTF8String:names[i]]);
+		if (k == Nil) continue;
+		(void)[k class];
+		if (getenv("MACHRUN_DEBUG")) fprintf(stderr, "machrun: animator of %s: %s\n", names[i], class_getInstanceMethod(k, @selector(animator)) ? "replaced" : "added");
+		{ Method am = class_getInstanceMethod(k, @selector(animator)); if (am != NULL) method_setImplementation(am, (IMP)anim_self); else class_addMethod(k, @selector(animator), (IMP)anim_self, "@16@0:8"); }
+		class_addMethod(k, @selector(setAnimations:), (IMP)anim_setanimations, "v24@0:8@16");
+	}
 }
