@@ -8,6 +8,10 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sysent.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
 #include <sys/syscall.h>
 #include <machine/frame.h>
 
@@ -19,12 +23,13 @@ darwin_fetch_syscall_args(struct thread *td)
 	struct trapframe *frame = td->td_frame;
 	struct syscall_args *sa = &td->td_sa;
 	register_t x16 = frame->tf_x[16];
+	uint64_t sigpc;
 
 	sa->original_code = (u_int)x16;
 	sa->code = (u_int)x16;
-	if (td->td_proc->p_sysent->sv_sigcode_base != 0 &&
-	    frame->tf_elr - 4 >= (uint64_t)td->td_proc->p_sysent->sv_sigcode_base &&
-	    frame->tf_elr - 4 < (uint64_t)td->td_proc->p_sysent->sv_sigcode_base + (uint64_t)*td->td_proc->p_sysent->sv_szsigcode) {
+	/* the signal trampoline of the kernel (in the shared page: shp_base + sv_sigcode_offset) returns with "svc #0" and the number in x8 */
+	sigpc = (uint64_t)td->td_proc->p_vmspace->vm_shp_base + (uint64_t)td->td_proc->p_sysent->sv_sigcode_offset;
+	if (frame->tf_elr - 4 >= sigpc && frame->tf_elr - 4 < sigpc + (uint64_t)*td->td_proc->p_sysent->sv_szsigcode) {
 		sa->code = SYS_sigreturn;		/* the signal trampoline of the kernel (svc #0, number in x8) */
 		sa->callp = &sysent[SYS_sigreturn];
 	} else if (x16 < 0 || x16 >= darwin_nsyscalls)		/* negative: Mach traps, not implemented yet */
