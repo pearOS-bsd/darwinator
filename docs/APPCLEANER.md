@@ -53,6 +53,8 @@ ok   com.aone.keka.plist is in ~/.Trash                        (and the other th
 
 ## Where it stops
 
-The application does its work, but the window does not show the result: the list of files is built (the test reads it from the application) and the window stays on "Searching...".
-Probably the auto layout of the list view (the solver of GNUstep ignores constraints that it cannot solve).
+The window shows the result now: "5 files were found" and the list (the list view was outside of the window, at x = 450, because `animator` did not exist and the push animation never moved it;
+`-[NSView animator]` is the object itself and `NSAnimationContext` makes its changes at once, `compat.m`).
+Not right yet: the row shows the description of the object (`<ACAppBundle: 0x...>`) and not the name and icon (the cell view of the nib gets its text from a binding that GNUstep does not evaluate the same way),
+and the size says "Zero KB" (the sizes of the files come from `getAllocatedSize:ofItemAtURL:...` of AppCleaner, which uses calls of macOS that are not here).
 Open: the images of `Assets.car` (no CoreUI reader), PDF images (`DropApp.pdf`), Sparkle as a library, a crash in `objc_msgSend` that was seen once at start and not again.
