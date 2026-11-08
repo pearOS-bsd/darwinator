@@ -38,9 +38,10 @@ Not done: arm64 (and there the variadic calling convention of Darwin's arm64 dif
 
 * maps, binds (30 symbols still unresolved of 438: Security, some CoreFoundation, dispatch details, IOKit, ImageIO), registers 68 classes, 1 category, 18 protocols, runs `main()`;
 * GNUstep starts (`GSInitializeProcess`), connects to the window server, finds the application bundle (needs the GNUstep layout: `tools/wrapapp.sh`) and its `NSPrincipalClass`;
-* **stops at `Cannot load the main model file`**: the user interface of Keka is in Apple's compiled `.nib` files (binary keyed archives); GNUstep reads `.gorm` and `.xib` but not these.
+* the compiled `.nib` files are **plain `NSKeyedArchiver` data** (`Base.lproj/main.nib/keyedobjects.nib`, classes `NSIBObjectData`, `NSWindowTemplate`, `NSNibOutletConnector`, ...): GNUstep's own nib loader reads them once two things are arranged: the localization (GNUstep looks in `en.lproj` / `English.lproj`, not in Apple's `Base.lproj`: `tools/wrapapp.sh` builds an `en.lproj` that merges `Base` and `en`) and the class `NSLocalizableString` (IB's localizable label, text stored inline in the archive, which GNUstep's decoder cannot read: `tools/nibfix.py` turns these objects into plain strings, and `dyld/objc.c` registers a class of that name as a safety net);
+* with that, **the nib is decoded and the model starts loading**, and then fails with `NSMenuItem(instance) does not recognize firstItem` (no `firstItem` in the program or the nib: it comes from the GNUstep side, the menu code; to be traced).
 
-What is needed next: a loader for compiled nibs (NSKeyedUnarchiver data with `NSIBObjectData`, connections, the Cocoa classes), the remaining 30 symbols, `SPUUpdater` (Sparkle) as a stub, and exceptions in Mach-O code (the unwind tables are `__unwind_info`: `@try`/C++ exceptions in the program do not unwind yet).
+What is needed next: the cause of the `firstItem` failure, the other classes of the nibs that GNUstep may lack (`IBClassReference`, `NSIBUserDefinedRuntimeAttributesConnector`, `NSButtonImageSource`, `NSSegmentItem`, `_NSCornerView`, `CIMaskToAlpha`), the remaining 30 symbols, `SPUUpdater` (Sparkle) as a stub, and exceptions in Mach-O code (the unwind tables are `__unwind_info`: `@try`/C++ exceptions in the program do not unwind yet).
 
 ## The files, from the simplest
 

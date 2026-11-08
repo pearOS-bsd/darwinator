@@ -256,6 +256,38 @@ objc_call_loads(void)
 	}
 }
 
+/* ---- classes of Interface Builder's archives that GNUstep does not have ---- */
+static id msg0(id o, const char *sel) { SEL s = rt_registerName(sel); return (((id (*)(id, SEL))machrun_objc_lookup(o, s))(o, s)); }
+static id msg1(id o, const char *sel, id a) { SEL s = rt_registerName(sel); return (((id (*)(id, SEL, id))machrun_objc_lookup(o, s))(o, s, a)); }
+static id
+nsstr(const char *c)
+{
+	Class cls = rt_getClass("NSString"); SEL s = rt_registerName("stringWithUTF8String:");
+	return (((id (*)(id, SEL, const char *))machrun_objc_lookup(cls, s))(cls, s, c));
+}
+/* NSLocalizableString (keys NS.string, NSDev, NSKey): the nib stores the text of a label with its localization key; decoding gives the string itself */
+static id
+ib_localizable_init(id self, SEL _cmd, id coder)
+{
+	id str = msg1(coder, "decodeObjectForKey:", nsstr("NS.string"));
+	if (str == NULL) str = msg1(coder, "decodeObjectForKey:", nsstr("NSDev"));
+	if (str == NULL) str = nsstr("");
+	msg0(str, "retain");
+	msg0(self, "release");
+	return (str);
+}
+static void
+ib_register_classes(void)
+{
+	Class ns = rt_getClass("NSObject"), k;
+	if (ns == NULL || rt_getClass("NSLocalizableString") != NULL) return;
+	k = rt_allocateClassPair(ns, "NSLocalizableString", 0);
+	if (k == NULL) return;
+	rt_addMethod(k, rt_registerName("initWithCoder:"), (IMP)ib_localizable_init, "@24@0:8@16");
+	rt_registerClassPair(k);
+	VLOG("objc: class NSLocalizableString (for nibs)\n");
+}
+
 /* ---- the entry point ---- */
 typedef void *(*find_fn)(const char *sect, size_t *size);
 
@@ -271,6 +303,7 @@ objc_load_image(find_fn find, intptr_t slide)
 	if (ncl + ncat + npr == 0 && find("__cfstring", &n) == NULL) return (0);
 	if (!rt_init()) { warnx("the program has Objective-C metadata but the Objective-C runtime (libobjc2) could not be used"); return (-1); }
 	VLOG("objc: %zu classes, %zu categories, %zu protocols\n", ncl, ncat, npr);
+	ib_register_classes();
 
 	g_classlist = cl; g_nclasses = ncl;
 	for (i = 0; i < npr; i++) make_protocol(prs[i]);
