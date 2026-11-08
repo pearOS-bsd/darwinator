@@ -41,7 +41,7 @@ dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
 
-Dylibs that are Mach-O files (the frameworks of an application: FFmpeg, libmpv ...) are loaded too, with their dependencies, thread-local variables and initializers; `machrun -L LIB.dylib -x SCRIPT` calls their functions (`docs/IINA.md`, `tests/dylib-ffmpeg.sh`).
+XLD, a converter of audio files with plug-ins that are Mach-O bundles (`docs/XLD.md`, `tests/xld.sh`), converts WAV to FLAC and back, byte for byte. Dylibs that are Mach-O files (the frameworks of an application: FFmpeg, libmpv ...) are loaded too, with their dependencies, thread-local variables and initializers; `machrun -L LIB.dylib -x SCRIPT` calls their functions (`docs/IINA.md`, `tests/dylib-ffmpeg.sh`).
 
 What recent applications need beyond that (AppCleaner is the test): `LC_DYLD_CHAINED_FIXUPS`, nibs in the `NIBArchive` format of Xcode 16 (converted to the keyed archive that GNUstep loads, `compat.m`), the constant literals of the compiler (`@[...]`, `@{...}`, `@1` as structures in the file), direct references to the program's own classes, `objc_alloc`, `objc_opt_new` and the other fast paths of newer compilers, libdispatch objects that the compiler retains with `objc_retain`, CoreGraphics and CoreFoundation from libopal and GNUstep corebase, and stand-ins for Sparkle, SF Symbols and asset catalogs.
 
