@@ -71,6 +71,7 @@ struct image {
 	int		nlib;
 	const struct dyld_info_command *dyld_info;
 	bool		chained;
+	const uint8_t	*chained_data;		/* the LC_DYLD_CHAINED_FIXUPS blob */
 	uint64_t	min_vm, max_vm;		/* preferred addresses of the mapped part */
 	uint64_t	text_vm;		/* preferred address of __TEXT: LC_MAIN's offset is from here */
 	intptr_t	slide;
@@ -208,7 +209,7 @@ parse(struct image *im, const char *path)
 		case LC_DYLD_INFO: case LC_DYLD_INFO_ONLY:
 			im->dyld_info = (const void *)lc; break;
 		case LC_DYLD_CHAINED_FIXUPS:
-			im->chained = true; break;
+			im->chained = true; im->chained_data = im->file + ((const uint32_t *)lc)[2]; break;
 		case LC_MAIN:
 			im->have_main = true; im->entryoff = ((const struct entry_point_command *)lc)->entryoff; break;
 		case LC_UNIXTHREAD: {
@@ -290,6 +291,55 @@ seg_addr(struct image *im, int seg, uint64_t off)
 {
 	if (seg < 0 || seg >= im->nseg) errx(1, "bad segment index %d in the bind information", seg);
 	return ((uint8_t *)(im->seg[seg].vmaddr + im->slide + off));
+}
+
+/* ---- chained fixups (LC_DYLD_CHAINED_FIXUPS, what the linker makes for macOS 12 and later): every pointer that needs a fix is part of a chain that starts at the page
+ * start of its segment; a pointer is either a rebase (its target) or a bind (the number of an import), and says how far the next one is (4 bytes each). ---- */
+
+static void
+do_chained(struct image *im)
+{
+	const uint8_t *h = im->chained_data;
+	uint32_t starts_off = le32dec(h + 4), imports_off = le32dec(h + 8), syms_off = le32dec(h + 12), nimports = le32dec(h + 16), ifmt = le32dec(h + 20);
+	const uint8_t *starts = h + starts_off; uint32_t nseg = le32dec(starts), s, k;
+	uintptr_t *imp = calloc(nimports ? nimports : 1, sizeof(uintptr_t)); int64_t *addend = calloc(nimports ? nimports : 1, sizeof(int64_t));
+	uint32_t i;
+
+	for (i = 0; i < nimports; i++) {
+		uint32_t ord, nameoff; bool weak; int64_t ad = 0;
+		if (ifmt == 1) { uint32_t v = le32dec(h + imports_off + 4 * i); ord = v & 0xff; weak = (v >> 8) & 1; nameoff = v >> 9; }
+		else if (ifmt == 2) { uint32_t v = le32dec(h + imports_off + 8 * i); ord = v & 0xff; weak = (v >> 8) & 1; nameoff = v >> 9; ad = (int32_t)le32dec(h + imports_off + 8 * i + 4); }
+		else { uint64_t v = le64dec(h + imports_off + 16 * i); ord = v & 0xffff; weak = (v >> 16) & 1; nameoff = v >> 32; ad = (int64_t)le64dec(h + imports_off + 16 * i + 8); if (ord > 0xfff0) ord = 0; }
+		if (ifmt != 3 && ord > 0xf0) ord = 0;			/* self / main executable / flat lookup: search everywhere */
+		imp[i] = resolve(im, (int)ord, (const char *)h + syms_off + nameoff, weak); addend[i] = ad;
+	}
+	for (s = 0; s < nseg && s < (uint32_t)im->nseg; s++) {
+		uint32_t so = le32dec(starts + 4 + 4 * s); const uint8_t *si; uint16_t psize, fmt, pcount; uint64_t segoff;
+		if (so == 0) continue;
+		si = starts + so; psize = le16dec(si + 4); fmt = le16dec(si + 6); segoff = le64dec(si + 8); pcount = le16dec(si + 20);
+		if (fmt != 2 && fmt != 6) errx(1, "chained fixups: pointer format %u is not supported (only DYLD_CHAINED_PTR_64 and _64_OFFSET)", fmt);
+		for (k = 0; k < pcount; k++) {
+			uint16_t ps = le16dec(si + 22 + 2 * k); uint8_t *p; 
+			if (ps == 0xffff) continue;
+			p = (uint8_t *)(im->min_vm + segoff + im->slide + (uint64_t)k * psize + ps);
+			for (;;) {
+				uint64_t v; uint32_t next;
+				memcpy(&v, p, 8); next = (v >> 51) & 0xfff;
+				if ((v >> 63) & 1) {					/* bind */
+					uint32_t o = v & 0xffffff; int64_t ad = (int64_t)((v >> 24) & 0xff) + (o < nimports ? addend[o] : 0);
+					uintptr_t r = o < nimports ? imp[o] : 0;
+					v = r ? r + ad : 0;
+				} else {						/* rebase */
+					uint64_t t = v & 0xfffffffffULL, hi = (v >> 36) & 0xff;
+					v = (fmt == 6 ? (uint64_t)im->min_vm + t : t) + im->slide + (hi << 56);
+				}
+				memcpy(p, &v, 8);
+				if (next == 0) break;
+				p += (size_t)next * 4;
+			}
+		}
+	}
+	free(imp); free(addend);
 }
 
 static void
@@ -447,7 +497,6 @@ main(int argc, char **argv)
 	if (launcher_real == NULL && ch >= argc) errx(64, "usage: machrun [-v] PROGRAM [arguments]");
 	memset(&im, 0, sizeof(im));
 	parse(&im, launcher_real ? launcher_real : argv[ch]);
-	if (im.chained) errx(1, "%s: chained fixups (LC_DYLD_CHAINED_FIXUPS) are not supported yet", launcher_real ? launcher_real : argv[ch]);
 	if (!im.have_main) errx(1, "%s: no LC_MAIN (only programs that start at main() are supported)", launcher_real ? launcher_real : argv[ch]);
 	{	/* an Objective-C program (a Mac application): the settings that made them run in the tests.  MALLOC_CONF=junk:true has to be in the environment before the allocator
 		 * starts, so the process starts itself again once; MACHRUN_STRICT=1 turns the leniency off (messages that nothing implements raise as GNUstep's do) */
@@ -466,6 +515,7 @@ main(int argc, char **argv)
 		void (*gsargs)(int, char **, char **) = dlsym(RTLD_DEFAULT, "GSInitializeProcess");
 		if (gsargs) { VLOG("GNUstep: GSInitializeProcess\n"); gsargs(argc - ch, argv + ch, environ); }
 	}
+	if (im.chained) do_chained(&im);
 	if (im.dyld_info) {
 		const struct dyld_info_command *di = im.dyld_info;
 		do_rebase(&im);
