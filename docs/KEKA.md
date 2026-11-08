@@ -25,10 +25,10 @@ The files are universal (x86_64 + arm64, plain arm64: no arm64e/PAC), so the sli
 | `kekaxz` (xz 5.8.4) | **works**: compresses (also with 4 threads), decompresses, lists, tests; output is read by the system `xz` and the other way round |
 | `kekazstd` (zstd 1.5.7), `kekalz4` (lz4 1.10.0) | **work**: round trips with the system `zstd`, and lz4 |
 | `keka7zz` (7-Zip 26.03, "modified by aone for Keka") | **works**: creates, lists, tests and extracts `7z` and `zip` archives (the extracted tree is identical, the system `unzip` accepts the zip); needed the CoreFoundation string subset (`dyld/cf.c`), `fstatat`, `readdir`, `setxattr` and the other shims |
-| `kekatar` | not yet: needs CommonCrypto (`CCCryptor*`, `CC_MD5_*`, `CC_SHA1_*`, `CCHmac*`, `CCKeyDerivationPBKDF`: to be mapped to libcrypto) and `libxml2` (a package) |
+| `kekatar` (bsdtar 3.8.9, libarchive) | **works**: creates `ustar`, `pax`, `gnutar`, `zip`, `7zip` archives (read by the system `tar`, extracted again to an identical tree), `-z` `-j` `-J` filters, extracts a system tar, creates and decrypts an **AES-256 zip** (the wrong passphrase is refused). Needed CommonCrypto on `libmd`/`libcrypto` (`dyld/cc.c`: MD5, SHA-1/256/384/512, HMAC, PBKDF2, AES ECB/CBC/CTR), `iconv`, `statfs`, `utimes`, and stubs for `copyfile`, the extended attribute calls and the membership (ACL) calls; `libxml2` comes from the package |
 | `Keka` (the application) | maps, binds and **reaches `main()`**, then stops at the first `objc_msgSend`: 438 unresolved symbols (139 Objective-C classes and 131 metaclasses of Foundation/AppKit/Sparkle, 38 `NS*` constants, 32 `libobjc` functions, CoreFoundation, blocks) |
 
-Things the shims had to fix, found by running real programs: the entries of FreeBSD's `_DefaultRuneLocale.__runetype` are 64 bits wide (Darwin's 32: every `isprint()` macro of the program read the wrong entry), `struct dirent` and `struct stat`, `AT_FDCWD` (-2 on Darwin) and the `AT_*` bits, `pthread_attr` detach state, pthread locks and `pthread_once` with Darwin's static initializers, `sigaction` and `sigset_t`, `sysctl` names, `open`/`fcntl` flags.
+Things the shims had to fix, found by running real programs (`struct statfs` is 2344 bytes on FreeBSD and 2168 on Darwin: the plain call overflowed the program's buffer and the stack guard stopped it): the entries of FreeBSD's `_DefaultRuneLocale.__runetype` are 64 bits wide (Darwin's 32: every `isprint()` macro of the program read the wrong entry), `struct dirent` and `struct stat`, `AT_FDCWD` (-2 on Darwin) and the `AT_*` bits, `pthread_attr` detach state, pthread locks and `pthread_once` with Darwin's static initializers, `sigaction` and `sigset_t`, `sysctl` names, `open`/`fcntl` flags.
 
 Not done: arm64 (and there the variadic calling convention of Darwin's arm64 differs from the standard one: `printf` and friends need their own shims), chained fixups, thread-local variables, `dlopen` of Mach-O dylibs.
 
@@ -53,6 +53,6 @@ The binaries use the classic `LC_DYLD_INFO_ONLY` bind tables with `dyld_stub_bin
 
 ## Suggested order
 
-1. ~~Userland dyld + libc shims for `kekaxz`, `keka7zz`~~ (done, see above). Next: `kekatar` (CommonCrypto on libcrypto, libxml2).
+1. ~~Userland dyld + libc shims for `kekaxz`, `keka7zz`~~ (done, see above). `kekatar` too (done). Next: the Objective-C 2 metadata loader for the application.
 2. The Objective-C metadata loader, tested first with a small Objective-C test program, then the Keka application.
 3. Mach IPC and `psynch` in the module only when a program really needs them.

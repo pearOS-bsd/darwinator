@@ -25,7 +25,7 @@ Tested on FreeBSD 14.5 amd64 under KVM (`tools/vm-test.sh`): the module builds w
 
 ## machrun: a dyld for FreeBSD (`dyld/`)
 
-Mach-O programs that need dyld and libSystem (nearly every Mac program) run through `machrun`, a userland loader that maps the file, applies rebase/bind and binds the imports to FreeBSD's libc and libraries, with shims for what differs (`dyld/shims.c`, `dyld/cf.c`). No kernel module is needed for this path. The unmodified command line tools of Keka (xz, zstd, lz4 and 7-Zip) run and produce archives that the system tools read: see `docs/KEKA.md` and `tests/keka.sh`.
+Mach-O programs that need dyld and libSystem (nearly every Mac program) run through `machrun`, a userland loader that maps the file, applies rebase/bind and binds the imports to FreeBSD's libc and libraries, with shims for what differs (`dyld/shims.c`, `dyld/cf.c`). No kernel module is needed for this path. The unmodified command line tools of Keka (xz, zstd, lz4, 7-Zip and bsdtar, with 37 checks) run and produce archives that the system tools read: see `docs/KEKA.md` and `tests/keka.sh`.
 
 ```
 make -C dyld                      # builds dyld/machrun (FreeBSD)

@@ -7,6 +7,7 @@
  * flags with other values (open, fcntl), sysctl names, and a few functions that exist only on the Mac.
  */
 #include <sys/types.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
@@ -51,7 +52,7 @@ static int dw_NSGetExecutablePath(char *buf, uint32_t *size)
 	return (0);
 }
 
-static void dw_stack_chk_fail(void) { fprintf(stderr, "machrun: stack smashing detected\n"); abort(); }
+static void dw_stack_chk_fail(void) { fprintf(stderr, "machrun: stack smashing detected in the function that returns to %p\n", __builtin_return_address(0)); abort(); }
 static void dw_stub_binder(void) { fprintf(stderr, "machrun: lazy binding was asked for (dyld_stub_binder): the lazy pointers should have been bound already\n"); abort(); }
 static void dw_bzero(void *p, size_t n) { memset(p, 0, n); }
 static void dw_memset_pattern16(void *b, const void *pat, size_t len)
@@ -111,6 +112,47 @@ st_out(const struct stat *sb, struct darwin_stat64 *d)
 static int dw_stat(const char *p, struct darwin_stat64 *d) { struct stat sb; int r = stat(p, &sb); if (r == 0) st_out(&sb, d); return (r); }
 static int dw_lstat(const char *p, struct darwin_stat64 *d) { struct stat sb; int r = lstat(p, &sb); if (r == 0) st_out(&sb, d); return (r); }
 static int dw_fstat(int fd, struct darwin_stat64 *d) { struct stat sb; int r = fstat(fd, &sb); if (r == 0) st_out(&sb, d); return (r); }
+
+/* statfs: Darwin's struct statfs is 2168 bytes, FreeBSD's is larger (2344): writing FreeBSD's would overflow the program's buffer */
+struct dstatfs {
+	uint32_t f_bsize; int32_t f_iosize; uint64_t f_blocks, f_bfree, f_bavail, f_files, f_ffree;
+	int32_t f_fsid[2]; uint32_t f_owner, f_type, f_flags, f_fssubtype;
+	char f_fstypename[16], f_mntonname[1024], f_mntfromname[1024];
+	uint32_t f_flags_ext, f_reserved[7];
+};
+_Static_assert(sizeof(struct dstatfs) == 2168, "struct statfs of Darwin");
+static void
+sfs_out(const struct statfs *f, struct dstatfs *d)
+{
+	memset(d, 0, sizeof(*d));
+	d->f_bsize = (uint32_t)f->f_bsize; d->f_iosize = (int32_t)f->f_iosize; d->f_blocks = f->f_blocks; d->f_bfree = f->f_bfree;
+	d->f_bavail = f->f_bavail > 0 ? f->f_bavail : 0; d->f_files = f->f_files; d->f_ffree = f->f_ffree > 0 ? f->f_ffree : 0;
+	d->f_fsid[0] = f->f_fsid.val[0]; d->f_fsid[1] = f->f_fsid.val[1]; d->f_owner = f->f_owner; d->f_type = f->f_type; d->f_flags = (uint32_t)f->f_flags;
+	strlcpy(d->f_fstypename, f->f_fstypename, sizeof(d->f_fstypename));
+	strlcpy(d->f_mntonname, f->f_mntonname, sizeof(d->f_mntonname));
+	strlcpy(d->f_mntfromname, f->f_mntfromname, sizeof(d->f_mntfromname));
+}
+static int dw_statfs(const char *p, struct dstatfs *d) { struct statfs f; int r = statfs(p, &f); if (r == 0) sfs_out(&f, d); return (r); }
+static int dw_fstatfs(int fd, struct dstatfs *d) { struct statfs f; int r = fstatfs(fd, &f); if (r == 0) sfs_out(&f, d); return (r); }
+
+/* utimes and lutimes: Darwin's timeval has a 32 bit tv_usec */
+struct dtimeval2 { int64_t sec; int32_t usec; int32_t pad; };
+static int
+dw_utimes(const char *path, const struct dtimeval2 *tv)
+{
+	struct timeval t[2];
+	if (tv == NULL) return (utimes(path, NULL));
+	t[0].tv_sec = tv[0].sec; t[0].tv_usec = tv[0].usec; t[1].tv_sec = tv[1].sec; t[1].tv_usec = tv[1].usec;
+	return (utimes(path, t));
+}
+static int
+dw_lutimes(const char *path, const struct dtimeval2 *tv)
+{
+	struct timeval t[2];
+	if (tv == NULL) return (lutimes(path, NULL));
+	t[0].tv_sec = tv[0].sec; t[0].tv_usec = tv[0].usec; t[1].tv_sec = tv[1].sec; t[1].tv_usec = tv[1].usec;
+	return (lutimes(path, t));
+}
 
 /* fstatat: Darwin's AT_FDCWD is -2 and its AT_* flags are other bits */
 static int
@@ -280,6 +322,32 @@ static int dw_setxattr(const char *p, const char *n, const void *v, size_t sz, u
 static ssize_t dw_getxattr(const char *p, const char *n, void *v, size_t sz, uint32_t pos, int opt) { errno = ENOATTR; return (-1); }
 static ssize_t dw_listxattr(const char *p, char *l, size_t sz, int opt) { return (0); }
 
+/* CommonCrypto (cc.c) */
+int cc_MD5_Init(void *); int cc_MD5_Update(void *, const void *, uint32_t); int cc_MD5_Final(unsigned char *, void *);
+int cc_SHA1_Init(void *); int cc_SHA1_Update(void *, const void *, uint32_t); int cc_SHA1_Final(unsigned char *, void *);
+int cc_SHA256_Init(void *); int cc_SHA256_Update(void *, const void *, uint32_t); int cc_SHA256_Final(unsigned char *, void *);
+int cc_SHA384_Init(void *); int cc_SHA384_Update(void *, const void *, uint32_t); int cc_SHA384_Final(unsigned char *, void *);
+int cc_SHA512_Init(void *); int cc_SHA512_Update(void *, const void *, uint32_t); int cc_SHA512_Final(unsigned char *, void *);
+void cc_CCHmacInit(void *, uint32_t, const void *, size_t); void cc_CCHmacUpdate(void *, const void *, size_t); void cc_CCHmacFinal(void *, void *);
+int cc_CCKeyDerivationPBKDF(uint32_t, const char *, size_t, const uint8_t *, size_t, uint32_t, uint32_t, uint8_t *, size_t);
+int cc_CCCryptorCreateWithMode(uint32_t, uint32_t, uint32_t, uint32_t, const void *, const void *, size_t, const void *, size_t, int, uint32_t, void **);
+int cc_CCCryptorUpdate(void *, const void *, size_t, void *, size_t, size_t *); int cc_CCCryptorReset(void *, const void *);
+int cc_CCCryptorRelease(void *); int cc_CCCryptorFinal(void *, void *, size_t, size_t *);
+
+/* Mac-only calls that need no real work here: extended attributes, copyfile, the membership (ACL) API */
+static int dw_fsetxattr(int fd, const char *n, const void *v, size_t sz, uint32_t pos, int opt) { errno = ENOTSUP; return (-1); }
+static ssize_t dw_fgetxattr(int fd, const char *n, void *v, size_t sz, uint32_t pos, int opt) { errno = ENOATTR; return (-1); }
+static ssize_t dw_flistxattr(int fd, char *l, size_t sz, int opt) { return (0); }
+static int dw_fremovexattr(int fd, const char *n, int opt) { errno = ENOATTR; return (-1); }
+static int dw_copyfile(const char *from, const char *to, void *state, uint32_t flags) { if (flags & (1u << 16)) return (0); errno = ENOTSUP; return (-1); }	/* COPYFILE_CHECK: nothing to copy (no AppleDouble data) */
+static int dw_mbr_uid_to_uuid(unsigned uid, unsigned char *uu) { return (ENOENT); }
+static int dw_mbr_uuid_to_id(const unsigned char *uu, unsigned *id, int *type) { return (ENOENT); }
+
+/* iconv: FreeBSD's libc has it under the names __bsd_iconv* */
+static void *dw_iconv_open(const char *to, const char *from) { void *(*f)(const char *, const char *) = dlsym(RTLD_DEFAULT, "__bsd_iconv_open"); return (f ? f(to, from) : (errno = EINVAL, (void *)-1)); }
+static size_t dw_iconv(void *cd, char **in, size_t *il, char **out, size_t *ol) { size_t (*f)(void *, char **, size_t *, char **, size_t *) = dlsym(RTLD_DEFAULT, "__bsd_iconv"); return (f ? f(cd, in, il, out, ol) : (size_t)-1); }
+static int dw_iconv_close(void *cd) { int (*f)(void *) = dlsym(RTLD_DEFAULT, "__bsd_iconv_close"); return (f ? f(cd) : -1); }
+
 /* CoreFoundation strings (cf.c) */
 void *cf_CFStringCreateWithCString(void *, const char *, uint32_t);
 void *cf_CFStringCreateWithCharacters(void *, const uint16_t *, long);
@@ -296,6 +364,8 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_open", dw_open }, { "_fcntl", dw_fcntl },
 	{ "_readdir$INODE64", dw_readdir }, { "_readdir", dw_readdir }, { "_readdir_r$INODE64", dw_readdir_r }, { "_readdir_r", dw_readdir_r },
 	{ "_stat$INODE64", dw_stat }, { "_lstat$INODE64", dw_lstat }, { "_fstat$INODE64", dw_fstat },
+	{ "_statfs$INODE64", dw_statfs }, { "_statfs", dw_statfs }, { "_fstatfs$INODE64", dw_fstatfs }, { "_fstatfs", dw_fstatfs },
+	{ "_utimes", dw_utimes }, { "_lutimes", dw_lutimes },
 	{ "_fstatat$INODE64", dw_fstatat }, { "_fstatat", dw_fstatat }, { "_openat", dw_openat }, { "_unlinkat", dw_unlinkat },
 	{ "_pthread_attr_setdetachstate", dw_attr_setdetachstate },
 	{ "_stat64", dw_stat }, { "_lstat64", dw_lstat }, { "_fstat64", dw_fstat },
@@ -315,6 +385,18 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "___memcpy_chk", dw_memcpy_chk }, { "___memmove_chk", dw_memmove_chk }, { "___memset_chk", dw_memset_chk },
 	{ "___strcpy_chk", dw_strcpy_chk }, { "___strcat_chk", dw_strcat_chk }, { "___strncpy_chk", dw_strncpy_chk }, { "___strncat_chk", dw_strncat_chk },
 	{ "_setxattr", dw_setxattr }, { "_getxattr", dw_getxattr }, { "_listxattr", dw_listxattr },
+	{ "_CC_MD5_Init", cc_MD5_Init }, { "_CC_MD5_Update", cc_MD5_Update }, { "_CC_MD5_Final", cc_MD5_Final },
+	{ "_CC_SHA1_Init", cc_SHA1_Init }, { "_CC_SHA1_Update", cc_SHA1_Update }, { "_CC_SHA1_Final", cc_SHA1_Final },
+	{ "_CC_SHA256_Init", cc_SHA256_Init }, { "_CC_SHA256_Update", cc_SHA256_Update }, { "_CC_SHA256_Final", cc_SHA256_Final },
+	{ "_CC_SHA384_Init", cc_SHA384_Init }, { "_CC_SHA384_Update", cc_SHA384_Update }, { "_CC_SHA384_Final", cc_SHA384_Final },
+	{ "_CC_SHA512_Init", cc_SHA512_Init }, { "_CC_SHA512_Update", cc_SHA512_Update }, { "_CC_SHA512_Final", cc_SHA512_Final },
+	{ "_CCHmacInit", cc_CCHmacInit }, { "_CCHmacUpdate", cc_CCHmacUpdate }, { "_CCHmacFinal", cc_CCHmacFinal },
+	{ "_CCKeyDerivationPBKDF", cc_CCKeyDerivationPBKDF },
+	{ "_CCCryptorCreateWithMode", cc_CCCryptorCreateWithMode }, { "_CCCryptorUpdate", cc_CCCryptorUpdate }, { "_CCCryptorReset", cc_CCCryptorReset },
+	{ "_CCCryptorRelease", cc_CCCryptorRelease }, { "_CCCryptorFinal", cc_CCCryptorFinal },
+	{ "_fsetxattr", dw_fsetxattr }, { "_fgetxattr", dw_fgetxattr }, { "_flistxattr", dw_flistxattr }, { "_fremovexattr", dw_fremovexattr },
+	{ "_copyfile", dw_copyfile }, { "_mbr_uid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_gid_to_uuid", dw_mbr_uid_to_uuid }, { "_mbr_uuid_to_id", dw_mbr_uuid_to_id },
+	{ "_iconv_open", dw_iconv_open }, { "_iconv", dw_iconv }, { "_iconv_close", dw_iconv_close },
 	{ "_CFStringCreateWithCString", cf_CFStringCreateWithCString }, { "_CFStringCreateWithCharacters", cf_CFStringCreateWithCharacters },
 	{ "_CFStringGetLength", cf_CFStringGetLength }, { "_CFStringGetCharacterAtIndex", cf_CFStringGetCharacterAtIndex },
 	{ "_CFStringCreateMutableCopy", cf_CFStringCreateMutableCopy }, { "_CFStringGetCString", cf_CFStringGetCString },
@@ -347,7 +429,7 @@ shim_open_library(const char *installname)
 {
 	static const struct { const char *prefix, *so; } map[] = {
 		{ "/usr/lib/libz.", "libz.so.6" }, { "/usr/lib/libbz2", "libbz2.so.4" }, { "/usr/lib/libexpat", "libexpat.so.1" },
-		{ "/usr/lib/libxml2", "libxml2.so.2" }, { "/usr/lib/libc++.", "libc++.so.1" }, { "/usr/lib/libiconv", "libiconv.so.2" },
+		{ "/usr/lib/libxml2", "libxml2.so.16" }, { "/usr/lib/libc++.", "libc++.so.1" }, { "/usr/lib/libiconv", "libiconv.so.2" },
 		{ "/usr/lib/liblzma", "liblzma.so.5" }, { "/usr/lib/libcurses", "libncurses.so.9" }, { "/usr/lib/libncurses", "libncurses.so.9" },
 	};
 	size_t i; void *h;
