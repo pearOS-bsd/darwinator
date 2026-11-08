@@ -35,6 +35,27 @@ static i64 dsys_2(i64 n, i64 *second)
 #endif
 }
 
+
+/* a call with seven arguments (kevent64): the seventh is on the stack on x86-64 (above a return address), in x6 on arm64 */
+static i64 dsys7(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g)
+{
+#if defined(__x86_64__)
+	register i64 r10 __asm__("r10") = d;
+	register i64 r8 __asm__("r8") = e;
+	register i64 r9 __asm__("r9") = f;
+	i64 ret = 0x2000000 | n;
+	unsigned char err;
+	__asm__ volatile("push %7; push $0; syscall; setc %1; add $16, %%rsp" : "+a"(ret), "=q"(err), "+d"(c), "+D"(a), "+S"(b), "+r"(r10), "+r"(r8), "+r"(r9)
+	    : "r"(g) : "rcx", "r11", "memory", "cc");
+	return err ? -ret : ret;
+#else
+	register i64 x0 __asm__("x0") = a, x1 __asm__("x1") = b, x2 __asm__("x2") = c, x3 __asm__("x3") = d, x4 __asm__("x4") = e, x5 __asm__("x5") = f, x6 __asm__("x6") = g, x16 __asm__("x16") = n;
+	unsigned long err;
+	__asm__ volatile("svc #0x80\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6) : "r"(x16) : "memory", "cc");
+	return err ? -x0 : x0;
+#endif
+}
+
 static int fails;
 static void check(const char *name, int cond, i64 detail)
 {
@@ -51,9 +72,19 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
+	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
 };
 
+struct dkev { u64 ident; short filter; unsigned short flags; unsigned fflags; i64 data; u64 udata; u64 ext[2]; };	/* 32 bytes for kevent, 48 for kevent64 */
+struct dsa { u64 handler, tramp; unsigned mask; int flags; };
+struct dtv { i64 sec; int usec; int pad; };
+struct ditimer { struct dtv interval, value; };
+static struct dkev mk(u64 id, short f, unsigned short fl, unsigned ff, i64 d, u64 u) { struct dkev k = { id, f, fl, ff, d, u, { 0, 0 } }; return k; }
+static struct dtv tv0 = { 0, 0, 0 }, tv1 = { 1, 0, 0 }, tv2 = { 2, 0, 0 };
+static volatile int got_sig, got_signo_from_info;
+static void on_usr1(int sig) { got_sig = sig; }
+static void on_usr1_info(int sig, void *info, void *uc) { got_sig = sig; got_signo_from_info = *(int *)info; (void)uc; }
 struct dflock { i64 start, len; int pid; short type, whence; };
 struct dpollfd { int fd; short events, revents; };
 struct drlimit { u64 cur, max; };
@@ -63,7 +94,7 @@ static void cleanup(void)
 {
 	S(SYS_unlink, "/tmp/dsc/a", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/bb", 0, 0, 0, 0, 0);
 	S(SYS_unlink, "/tmp/dsc/ln", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/sl", 0, 0, 0, 0, 0);
-	S(SYS_unlink, "/tmp/dsc/ren", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/fifo", 0, 0, 0, 0, 0);
+	S(SYS_unlink, "/tmp/dsc/ren", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/fifo", 0, 0, 0, 0, 0); S(SYS_unlink, "/tmp/dsc/fifo2", 0, 0, 0, 0, 0);
 	S(SYS_rmdir, "/tmp/dsc", 0, 0, 0, 0, 0);
 }
 
@@ -178,6 +209,60 @@ int cmain(void)
 		unsigned char sa[16] = { 16, 2, 0, 0, 127, 0, 0, 1, 0 }; check("bind (127.0.0.1)", S(SYS_bind, r, sa, 16, 0, 0, 0) == 0, 0);
 		check("listen", S(SYS_listen, r, 1, 0, 0, 0, 0) == 0, 0); S(SYS_close, r, 0, 0, 0, 0, 0); }
 	else check("socket (AF_INET)", 0, r);
+
+	/* mknod (a FIFO), the device numbers of stat */
+	{ struct dstat64 st; r = S(SYS_mknod, "/tmp/dsc/fifo2", 010600, 0, 0, 0, 0); check("mknod (S_IFIFO)", r == 0, r);
+	  r = S(SYS_stat64, "/tmp/dsc/fifo2", &st, 0, 0, 0, 0); check("  stat says FIFO", r == 0 && (st.st_mode & 0170000) == 010000 && st.st_dev != 0, st.st_mode);
+	  r = S(SYS_stat64, "/dev/null", &st, 0, 0, 0, 0); check("stat /dev/null: st_rdev is set", r == 0 && st.st_rdev != 0 && (st.st_mode & 0170000) == 020000, st.st_rdev);
+	  S(SYS_unlink, "/tmp/dsc/fifo2", 0, 0, 0, 0, 0); }
+
+	/* getfsstat64 */
+	{ static struct dstatfs fs[4]; r = S(SYS_getfsstat64, 0, 0, 2, 0, 0, 0); check("getfsstat64 (count)", r >= 1, r);
+	  r2 = S(SYS_getfsstat64, fs, sizeof(fs), 2, 0, 0, 0); check("getfsstat64 (structures)", r2 >= 1 && fs[0].fstype[0] && fs[0].on[0] == '/' && fs[0].blocks > 0, r2); }
+
+	/* kqueue: a pipe becoming readable, a user event (Darwin's filter -10), a timer, kevent64 */
+	{ i64 kq = S(SYS_kqueue, 0, 0, 0, 0, 0, 0); i64 p1, p0; struct dkev c, e[2]; check("kqueue", kq >= 0, kq);
+	  p0 = dsys_2(SYS_pipe, &p1);
+	  c = mk((u64)p0, -1, 0x1, 0, 0, 0x1234);
+	  r = S(SYS_kevent, kq, &c, 1, 0, 0, 0); check("kevent EV_ADD EVFILT_READ", r == 0, r);
+	  r = S(SYS_kevent, kq, 0, 0, e, 1, &tv0); check("  nothing to read yet", r == 0, r);
+	  S(SYS_write, p1, "z", 1, 0, 0, 0);
+	  r = S(SYS_kevent, kq, 0, 0, e, 1, &tv1); check("  readable: filter, ident, data, udata", r == 1 && e[0].filter == -1 && e[0].ident == (u64)p0 && e[0].data >= 1 && e[0].udata == 0x1234, r);
+	  S(SYS_read, p0, buf, 1, 0, 0, 0);	/* the pipe is empty again: a level-triggered filter would report it every time */
+	  c = (struct dkev){ 7, -10, 0x21, 0, 0, 0x55, { 0, 0 } };	/* EVFILT_USER, EV_ADD | EV_CLEAR */
+	  r = dsys7(SYS_kevent64, kq, (i64)&c, 1, 0, 0, 0, 0); check("kevent64 EV_ADD EVFILT_USER", r == 0, r);
+	  c = mk(7, -10, 0, 0x01000000, 0, 0x55);	/* NOTE_TRIGGER */
+	  r = dsys7(SYS_kevent64, kq, (i64)&c, 1, (i64)e, 1, 0, (i64)&tv1); check("  triggered: filter -10 comes back", r == 1 && e[0].filter == -10 && e[0].ident == 7 && e[0].udata == 0x55, r);
+	  c = mk(1, -7, 0x11, 0, 20, 0);	/* EVFILT_TIMER 20 ms, EV_ADD | EV_ONESHOT */
+	  r = S(SYS_kevent, kq, &c, 1, 0, 0, 0); check("kevent EVFILT_TIMER", r == 0, r);
+	  r = S(SYS_kevent, kq, 0, 0, e, 2, &tv2); check("  timer fires", r >= 1 && e[0].filter == -7, r);
+	  c = mk(9, -8, 0x1, 0, 0, 0);	/* EVFILT_MACHPORT: not supported: an error event */
+	  r = S(SYS_kevent, kq, &c, 1, e, 1, &tv0); check("  a Mach port filter is reported as an error event", r == 1 && (e[0].flags & 0x4000), r);
+	  S(SYS_close, kq, 0, 0, 0, 0, 0); S(SYS_close, p0, 0, 0, 0, 0, 0); S(SYS_close, p1, 0, 0, 0, 0, 0); }
+
+	/* signals: sigaction with a handler, SA_SIGINFO, sigpending, pthread_sigmask, itimers */
+	{ struct dsa sa = { (u64)on_usr1, 0, 0, 0 }, old = { 1, 1, 1, 1 }; u64 me = S(SYS_getpid, 0, 0, 0, 0, 0, 0);
+	  r = S(SYS_sigaction, 30, &sa, &old, 0, 0, 0); check("sigaction (SIGUSR1)", r == 0 && old.handler == 0, r);
+	  got_sig = 0; S(SYS_kill, me, 30, 1, 0, 0, 0); check("  the handler ran and returned (kill SIGUSR1 to self)", got_sig == 30, got_sig);
+	  sa.handler = (u64)on_usr1_info; sa.flags = 0x40; got_sig = 0; got_signo_from_info = 0;
+	  r = S(SYS_sigaction, 30, &sa, &old, 0, 0, 0); check("sigaction SA_SIGINFO (the old handler comes back)", r == 0 && old.handler == (u64)on_usr1, r);
+	  S(SYS_kill, me, 30, 1, 0, 0, 0); check("  siginfo: si_signo", got_sig == 30 && got_signo_from_info == 30, got_signo_from_info);
+	  { unsigned m = 1U << 29, pend = 0, oldm = 0; got_sig = 0;
+	    S(SYS_pthread_sigmask, 1, &m, &oldm, 0, 0, 0); S(SYS_kill, me, 30, 1, 0, 0, 0);
+	    r = S(SYS_sigpending, &pend, 0, 0, 0, 0, 0); check("sigpending (blocked SIGUSR1 is pending)", r == 0 && (pend & m) && got_sig == 0, pend);
+	    S(SYS_pthread_sigmask, 3, &oldm, 0, 0, 0, 0); check("  unblocked: the handler runs", got_sig == 30, got_sig); }
+	  sa.handler = 0; sa.flags = 0; S(SYS_sigaction, 30, &sa, 0, 0, 0, 0);
+	  check("sigaction with a bad signal is EINVAL", S(SYS_sigaction, 99, &sa, 0, 0, 0, 0) == -22, 0);
+	  { struct ditimer it = { { 0, 0, 0 }, { 100, 0, 0 } }, cur; r = S(SYS_setitimer, 0, &it, 0, 0, 0, 0); check("setitimer", r == 0, r);
+	    r = S(SYS_getitimer, 0, &cur, 0, 0, 0, 0); check("  getitimer", r == 0 && cur.value.sec >= 99 && cur.value.sec <= 100, cur.value.sec);
+	    it.value.sec = 0; S(SYS_setitimer, 0, &it, 0, 0, 0, 0); } }
+
+	/* AF_INET6: Darwin's family number in the address */
+	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
+	  check("socket AF_INET6 (stream)", s6 >= 0, s6);
+	  r = S(SYS_bind, s6, a6, 28, 0, 0, 0); check("bind [::]:0 with family 30", r == 0, r);
+	  r = S(SYS_getsockname, s6, b6, &bl, 0, 0, 0); check("  getsockname says family 30 and gives a port", r == 0 && b6[1] == 30 && bl == 28 && (b6[2] | b6[3]), b6[1]);
+	  S(SYS_close, s6, 0, 0, 0, 0, 0); }
 
 	cleanup();
 	check("cleanup", S(SYS_stat64, "/tmp/dsc", buf, 0, 0, 0, 0) == -2, 0);

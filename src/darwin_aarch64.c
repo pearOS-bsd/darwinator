@@ -8,6 +8,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sysent.h>
+#include <sys/syscall.h>
 #include <machine/frame.h>
 
 #include "darwinator.h"
@@ -21,7 +22,12 @@ darwin_fetch_syscall_args(struct thread *td)
 
 	sa->original_code = (u_int)x16;
 	sa->code = (u_int)x16;
-	if (x16 < 0 || x16 >= darwin_nsyscalls)		/* negative: Mach traps, not implemented yet */
+	if (td->td_proc->p_sysent->sv_sigcode_base != 0 &&
+	    frame->tf_elr - 4 >= (uint64_t)td->td_proc->p_sysent->sv_sigcode_base &&
+	    frame->tf_elr - 4 < (uint64_t)td->td_proc->p_sysent->sv_sigcode_base + (uint64_t)*td->td_proc->p_sysent->sv_szsigcode) {
+		sa->code = SYS_sigreturn;		/* the signal trampoline of the kernel (svc #0, number in x8) */
+		sa->callp = &sysent[SYS_sigreturn];
+	} else if (x16 < 0 || x16 >= darwin_nsyscalls)		/* negative: Mach traps, not implemented yet */
 		sa->callp = &nosys_sysent;
 	else
 		sa->callp = &darwin_sysent[sa->code];

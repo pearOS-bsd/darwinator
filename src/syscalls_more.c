@@ -12,6 +12,7 @@
 #include <sys/errno.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
+#include <sys/time.h>
 #include <sys/filedesc.h>
 #include <sys/ioccom.h>
 #include <sys/kernel.h>
@@ -256,7 +257,7 @@ out:
 
 /* ---- statfs64, fstatfs64 ---- */
 
-static int
+int
 darwin_statfs_out(const struct statfs *s, void *ubuf)
 {
 	struct darwin_statfs64 *d;
@@ -309,7 +310,7 @@ darwin_fstatfs64(struct thread *td, struct darwin_args *uap)
 
 /* ---- sigprocmask(how, *set, *oset): Darwin's sigset_t is 32 bits ---- */
 
-static int
+int
 darwin_sigprocmask(struct thread *td, struct darwin_args *uap)
 {
 	sigset_t set, oset, *setp = NULL;
@@ -457,7 +458,7 @@ darwin_getsockopt(struct thread *td, struct darwin_args *uap)
 #define	DARWIN_MACHINE	"arm64"
 #endif
 
-enum { K_STR, K_INT, K_U64, K_HOST };
+enum { K_STR, K_INT, K_U64, K_HOST, K_BOOTTIME };
 
 static const struct darwin_sysctl {
 	const char	*name;
@@ -479,6 +480,16 @@ static const struct darwin_sysctl {
 	{ "hw.pagesize",	6, 7,	K_INT, NULL, 3 },
 	{ "hw.memsize",		6, 24,	K_U64, NULL, 5 },
 	{ "hw.activecpu",	6, 25,	K_INT, NULL, 2 },
+	{ "kern.boottime",	1, 21,	K_BOOTTIME, NULL, 0 },
+	{ "kern.maxproc",	1, 6,	K_INT, NULL, 6 },
+	{ "kern.maxfiles",	1, 7,	K_INT, NULL, 7 },
+	{ "kern.maxfilesperproc", 1, 29, K_INT, NULL, 8 },
+	{ "kern.osrev",		1, 3,	K_INT, NULL, 9 },
+	{ "hw.cachelinesize",	-1, -1,	K_INT, NULL, 10 },
+	{ "hw.cpu64bit_capable", -1, -1, K_INT, NULL, 11 },
+	{ "hw.byteorder",	6, 4,	K_INT, NULL, 12 },
+	{ "hw.logicalcpu_max",	-1, -1,	K_INT, NULL, 2 },
+	{ "hw.physicalcpu_max",	-1, -1,	K_INT, NULL, 2 },
 	{ "hw.logicalcpu",	-1, -1,	K_INT, NULL, 2 },
 	{ "hw.physicalcpu",	-1, -1,	K_INT, NULL, 2 },
 };
@@ -489,6 +500,7 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 {
 	char hostname[MAXHOSTNAMELEN];
 	union { int i; uint64_t u; } v;
+	struct { int64_t sec; int32_t usec; int32_t pad; } tv;		/* Darwin's struct timeval */
 	const char *data = NULL;
 	size_t size = 0, have = 0;
 	int error;
@@ -514,11 +526,29 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 		case 1: v.i = 1048576; break;
 		case 2: v.i = mp_ncpus; break;
 		case 3: v.i = PAGE_SIZE; break;
+		case 6: v.i = maxproc; break;
+		case 7: v.i = maxfiles; break;
+		case 8: v.i = maxfilesperproc; break;
+		case 9: v.i = 199506; break;		/* KERN_OSREV of BSD 4.4 */
+		case 10: v.i = 64; break;
+		case 11: v.i = 1; break;
+		case 12: v.i = 1234; break;
 		default: v.i = (int)MIN((uint64_t)ptoa((uint64_t)physmem), (uint64_t)INT_MAX); break;
 		}
 		data = (const char *)&v;
 		size = sizeof(v.i);
 		break;
+	case K_BOOTTIME: {
+		struct timeval bt;
+
+		getboottime(&bt);
+		tv.sec = bt.tv_sec;
+		tv.usec = bt.tv_usec;
+		tv.pad = 0;
+		data = (const char *)&tv;
+		size = sizeof(tv);
+		break;
+	}
 	default:
 		v.u = (uint64_t)ptoa((uint64_t)physmem);
 		data = (const char *)&v;
@@ -651,6 +681,7 @@ static const struct {
 	E(203, 2, sys_mlock,		AUE_MLOCK,		"mlock"),
 	E(204, 2, sys_munlock,		AUE_MUNLOCK,		"munlock"),
 	E(48,  3, darwin_sigprocmask,	AUE_SIGPROCMASK,	"sigprocmask"),
+	E(329, 3, darwin_sigprocmask,	AUE_SIGPROCMASK,	"pthread_sigmask"),
 	E(93,  5, sys_select,		AUE_SELECT,		"select"),
 	E(230, 3, sys_poll,		AUE_POLL,		"poll"),
 	/* sockets */
@@ -705,6 +736,7 @@ darwin_more_syscalls_init(void)
 		    .sy_auevent = darwin_more[i].auevent, .sy_thrcnt = SY_THR_STATIC };
 		darwin_syscallnames[n] = darwin_more[i].name;
 	}
+	darwin_event_syscalls_init();		/* syscalls_event.c: replaces some of the above */
 }
 
 /* open_nocancel (398) is the open of syscalls.c: filled by darwin_syscalls_init */
