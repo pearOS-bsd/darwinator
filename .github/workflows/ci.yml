@@ -26,4 +26,4 @@ jobs:
             fetch -q -o /tmp/src.txz "https://download.freebsd.org/releases/$RELDIR/$REL/src.txz"
             sudo tar -xf /tmp/src.txz -C / usr/src/sys
             make SYSDIR=/usr/src/sys
-            sudo sh tests/run.sh
+            sudo sh tests/run.sh || { echo "== dmesg"; dmesg | tail -40; exit 1; }
