@@ -19,11 +19,12 @@ Install and run it in the pearOS image: `macapp-install unarchiver`, then `macap
 
 ## Not solved
 
-The application crashes in about half of its runs, with a message to an object that was freed (`objc_msgSend` with a receiver without a class, or
-`objc_autoreleasePoolPop` when `junk:true`). The Preferences window and the extraction work in the other runs (6 runs with a tar.gz: 3 extracted).
-The receiver is not sent from the application's code but from GNUstep's: some object is released once too often earlier. Not found yet.
+About a third of the runs crash (`objc_msgSend` or `objc_msg_lookup` with a receiver that is not an object, `objc_autoreleasePoolPop` when `junk:true`); the others
+extract. Found so far: the string that `MACHRUN_OPENFILE` hands to `application:openFile:` was autoreleased and freed under the extraction (fixed: it is owned now, with
+`NSZombieEnabled=YES` there are no more messages to a freed `GSCInlineString`), and archives made by the image's own `tar` (bsdtar) crash it more often than archives
+of GNU tar. The remaining crash is not found. The test (`tests/unar.sh`) tries each archive up to three times.
 
 ## Test
 
-`sh tests/unar.sh "/Applications/The Unarchiver.app"` makes archives of a small tree (tar.gz, tar.bz2, tar.xz; zip and 7z too with `PREBUILT=dir`),
-has the application open each one (up to `ATTEMPTS`, 4 by default, runs for each archive, because of the crashes) and compares the extracted files with the originals byte for byte.
+`sh tests/unar.sh "/Applications/The Unarchiver.app"` makes archives of a small tree (from `tests/data/unar`),
+has the application open each one (up to `ATTEMPTS`, 3 by default, runs for each archive, because of the crashes) and compares the extracted files with the originals byte for byte.
