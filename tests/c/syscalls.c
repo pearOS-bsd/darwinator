@@ -56,6 +56,19 @@ static i64 dsys7(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g)
 #endif
 }
 
+
+/* a thread of libpthread's kind: bsdthread_create starts thread_entry with (pthread, kport, func, arg, stack, flags) in the argument registers */
+static volatile u64 thread_val, thread_port;
+static void tfunc(u64 arg) { thread_val = arg; }
+void thread_entry(void);
+#if defined(__x86_64__)
+__asm__(".globl thread_entry\nthread_entry:\n\tmov %rsi, thread_port(%rip)\n\tmov %rdx, %rax\n\tmov %rcx, %rdi\n\tcall *%rax\n"
+	"\txor %edi, %edi\n\txor %esi, %esi\n\txor %edx, %edx\n\txor %r10d, %r10d\n\tmov $0x2000169, %eax\n\tsyscall\n\tud2\n");
+#else
+__asm__(".globl thread_entry\nthread_entry:\n\tadrp x9, thread_port\n\tstr x1, [x9, :lo12:thread_port]\n\tmov x0, x3\n\tblr x2\n"
+	"\tmov x0, #0\n\tmov x1, #0\n\tmov x2, #0\n\tmov x3, #0\n\tmov x16, #361\n\tsvc #0\n\tbrk #1\n");
+#endif
+
 static int fails;
 static void check(const char *name, int cond, i64 detail)
 {
@@ -72,7 +85,7 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
 	SYS_pthread_kill = 328, SYS_thread_selfid = 372, SYS_openat = 463, SYS_renameat = 465, SYS_faccessat = 466, SYS_fchmodat = 467, SYS_fstatat64 = 470, SYS_linkat = 471,
 	SYS_unlinkat = 472, SYS_readlinkat = 473, SYS_symlinkat = 474, SYS_mkdirat = 475, SYS_ulock_wait = 515, SYS_ulock_wake = 516, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
 	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
@@ -307,6 +320,16 @@ int cmain(void)
 	{ i64 tid = S(SYS_thread_selfid, 0, 0, 0, 0, 0, 0); check("thread_selfid", tid > 0, tid); check("__pthread_kill (signal 0 to this thread)", S(SYS_pthread_kill, tid, 0, 0, 0, 0, 0) == 0, 0); }
 	{ unsigned cs = 7; r = S(SYS_csops, 0, 0, &cs, 4, 0, 0); check("csops (status)", r == 0 && cs == 0, cs); }
 	check("shared_region_check_np is ENOMEM (no shared region)", S(SYS_shared_region_check_np, &buf, 0, 0, 0, 0, 0) == -12, 0);
+
+	/* threads: bsdthread_register, bsdthread_create (the registers of the new thread), bsdthread_terminate */
+	{ i64 base = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0), top; static volatile unsigned dummy = 1;
+	  check("bsdthread_create without bsdthread_register is EINVAL", S(SYS_bsdthread_create, tfunc, 1, base + 65000, 0x1000, 0, 0) == -22, 0);
+	  r = S(SYS_bsdthread_register, thread_entry, 0, 0, 0, 0, 0); check("bsdthread_register", r == 0, r);
+	  top = (base + 65536 - 64) & ~15L; thread_val = 0; thread_port = 0;
+	  r = S(SYS_bsdthread_create, tfunc, 0x1234, top, 0xabc000, 0, 0); check("bsdthread_create gives the pthread back", r == 0xabc000, r);
+	  for (i = 0; i < 300 && thread_val == 0; i++) S(SYS_ulock_wait, 1, &dummy, 1, 10000, 0, 0);
+	  check("  the new thread ran func(arg) (registers of the start routine)", thread_val == 0x1234, (i64)thread_val);
+	  check("  its kernel port is its thread id", thread_port > 0, (i64)thread_port); }
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
