@@ -472,6 +472,17 @@ shim_open_library(const char *installname)
 		}
 		return (RTLD_DEFAULT);
 	}
+	if (strstr(installname, "CoreGraphics.framework") || strstr(installname, "QuartzCore.framework") || strstr(installname, "Quartz.framework") ||
+	    strstr(installname, "ImageIO.framework") || strstr(installname, "CoreImage.framework")) {
+		static int loaded;
+		if (!loaded && getenv("MACHRUN_NOCG") == NULL) {				/* CoreGraphics and CoreFoundation are libopal and GNUstep corebase, Core Animation is the QuartzCore of this system (the libraries that the desktop programs use) */
+			static const char *const so[] = { "libgnustep-corebase.so.0", "libopal.so.0", "libQuartzCore.so" };
+			size_t k;
+			for (k = 0; k < sizeof(so) / sizeof(so[0]); k++) if (dlopen(so[k], RTLD_LAZY | RTLD_GLOBAL) == NULL) VLOG("no %s: %s\n", so[k], dlerror());
+			loaded = 1;
+		}
+		return (RTLD_DEFAULT);
+	}
 	for (i = 0; i < sizeof(map) / sizeof(map[0]); i++)
 		if (strncmp(installname, map[i].prefix, strlen(map[i].prefix)) == 0) {
 			h = dlopen(map[i].so, RTLD_NOW | RTLD_GLOBAL);

@@ -14,6 +14,10 @@ Written from the public description of the Mach-O format and the system call con
 
 *The Preferences window of Keka, the original Mach-O application from its release, started through `machrun` in the pearOS image: GNUstep's AppKit on the window server, Apple's compiled nibs, Objective-C classes of the program in libobjc2.*
 
+![AppCleaner 3.7 (the unmodified Mac application) running in pearOS](docs/screenshot-appcleaner.png)
+
+*AppCleaner 3.7, an original Mach-O application of macOS 15 (Objective-C, chained fixups, Xcode 16 nibs, Sparkle), in its main window in the pearOS image. It starts and shows its window; scanning an application for its files is not working yet (`docs/APPCLEANER.md`).*
+
 ## State
 
 | | |
@@ -36,6 +40,8 @@ make -C dyld                      # builds dyld/machrun (FreeBSD)
 dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
+
+What recent applications need beyond that (AppCleaner is the test): `LC_DYLD_CHAINED_FIXUPS`, nibs in the `NIBArchive` format of Xcode 16 (converted to the keyed archive that GNUstep loads, `compat.m`), the constant literals of the compiler (`@[...]`, `@{...}`, `@1` as structures in the file), direct references to the program's own classes, `objc_alloc`, `objc_opt_new` and the other fast paths of newer compilers, libdispatch objects that the compiler retains with `objc_retain`, CoreGraphics and CoreFoundation from libopal and GNUstep corebase, and stand-ins for Sparkle, SF Symbols and asset catalogs.
 
 ## In the pearOS image
 

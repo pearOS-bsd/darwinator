@@ -459,7 +459,9 @@ machrun_show_windows(id app, SEL _cmd, id arg)
 static void
 safe_finishLaunching(id self, SEL _cmd)
 {
+	VLOG("objc: finishLaunching\n");
 	orig_finishLaunching(self, _cmd);
+	VLOG("objc: finishLaunching done\n");
 	if (getenv("MACHRUN_SHOWWINDOWS")) {
 		SEL s = rt_registerName("machrunShowWindows:"), p = rt_registerName("performSelector:withObject:afterDelay:");
 		Class k = rt_object_getClass(self);
@@ -711,7 +713,7 @@ objc_load_image(find_fn find, intptr_t slide)
 	size_t n, i; void **p; struct o_class **cl; struct o_cat **cats; struct o_proto **prs; uintptr_t *refs;
 	size_t ncl = 0, ncat = 0, npr = 0;
 
-	{ void *dp = find("__objc_data", &n); if (dp) { machrun_cls_lo = (uintptr_t)dp; machrun_cls_hi = (uintptr_t)dp + n; } }	/* class structures in the program: see machrun_fix_recv */
+	{ void *dp = find("__objc_data", &n); if (dp && getenv("MACHRUN_NOFIX") == NULL) { machrun_cls_lo = (uintptr_t)dp; machrun_cls_hi = (uintptr_t)dp + n; } }	/* class structures in the program: see machrun_fix_recv */
 	cl = find("__objc_classlist", &n); ncl = n / sizeof(void *);
 	cats = find("__objc_catlist", &n); ncat = n / sizeof(void *);
 	prs = find("__objc_protolist", &n); npr = n / sizeof(void *);
@@ -791,6 +793,43 @@ objc_send_retain_release(void *obj, int release)
 	((void (*)(id, SEL))machrun_objc_lookup((id)obj, s))((id)obj, s);
 }
 
+/* libdispatch objects (queues, groups, semaphores) are not Objective-C objects here, but the compiler of a Mac application retains and releases them with objc_retain & co. (on a Mac they are);
+ * those calls go to the retain and release of libdispatch for them: an object whose first word points into libdispatch itself is one of its objects. */
+#include <link.h>
+static uintptr_t dsp_lo, dsp_hi; static int dsp_done;
+static int
+dsp_cb(struct dl_phdr_info *i, size_t sz, void *arg)
+{
+	int k;
+	if (i->dlpi_name == NULL || strstr(i->dlpi_name, "libdispatch") == NULL) return (0);
+	for (k = 0; k < i->dlpi_phnum; k++) if (i->dlpi_phdr[k].p_type == PT_LOAD) {
+		uintptr_t a = i->dlpi_addr + i->dlpi_phdr[k].p_vaddr, b = a + i->dlpi_phdr[k].p_memsz;
+		if (dsp_lo == 0 || a < dsp_lo) dsp_lo = a;
+		if (b > dsp_hi) dsp_hi = b;
+	}
+	return (1);
+}
+static inline int
+is_dsp(void *o)
+{
+	uintptr_t w;
+	if (o == NULL || ((uintptr_t)o & 7) != 0) return (0);
+	if (!dsp_done) { if (getenv("MACHRUN_NODSP") == NULL) dl_iterate_phdr(dsp_cb, NULL); dsp_done = 1; }
+	if (dsp_hi == 0) return (0);
+	w = *(uintptr_t *)o;
+	return (w >= dsp_lo && w < dsp_hi);
+}
+static void *real(const char *n) { return (dlsym(RTLD_NEXT, n) ? dlsym(RTLD_NEXT, n) : dlsym(RTLD_DEFAULT, n)); }
+#define	REAL1(var, name)	static void *(*var)(void *); if (!var) var = real(name)
+static void *shim_retain(void *o) { REAL1(f, "objc_retain"); if (is_dsp(o)) { void (*d)(void *) = dlsym(RTLD_DEFAULT, "dispatch_retain"); if (d) d(o); return (o); } return (f(o)); }
+static void shim_release(void *o) { static void (*f)(void *); if (!f) f = real("objc_release"); if (is_dsp(o)) { void (*d)(void *) = dlsym(RTLD_DEFAULT, "dispatch_release"); if (d) d(o); return; } f(o); }
+static void *shim_retainAutoreleasedReturnValue(void *o) { return (shim_retain(o)); }
+static void *shim_autorelease(void *o) { REAL1(f, "objc_autorelease"); return (is_dsp(o) ? o : f(o)); }
+static void *shim_autoreleaseReturnValue(void *o) { REAL1(f, "objc_autoreleaseReturnValue"); return (is_dsp(o) ? o : f(o)); }
+static void *shim_retainAutorelease(void *o) { REAL1(f, "objc_retainAutorelease"); if (is_dsp(o)) return (shim_retain(o)); return (f(o)); }
+static void *shim_retainAutoreleaseReturnValue(void *o) { REAL1(f, "objc_retainAutoreleaseReturnValue"); if (is_dsp(o)) return (shim_retain(o)); return (f(o)); }
+static void shim_storeStrong(void **loc, void *val) { void *old = *loc; *loc = shim_retain(val); shim_release(old); }
+
 void *machrun_fix_recv(void *p);
 /* the optimized messages of newer compilers (objc_opt_*): plain messages that go through objc_msgSend in Apple's runtime */
 static id
@@ -837,6 +876,17 @@ static id shim_identity(id o) { return (o); }
 void *
 objc_shim_lookup(const char *name)
 {
+	if (getenv("MACHRUN_NORR") == NULL) {
+	if (strcmp(name, "_objc_retain") == 0) return ((void *)shim_retain);
+	if (strcmp(name, "_objc_release") == 0) return ((void *)shim_release);
+	if (strcmp(name, "_objc_retainAutoreleasedReturnValue") == 0) return ((void *)shim_retainAutoreleasedReturnValue);
+	if (strcmp(name, "_objc_autorelease") == 0) return ((void *)shim_autorelease);
+	if (strcmp(name, "_objc_autoreleaseReturnValue") == 0) return ((void *)shim_autoreleaseReturnValue);
+	if (strcmp(name, "_objc_retainAutorelease") == 0) return ((void *)shim_retainAutorelease);
+	if (strcmp(name, "_objc_retainAutoreleaseReturnValue") == 0) return ((void *)shim_retainAutoreleaseReturnValue);
+	if (strcmp(name, "_objc_storeStrong") == 0) return ((void *)shim_storeStrong);
+	}
+	if (getenv("MACHRUN_NOALLOC") == NULL) {
 	if (strcmp(name, "_objc_alloc") == 0) return ((void *)shim_alloc);
 	if (strcmp(name, "_objc_alloc_init") == 0) return ((void *)shim_alloc_init);
 	if (strcmp(name, "_objc_allocWithZone") == 0) return ((void *)shim_allocWithZone);
@@ -845,6 +895,7 @@ objc_shim_lookup(const char *name)
 	if (strcmp(name, "_objc_opt_isKindOfClass") == 0) return ((void *)shim_opt_isKindOfClass);
 	if (strcmp(name, "_objc_opt_respondsToSelector") == 0) return ((void *)shim_opt_respondsToSelector);
 	if (strcmp(name, "_objc_unsafeClaimAutoreleasedReturnValue") == 0) return ((void *)shim_identity);
+	}
 	if (strcmp(name, "_objc_msgSend") == 0 || strcmp(name, "_objc_msgSend_fpret") == 0) return ((void *)machrun_objc_msgSend);
 	if (strcmp(name, "_objc_msgSend_stret") == 0) return ((void *)machrun_objc_msgSend_stret);
 	if (strcmp(name, "_objc_msgSendSuper2") == 0) return ((void *)machrun_objc_msgSendSuper2);

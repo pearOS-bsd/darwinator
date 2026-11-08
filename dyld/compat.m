@@ -408,24 +408,34 @@ nibarchive_init(void)
 	}
 }
 
-/* Sparkle (the update framework that Mac applications carry; its updater is an object of the main nib): there are no updates for programs that run here, so the updater is an object that does nothing. */
-@interface SUUpdater : NSObject
-+ (SUUpdater *)sharedUpdater;
-- (IBAction)checkForUpdates:(id)sender;
-@end
-@implementation SUUpdater
-+ (SUUpdater *)sharedUpdater { static SUUpdater *u; if (u == nil) u = [[SUUpdater alloc] init]; return u; }
-- (id)initWithCoder:(NSCoder *)c { return [super init]; }
-- (void)encodeWithCoder:(NSCoder *)c { }
-- (void)checkForUpdates:(id)sender { }
-- (void)checkForUpdatesInBackground { }
-- (BOOL)automaticallyChecksForUpdates { return NO; }
-- (void)setAutomaticallyChecksForUpdates:(BOOL)b { }
-- (void)setDelegate:(id)d { }
-- (id)delegate { return nil; }
-- (void)setFeedURL:(NSURL *)u { }
-- (BOOL)updateInProgress { return NO; }
-@end
+/* Sparkle (the update framework that Mac applications carry; its updater is an object of the main nib): there are no updates for programs that run here, so the updater is an object that does nothing.
+ * Made only when nothing made a class of that name before (machrun makes an empty placeholder for a program that binds to the class). */
+static id su_self(id self, SEL _cmd) { return self; }
+static id su_initWithCoder(id self, SEL _cmd, id coder) { return self; }
+static void su_void(id self, SEL _cmd) { }
+static void su_void1(id self, SEL _cmd, id a) { }
+static BOOL su_no(id self, SEL _cmd) { return NO; }
+static id su_nil(id self, SEL _cmd) { return nil; }
+static id su_shared(id self, SEL _cmd) { static id u; if (u == nil) u = [[self alloc] init]; return u; }
+__attribute__((constructor)) static void
+sparkle_init(void)
+{
+	Class k;
+	if (objc_getClass("SUUpdater") != Nil) return;
+	if ((k = objc_allocateClassPair(NSClassFromString(@"NSObject"), "SUUpdater", 0)) == Nil) return;
+	class_addMethod(k, @selector(initWithCoder:), (IMP)su_initWithCoder, "@24@0:8@16");
+	class_addMethod(k, @selector(encodeWithCoder:), (IMP)su_void1, "v24@0:8@16");
+	class_addMethod(k, @selector(checkForUpdates:), (IMP)su_void1, "v24@0:8@16");
+	class_addMethod(k, @selector(checkForUpdatesInBackground), (IMP)su_void, "v16@0:8");
+	class_addMethod(k, @selector(automaticallyChecksForUpdates), (IMP)su_no, "c16@0:8");
+	class_addMethod(k, @selector(setAutomaticallyChecksForUpdates:), (IMP)su_void1, "v20@0:8c16");
+	class_addMethod(k, @selector(setDelegate:), (IMP)su_void1, "v24@0:8@16");
+	class_addMethod(k, @selector(delegate), (IMP)su_nil, "@16@0:8");
+	class_addMethod(k, @selector(updateInProgress), (IMP)su_no, "c16@0:8");
+	objc_registerClassPair(k);
+	class_addMethod(object_getClass(k), @selector(sharedUpdater), (IMP)su_shared, "@16@0:8");
+	(void)su_self;
+}
 
 /* Images that GNUstep cannot give (SF Symbols of macOS 11, and the images of an Assets.car asset catalog): an empty image of the usual size.  Code that builds a toolbar or a menu out of them
  * (arrays with the image in them) goes on instead of ending on a nil; nothing is drawn where such an image goes. */
@@ -455,5 +465,17 @@ images_init(void)
 	(void)[k class];
 	class_addMethod(object_getClass(k), @selector(imageWithSystemSymbolName:accessibilityDescription:), (IMP)symbol_image, "@32@0:8@16@24");
 	class_addMethod(object_getClass(k), @selector(imageWithSystemSymbolName:variableValue:accessibilityDescription:), (IMP)symbol_image, "@40@0:8@16d24@32");
-	if ((m = class_getClassMethod(k, @selector(imageNamed:))) != NULL) o_imageNamed = method_setImplementation(m, (IMP)w_imageNamed);
+	if (getenv("MACHRUN_NOEMPTYIMAGES") == NULL && (m = class_getClassMethod(k, @selector(imageNamed:))) != NULL) o_imageNamed = method_setImplementation(m, (IMP)w_imageNamed);
+}
+
+/* -1 means "nothing" to the selection setters of AppKit (AppCleaner deselects its segmented control that way); GNUstep raises an exception for the index. */
+static IMP o_selSeg, o_selTab;
+static void w_selSeg(id self, SEL _cmd, NSInteger i) { if (i >= 0) ((void (*)(id, SEL, NSInteger))o_selSeg)(self, _cmd, i); }
+static void w_selTab(id self, SEL _cmd, NSInteger i) { if (i >= 0) ((void (*)(id, SEL, NSInteger))o_selTab)(self, _cmd, i); }
+__attribute__((constructor)) static void
+selection_init(void)
+{
+	Class k; Method m;
+	if ((k = NSClassFromString(@"NSSegmentedControl")) != Nil) { (void)[k class]; if ((m = class_getInstanceMethod(k, @selector(setSelectedSegment:))) != NULL) o_selSeg = method_setImplementation(m, (IMP)w_selSeg); }
+	if ((k = NSClassFromString(@"NSTabView")) != Nil) { (void)[k class]; if ((m = class_getInstanceMethod(k, @selector(selectTabViewItemAtIndex:))) != NULL) o_selTab = method_setImplementation(m, (IMP)w_selTab); }
 }
