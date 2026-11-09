@@ -483,22 +483,21 @@ static const struct darwin_sysctl {
 	{ "hw.model",		6, 2,	K_STR, "pearOS", 0 },
 	{ "hw.ncpu",		6, 3,	K_INT, NULL, 2 },
 	{ "hw.physmem",		6, 5,	K_INT, NULL, 4 },
-	{ "hw.pagesize",	6, 7,	K_INT, NULL, 3 },
+	{ "hw.pagesize",	6, 7,	K_U64, NULL, 3 },	/* 8 bytes on the Mac (probe of macOS 27); 4 bytes when the caller only has room for 4 */
 	{ "hw.memsize",		6, 24,	K_U64, NULL, 5 },
 	{ "hw.activecpu",	6, 25,	K_INT, NULL, 2 },
 	{ "kern.boottime",	1, 21,	K_BOOTTIME, NULL, 0 },
 	{ "kern.maxproc",	1, 6,	K_INT, NULL, 6 },
 	{ "kern.maxfiles",	1, 7,	K_INT, NULL, 7 },
 	{ "kern.maxfilesperproc", 1, 29, K_INT, NULL, 8 },
-	{ "kern.osrev",		1, 3,	K_INT, NULL, 9 },
-	{ "hw.cachelinesize",	-1, -1,	K_INT, NULL, 10 },
+	{ "hw.cachelinesize",	-1, -1,	K_U64, NULL, 10 },
 	{ "hw.cpu64bit_capable", -1, -1, K_INT, NULL, 11 },
 	{ "hw.byteorder",	6, 4,	K_INT, NULL, 12 },
 	{ "hw.logicalcpu_max",	-1, -1,	K_INT, NULL, 2 },
 	{ "hw.physicalcpu_max",	-1, -1,	K_INT, NULL, 2 },
-	{ "hw.l1dcachesize",	-1, -1,	K_INT, NULL, 13 },
-	{ "hw.l1icachesize",	-1, -1,	K_INT, NULL, 13 },
-	{ "hw.l2cachesize",	-1, -1,	K_INT, NULL, 14 },
+	{ "hw.l1dcachesize",	-1, -1,	K_U64, NULL, 13 },
+	{ "hw.l1icachesize",	-1, -1,	K_U64, NULL, 13 },
+	{ "hw.l2cachesize",	-1, -1,	K_U64, NULL, 14 },
 	{ "hw.tbfrequency",	-1, -1,	K_U64, NULL, 15 },
 	{ "hw.optional.x86_64",	-1, -1,	K_INT, NULL, 11 },
 	{ "hw.optional.arm64",	-1, -1,	K_INT, NULL, 11 },
@@ -515,6 +514,7 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 	struct { int64_t sec; int32_t usec; int32_t pad; } tv;		/* Darwin's struct timeval */
 	const char *data = NULL;
 	size_t size = 0, have = 0;
+	bool shrink = false;
 	int error;
 
 	switch (e->kind) {
@@ -564,11 +564,20 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 		break;
 	}
 	default:
-		v.u = e->id == 15 ? 1000000000ULL : (uint64_t)ptoa((uint64_t)physmem);
+		switch (e->id) {
+		case 3: v.u = PAGE_SIZE; shrink = true; break;
+		case 10: v.u = 64; shrink = true; break;
+		case 13: v.u = 32768; shrink = true; break;
+		case 14: v.u = 262144; shrink = true; break;
+		case 15: v.u = 1000000000ULL; break;
+		default: v.u = (uint64_t)ptoa((uint64_t)physmem); break;
+		}
 		data = (const char *)&v;
 		size = sizeof(v.u);
 		break;
 	}
+	if (uoldlenp != NULL && copyin(uoldlenp, &have, sizeof(have)) == 0 && shrink && have == 4)
+		size = 4;			/* the caller asks with an int: the low half (little endian) */
 	if (uoldlenp != NULL) {
 		error = copyin(uoldlenp, &have, sizeof(have));
 		if (error != 0)

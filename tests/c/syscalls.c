@@ -444,6 +444,8 @@ int cmain(void)
 	/* fgetattrlist; sysctl hw.tbfrequency */
 	{ struct { unsigned short n, res; unsigned cmn, vol, dir, file, fork; } fal = { 5, 0, 0x8, 0, 0, 0x200, 0 }; static char fb[128]; int fdf = (int)S(SYS_open, "/tmp/dsc/a", 0, 0, 0, 0, 0);
 	  r = S(SYS_fgetattrlist, fdf, &fal, fb, sizeof(fb), 0, 0); check("fgetattrlist (objtype, data length)", r == 0 && *(unsigned *)fb == 16 && *(unsigned *)(fb + 4) == 1 && *(u64 *)(fb + 8) == 5, r); S(SYS_close, fdf, 0, 0, 0, 0, 0); }
+	{ u64 ps = 0, len = 8; r = S(SYS_sysctlbyname, "hw.pagesize", 11, &ps, &len, 0, 0); check("sysctlbyname hw.pagesize is 8 bytes (as on the Mac)", r == 0 && len == 8 && ps >= 4096, ps); }
+	{ unsigned ps4 = 0; u64 len = 4; r = S(SYS_sysctlbyname, "hw.pagesize", 11, &ps4, &len, 0, 0); check("  and 4 bytes for a caller with an int", r == 0 && len == 4 && ps4 >= 4096, ps4); }
 	{ u64 f = 0, len = 8; r = S(SYS_sysctlbyname, "hw.tbfrequency", 14, &f, &len, 0, 0); check("sysctlbyname hw.tbfrequency", r == 0 && f == 1000000000UL, r); }
 
 	/* AF_INET6: Darwin's family number in the address */
