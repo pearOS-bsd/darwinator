@@ -3,8 +3,11 @@
  * Each one is a place where Apple's AppKit is more forgiving than GNUstep's.
  */
 #import <Foundation/Foundation.h>
+typedef const void *CFTypeRef; typedef const void *CFStringRef;
 #include <objc/runtime.h>
 #include <sys/stat.h>
+#include <sys/param.h>
+#include <sys/mount.h>
 
 /* The auto layout solver of GNUstep raises "Objective function is unbounded" for some constraint sets that Apple's engine solves; the solver and
  * the views keep what they had and the program goes on (the exception would otherwise end it in Keka's "Critical Error" dialog).  Every way into
@@ -680,7 +683,39 @@ w_getRV(id self, SEL _cmd, id *value, NSString *key, NSError **err)
 		if ([key isEqualToString:@"NSURLTypeIdentifierKey"]) { if (value) *value = [t identifier]; } else { if (value) *value = t; }
 		return t != nil;
 	}
-	return ((BOOL (*)(id, SEL, id *, NSString *, NSError **))o_getRV)(self, _cmd, value, key, err);
+	{	/* the keys that GNUstep does not give (the ones Mac programs ask first: folder or file, the volume with its capacity, the dates): when its own answer is no, one from stat and statfs */
+		BOOL ok = ((BOOL (*)(id, SEL, id *, NSString *, NSError **))o_getRV)(self, _cmd, value, key, err);
+		NSString *path; struct stat st; struct statfs sf; NSNumber *n = nil; id v = nil;
+		if (ok) return ok;
+		if (value) *value = nil;		/* a program that does not look at the answer (GrandPerspective logs the format of the volume) must not get what was in its variable */
+		if (![(NSURL *)self isFileURL] || (path = [(NSURL *)self path]) == nil || lstat([path fileSystemRepresentation], &st) != 0) return NO;
+		if ([key isEqualToString:@"NSURLIsDirectoryKey"]) n = [NSNumber numberWithBool:S_ISDIR(st.st_mode) != 0];
+		else if ([key isEqualToString:@"NSURLIsRegularFileKey"]) n = [NSNumber numberWithBool:S_ISREG(st.st_mode) != 0];
+		else if ([key isEqualToString:@"NSURLIsSymbolicLinkKey"]) n = [NSNumber numberWithBool:S_ISLNK(st.st_mode) != 0];
+		else if ([key isEqualToString:@"NSURLIsHiddenKey"]) n = [NSNumber numberWithBool:[[path lastPathComponent] hasPrefix:@"."]];
+		else if ([key isEqualToString:@"NSURLIsPackageKey"]) {
+			NSString *e = [[path pathExtension] lowercaseString];
+			n = [NSNumber numberWithBool:S_ISDIR(st.st_mode) && ([e isEqualToString:@"app"] || [e isEqualToString:@"framework"] || [e isEqualToString:@"bundle"] || [e isEqualToString:@"plugin"] || [e isEqualToString:@"kext"])];
+		}
+		else if ([key isEqualToString:@"NSURLIsVolumeKey"]) n = [NSNumber numberWithBool:[path isEqualToString:@"/"]];
+		else if ([key isEqualToString:@"NSURLNameKey"] || [key isEqualToString:@"NSURLLocalizedNameKey"]) v = [path lastPathComponent];
+		else if ([key isEqualToString:@"NSURLPathKey"]) v = path;
+		else if ([key isEqualToString:@"NSURLContentModificationDateKey"] || [key isEqualToString:@"NSURLAttributeModificationDateKey"]) v = [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)st.st_mtime];
+		else if ([key isEqualToString:@"NSURLContentAccessDateKey"]) v = [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)st.st_atime];
+		else if ([key isEqualToString:@"NSURLCreationDateKey"]) v = [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)st.st_birthtime];
+		else if (statfs([path fileSystemRepresentation], &sf) == 0) {
+			if ([key isEqualToString:@"NSURLVolumeURLKey"]) v = [NSURL fileURLWithPath:[NSString stringWithUTF8String:sf.f_mntonname] isDirectory:YES];
+			else if ([key isEqualToString:@"NSURLVolumeTotalCapacityKey"]) n = [NSNumber numberWithLongLong:(long long)sf.f_blocks * (long long)sf.f_bsize];
+			else if ([key isEqualToString:@"NSURLVolumeAvailableCapacityKey"] || [key isEqualToString:@"NSURLVolumeAvailableCapacityForImportantUsageKey"]) n = [NSNumber numberWithLongLong:(long long)sf.f_bavail * (long long)sf.f_bsize];
+			else if ([key isEqualToString:@"NSURLVolumeNameKey"] || [key isEqualToString:@"NSURLVolumeLocalizedNameKey"]) v = [[NSString stringWithUTF8String:sf.f_mntfromname] lastPathComponent];
+			else if ([key isEqualToString:@"NSURLVolumeLocalizedFormatDescriptionKey"]) v = [[NSString stringWithUTF8String:sf.f_fstypename] uppercaseString];
+			else if ([key isEqualToString:@"NSURLVolumeIsLocalKey"]) n = [NSNumber numberWithBool:(sf.f_flags & MNT_LOCAL) != 0];
+		}
+		if (n != nil) v = n;
+		if (v == nil) return NO;
+		if (value) *value = v;
+		return YES;
+	}
 }
 __attribute__((constructor)) static void
 uttype_init(void)
@@ -986,6 +1021,61 @@ convert_guard_init(void)
 	if ((m = class_getInstanceMethod(k, @selector(convertPoint:fromView:))) != NULL) o_cpfv = method_setImplementation(m, (IMP)w_cpfv);
 	if ((m = class_getInstanceMethod(k, @selector(convertRect:toView:))) != NULL) o_crtv = method_setImplementation(m, (IMP)w_crtv);
 	if ((m = class_getInstanceMethod(k, @selector(convertRect:fromView:))) != NULL) o_crfv = method_setImplementation(m, (IMP)w_crfv);
+}
+
+
+/* NSWindowController finds its nib from the ivar that -initWithWindowNibName: sets; a Mac program that overrides -windowNibName (a subclass that answers the name itself: GrandPerspective's start window)
+ * has no name in the ivar and GNUstep loads a nib of nil.  Without a path of its own, the controller asks -windowNibName and looks the nib up as GNUstep does. */
+static IMP o_windowNibPath;
+static id
+w_windowNibPath(id self, SEL _cmd)
+{
+	id r = ((id (*)(id, SEL))o_windowNibPath)(self, _cmd), name, owner, b;
+	if (r != nil) return r;
+	name = ((id (*)(id, SEL))objc_msgSend)(self, @selector(windowNibName));
+	if (name == nil) return nil;
+	owner = ((id (*)(id, SEL))objc_msgSend)(self, @selector(owner));
+	b = [NSBundle bundleForClass:[owner class]];
+	r = b != nil ? ((id (*)(id, SEL, id))objc_msgSend)(b, @selector(pathForNibResource:), name) : nil;
+	if (r == nil) r = ((id (*)(id, SEL, id))objc_msgSend)([NSBundle mainBundle], @selector(pathForNibResource:), name);
+	return r;
+}
+__attribute__((constructor)) static void
+windownib_init(void)
+{
+	Class k = NSClassFromString(@"NSWindowController"); Method m;
+	if (k == Nil || getenv("MACHRUN_NOWINNIBFIX")) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(windowNibPath))) != NULL) o_windowNibPath = method_setImplementation(m, (IMP)w_windowNibPath);
+}
+
+
+/* UTTypeCopyDeclaration: a declaration for every identifier (the programs that build a list of the file types of a folder, GrandPerspective, drop a type whose declaration is missing and then add nil to a set).
+ * The keys are what the program has for kUTTypeDescriptionKey and kUTTypeConformsToKey: strings with the names of those constants (see objc.c, constants that no library has). */
+CFTypeRef UTTypeCopyDeclaration(CFStringRef uti);
+CFTypeRef
+UTTypeCopyDeclaration(CFStringRef uti)
+{
+	NSString *u = (NSString *)uti, *desc; NSArray *conf;
+	if (getenv("MACHRUN_DEBUG_UT")) fprintf(stderr, "machrun: UTTypeCopyDeclaration(%s)\n", u ? [u UTF8String] : "nil");
+	if (u == nil) return NULL;
+	if ([u isEqualToString:@"public.data"]) { desc = @"Data"; conf = [NSArray arrayWithObject:@"public.item"]; }
+	else if ([u isEqualToString:@"public.item"]) { desc = @"Item"; conf = [NSArray array]; }
+	else if ([u hasPrefix:@"dyn."]) { desc = [NSString stringWithFormat:@"%@ document", [u substringFromIndex:4]]; conf = [NSArray arrayWithObject:@"public.data"]; }
+	else { desc = u; conf = [NSArray arrayWithObject:@"public.data"]; }
+	return (CFTypeRef)[[NSDictionary dictionaryWithObjectsAndKeys:desc, @"kUTTypeDescriptionKey", conf, @"kUTTypeConformsToKey", nil] retain];
+}
+
+
+/* UTTypeCopyPreferredTagWithClass: the extension of a "dyn." identifier (what UTTypeCreatePreferredIdentifierForTag made of it); nothing for the others */
+CFTypeRef UTTypeCopyPreferredTagWithClass(CFStringRef uti, CFStringRef tagClass);
+CFTypeRef
+UTTypeCopyPreferredTagWithClass(CFStringRef uti, CFStringRef tagClass)
+{
+	NSString *u = (NSString *)uti;
+	if (getenv("MACHRUN_DEBUG_UT")) fprintf(stderr, "machrun: UTTypeCopyPreferredTagWithClass(%s)\n", u ? [u UTF8String] : "nil");
+	(void)tagClass;
+	return (u != nil && [u hasPrefix:@"dyn."] && [u length] > 4) ? (CFTypeRef)[[u substringFromIndex:4] retain] : NULL;
 }
 
 /* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
