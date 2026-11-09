@@ -86,3 +86,36 @@ exctrace_init(void)
 	memset(&sa, 0, sizeof(sa)); sa.sa_sigaction = fatal; sa.sa_flags = SA_SIGINFO | SA_ONSTACK; sigemptyset(&sa.sa_mask);
 	for (i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) sigaction(sigs[i], &sa, NULL);
 }
+
+/* MACHRUN_TRACEPOOL=1 (with LD_PRELOAD=libexctrace.so): the autorelease pools of every thread, as libobjc sees them (NSAutoreleasePool -init pushes, -dealloc pops):
+ * a pop whose token is not the last push of the thread is reported with a stack trace */
+#include <pthread.h>
+#include <stdlib.h>
+static __thread void *pl_stack[512]; static __thread int pl_depth;
+void *
+objc_autoreleasePoolPush(void)
+{
+	static void *(*real)(void);
+	void *t;
+	if (!real) real = (void *(*)(void))dlsym(RTLD_NEXT, "objc_autoreleasePoolPush");
+	t = real();
+	if (getenv("MACHRUN_TRACEPOOL")) { if (pl_depth < 512) pl_stack[pl_depth] = t; pl_depth++; }
+	return (t);
+}
+void
+objc_autoreleasePoolPop(void *t)
+{
+	static void (*real)(void *);
+	if (!real) real = (void (*)(void *))dlsym(RTLD_NEXT, "objc_autoreleasePoolPop");
+	if (getenv("MACHRUN_TRACEPOOL") && pl_depth > 0 && pl_depth <= 512) {
+		if (pl_stack[pl_depth - 1] != t) {
+			int k, found = -1; void *bt[24];
+			for (k = pl_depth - 1; k >= 0; k--) if (pl_stack[k] == t) { found = k; break; }
+			dprintf(2, "POOL: pop %p on thread %p, the last push here was %p (%s)\n", t, (void *)pthread_self(), pl_stack[pl_depth - 1], found >= 0 ? "an outer pool: the inner ones are lost" : "not a pool of this thread");
+			k = backtrace(bt, 24); backtrace_symbols_fd(bt, k, 2);
+			if (found >= 0) pl_depth = found + 1;
+		}
+		pl_depth--;
+	} else if (pl_depth > 0) pl_depth--;
+	real(t);
+}

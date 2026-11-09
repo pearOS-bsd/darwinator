@@ -27,8 +27,10 @@ memory that is read without having been written. Found:
 
 * the string that `MACHRUN_OPENFILE` hands to `application:openFile:` was autoreleased and freed under the extraction (fixed: it is owned now);
 * `MALLOC_CONF=zero:true` (the allocator gives zeroed memory, as a Mac's `+alloc` does for the instance variables) takes away the crashes of the controller; `macapp` and the test start it that way;
-* what is left depends on the path length (27 to 33 characters): some string of that size is written or read out of its allocation. Not found. The test uses a short path (`/var/tmp/uat`),
-  where 5 archives of 5 are extracted at the first run.
+* what is left depends on the path length (27 to 33 characters). The crash is in `-[NSAutoreleasePool emptyPool]` -> `objc_autoreleasePoolPop` in the run loop (the pool of the main thread is
+  damaged: something is released once too often and its memory is reused; `MACHRUN_TRACEPOOL=1` with `LD_PRELOAD=libexctrace.so` follows the pools per thread). **`NSZombieEnabled=YES` makes the crashes go away**
+  (objects are not freed; 0 crashes in 24 runs for the lengths 26 to 33, 3 of 3 extracted each), and `macapp` starts the application that way. The cause (an over-release; with the zombies on, the first
+  report is `-[GSCInlineString release]: message sent to deallocated instance` for the path string that `application:openFile:` got) is not found; the price of the workaround is memory that is not given back.
 
 `MACHRUN_SEGV=1` prints the frames of the crash (`frame[n]`, by the frame pointers) and `MACHRUN_SEGV_HOLD=1` keeps the process for 90 seconds so that `procstat -v PID` can show its memory.
 

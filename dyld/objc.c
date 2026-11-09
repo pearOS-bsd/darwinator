@@ -11,6 +11,8 @@
  */
 #include <dlfcn.h>
 #include <pthread.h>
+static void *shim_pool_push(void);
+static void shim_pool_pop(void *);
 #include <err.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -453,6 +455,7 @@ machrun_show_windows(id app, SEL _cmd, id arg)
 	}
 	if (getenv("MACHRUN_OPENFILE") && del) {	/* MACHRUN_OPENFILE=/path/archive.zip: what a double click or a drop on the Dock does */
 		const char *path = getenv("MACHRUN_OPENFILE"); id str = nsstr(path), arr, url;
+		if (getenv("MACHRUN_EXTRARETAIN")) { int n = atoi(getenv("MACHRUN_EXTRARETAIN")); while (n-- > 0) msg0(str, "retain"); }
 		Class ca = rt_getClass("NSArray"), cu = rt_getClass("NSURL");
 		SEL wo = rt_registerName("arrayWithObject:"), fu = rt_registerName("fileURLWithPath:"), of = rt_registerName("application:openFiles:"), ou = rt_registerName("application:openURLs:"), rsp = rt_registerName("respondsToSelector:");
 		url = ((id (*)(id, SEL, id))machrun_objc_lookup(cu, fu))(cu, fu, str);
@@ -984,6 +987,8 @@ void *
 objc_shim_lookup(const char *name)
 {
 	if (getenv("MACHRUN_NORR") == NULL) {
+	if (getenv("MACHRUN_TRACEPOOL") && strcmp(name, "_objc_autoreleasePoolPush") == 0) return ((void *)shim_pool_push);
+	if (getenv("MACHRUN_TRACEPOOL") && strcmp(name, "_objc_autoreleasePoolPop") == 0) return ((void *)shim_pool_pop);
 	if (strcmp(name, "_objc_retain") == 0) return ((void *)shim_retain);
 	if (strcmp(name, "_objc_release") == 0) return ((void *)shim_release);
 	if (strcmp(name, "_objc_retainAutoreleasedReturnValue") == 0) return ((void *)shim_retainAutoreleasedReturnValue);
@@ -1051,6 +1056,29 @@ machrun_fix_recv(void *p)
 {
 	Class k = own_class(p);
 	return (k ? (void *)k : p);
+}
+
+
+/* MACHRUN_TRACEPOOL=1: the autorelease pools of the program are followed per thread (a pop with a token that is not the last push of the thread is reported with the caller) */
+static __thread void *pool_stack[256]; static __thread int pool_depth;
+static void *
+shim_pool_push(void)
+{
+	void *(*real)(void) = dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush"); void *t = real ? real() : NULL;
+	if (pool_depth < 256) pool_stack[pool_depth] = t; pool_depth++;
+	return (t);
+}
+static void
+shim_pool_pop(void *t)
+{
+	void (*real)(void *) = dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPop");
+	if (pool_depth > 0 && pool_depth <= 256 && pool_stack[pool_depth - 1] != t) {
+		int k, found = -1; for (k = pool_depth - 1; k >= 0 && k < 256; k--) if (pool_stack[k] == t) { found = k; break; }
+		dprintf(2, "machrun: POOL pop %p on thread %p but the last push here was %p (%s) caller %p\n", t, (void *)pthread_self(), pool_depth <= 256 ? pool_stack[pool_depth - 1] : NULL, found >= 0 ? "pops an outer pool" : "NOT a pool of this thread", __builtin_return_address(0));
+		if (found >= 0) pool_depth = found + 1;
+	}
+	if (pool_depth > 0) pool_depth--;
+	if (real) real(t);
 }
 
 /* ---- the messaging trampolines (x86-64): look the method up with the GNU runtime, then jump to it with the registers as they were ---- */
