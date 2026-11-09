@@ -32,6 +32,8 @@
 /* ---- the process: what _NSGetArgv and friends return ---- */
 static int g_argc; static char **g_argv; static char **g_envp; static char *g_path; static const char *g_progname;
 static uintptr_t g_stack_guard;
+static uint64_t g_vm_page_size = 4096;
+static void __attribute__((constructor)) init_vm_page_size(void) { g_vm_page_size = (uint64_t)getpagesize(); }
 
 void
 shim_set_process(int argc, char **argv, char **envp, const char *progpath)
@@ -39,6 +41,7 @@ shim_set_process(int argc, char **argv, char **envp, const char *progpath)
 	g_argc = argc; g_argv = argv; g_envp = envp; g_path = strdup(progpath);
 	g_progname = strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0];
 	arc4random_buf(&g_stack_guard, sizeof(g_stack_guard));
+	g_vm_page_size = (uint64_t)getpagesize();
 	g_stack_guard &= ~(uintptr_t)0xff;			/* a zero byte, like the real guard */
 }
 static char ***dw_NSGetArgv(void) { return (&g_argv); }
@@ -74,18 +77,16 @@ flags_d2f(int d)
 #undef M
 	return (f);
 }
+static int open_impl(const char *path, int d, int mode) { return (open(path, flags_d2f(d), mode)); }
+static int fcntl_impl(int fd, int cmd, long arg);
+#if !defined(__aarch64__)
+static int dw_open(const char *path, int d, ...) { int mode = 0; if (d & DARWIN_O_CREAT) { va_list ap; va_start(ap, d); mode = va_arg(ap, int); va_end(ap); } return (open_impl(path, d, mode)); }
+static int dw_fcntl(int fd, int cmd, ...) { va_list ap; long arg; va_start(ap, cmd); arg = va_arg(ap, long); va_end(ap); return (fcntl_impl(fd, cmd, arg)); }
+#endif
 static int
-dw_open(const char *path, int d, ...)
+fcntl_impl(int fd, int cmd, long arg)
 {
-	int mode = 0;
-	if (d & DARWIN_O_CREAT) { va_list ap; va_start(ap, d); mode = va_arg(ap, int); va_end(ap); }
-	return (open(path, flags_d2f(d), mode));
-}
-static int
-dw_fcntl(int fd, int cmd, ...)
-{
-	va_list ap; long arg; int r;
-	va_start(ap, cmd); arg = va_arg(ap, long); va_end(ap);
+	int r;
 	switch (cmd) {
 	case 0: case 1: case 2: case 5: case 6: return (fcntl(fd, cmd, arg));	/* F_DUPFD F_GETFD F_SETFD F_GETOWN F_SETOWN */
 	case 3: return (fcntl(fd, F_GETFL));
@@ -200,12 +201,10 @@ dw_fstatat(int fd, const char *path, struct darwin_stat64 *d, int dflag)
 	if (r == 0) st_out(&sb, d);
 	return (r);
 }
-static int dw_openat(int fd, const char *path, int d, ...)
-{
-	int mode = 0;
-	if (d & DARWIN_O_CREAT) { va_list ap; va_start(ap, d); mode = va_arg(ap, int); va_end(ap); }
-	return (openat(fd == -2 ? AT_FDCWD : fd, path, flags_d2f(d), mode));
-}
+static int openat_impl(int fd, const char *path, int d, int mode) { return (openat(fd == -2 ? AT_FDCWD : fd, path, flags_d2f(d), mode)); }
+#if !defined(__aarch64__)
+static int dw_openat(int fd, const char *path, int d, ...) { int mode = 0; if (d & DARWIN_O_CREAT) { va_list ap; va_start(ap, d); mode = va_arg(ap, int); va_end(ap); } return (openat_impl(fd, path, d, mode)); }
+#endif
 static int dw_unlinkat(int fd, const char *path, int dflag) { return (unlinkat(fd == -2 ? AT_FDCWD : fd, path, (dflag & 0x80) ? AT_REMOVEDIR : 0)); }
 static int dw_attr_setdetachstate(pthread_attr_t *a, int st) { return (pthread_attr_setdetachstate(a, st == 2 ? PTHREAD_CREATE_DETACHED : PTHREAD_CREATE_JOINABLE)); }
 
@@ -340,10 +339,71 @@ dw_assert_rtn(const char *func, const char *file, int line, const char *expr)
 	fprintf(stderr, "Assertion failed: (%s), function %s, file %s, line %d.\n", expr, func, file, line);
 	abort();
 }
+#if !defined(__aarch64__)
 static int dw_sprintf_chk(char *d, int flag, size_t len, const char *fmt, ...) { va_list ap; int r; va_start(ap, fmt); r = vsnprintf(d, len, fmt, ap); va_end(ap); return (r); }
 static int dw_snprintf_chk(char *d, size_t n, int flag, size_t len, const char *fmt, ...) { va_list ap; int r; va_start(ap, fmt); r = vsnprintf(d, n < len ? n : len, fmt, ap); va_end(ap); return (r); }
+#endif
 static int dw_vsprintf_chk(char *d, int flag, size_t len, const char *fmt, va_list ap) { return (vsnprintf(d, len, fmt, ap)); }
 static int dw_vsnprintf_chk(char *d, size_t n, int flag, size_t len, const char *fmt, va_list ap) { return (vsnprintf(d, n < len ? n : len, fmt, ap)); }
+
+#if defined(__aarch64__)
+/*
+ * arm64 Darwin passes the variable arguments of a call on the STACK (the named ones in x0..x7); FreeBSD's AAPCS64 puts them in registers.  A thunk per variadic function
+ * hands the stack pointer of the call to a C function as its last argument, and the arguments are read from there (a va_list that has no register save area).
+ */
+__asm__(
+	".macro DWVA name, reg\n"
+	".globl \\name\n"
+	".type \\name, %function\n"
+	"\\name:\n"
+	"	stp x29, x30, [sp, #-16]!\n"
+	"	add \\reg, sp, #16\n"
+	"	bl \\name\\()_v\n"
+	"	ldp x29, x30, [sp], #16\n"
+	"	ret\n"
+	".endm\n"
+	"DWVA dwva_printf, x1\n DWVA dwva_fprintf, x2\n DWVA dwva_sprintf, x2\n DWVA dwva_snprintf, x3\n DWVA dwva_asprintf, x2\n DWVA dwva_dprintf, x2\n"
+	"DWVA dwva_warn, x1\n DWVA dwva_warnx, x1\n DWVA dwva_err, x2\n DWVA dwva_errx, x2\n DWVA dwva_syslog, x2\n DWVA dwva_sscanf, x2\n"
+	"DWVA dwva_ioctl, x2\n DWVA dwva_open, x2\n DWVA dwva_fcntl, x2\n DWVA dwva_openat, x3\n"
+	"DWVA dwva_sprintf_chk, x4\n DWVA dwva_snprintf_chk, x5\n");
+#include <err.h>
+#include <syslog.h>
+#define	VA_OF(ap, stk)	va_list ap; do { (ap).__stack = (stk); (ap).__gr_top = 0; (ap).__vr_top = 0; (ap).__gr_offs = 0; (ap).__vr_offs = 0; } while (0)
+int dwva_printf(const char *, ...), dwva_fprintf(FILE *, const char *, ...), dwva_sprintf(char *, const char *, ...), dwva_snprintf(char *, size_t, const char *, ...);
+int dwva_asprintf(char **, const char *, ...), dwva_dprintf(int, const char *, ...), dwva_sscanf(const char *, const char *, ...), dwva_ioctl(int, unsigned long, ...);
+int dwva_open(const char *, int, ...), dwva_fcntl(int, int, ...), dwva_openat(int, const char *, int, ...);
+int dwva_sprintf_chk(char *, int, size_t, const char *, ...), dwva_snprintf_chk(char *, size_t, int, size_t, const char *, ...);
+void dwva_warn(const char *, ...), dwva_warnx(const char *, ...), dwva_err(int, const char *, ...), dwva_errx(int, const char *, ...), dwva_syslog(int, const char *, ...);
+__attribute__((used)) int dwva_printf_v(const char *f, void *k) { VA_OF(ap, k); return (vprintf(f, ap)); }
+__attribute__((used)) int dwva_fprintf_v(FILE *o, const char *f, void *k) { VA_OF(ap, k); return (vfprintf(o, f, ap)); }
+__attribute__((used)) int dwva_sprintf_v(char *d, const char *f, void *k) { VA_OF(ap, k); return (vsprintf(d, f, ap)); }
+__attribute__((used)) int dwva_snprintf_v(char *d, size_t n, const char *f, void *k) { VA_OF(ap, k); return (vsnprintf(d, n, f, ap)); }
+__attribute__((used)) int dwva_asprintf_v(char **d, const char *f, void *k) { VA_OF(ap, k); return (vasprintf(d, f, ap)); }
+__attribute__((used)) int dwva_dprintf_v(int fd, const char *f, void *k) { VA_OF(ap, k); return (vdprintf(fd, f, ap)); }
+__attribute__((used)) int dwva_sscanf_v(const char *s, const char *f, void *k) { VA_OF(ap, k); return (vsscanf(s, f, ap)); }
+__attribute__((used)) void dwva_warn_v(const char *f, void *k) { VA_OF(ap, k); vwarn(f, ap); }
+__attribute__((used)) void dwva_warnx_v(const char *f, void *k) { VA_OF(ap, k); vwarnx(f, ap); }
+__attribute__((used)) void dwva_err_v(int c, const char *f, void *k) { VA_OF(ap, k); verr(c, f, ap); }
+__attribute__((used)) void dwva_errx_v(int c, const char *f, void *k) { VA_OF(ap, k); verrx(c, f, ap); }
+__attribute__((used)) void dwva_syslog_v(int p, const char *f, void *k) { VA_OF(ap, k); vsyslog(p, f, ap); }
+__attribute__((used)) int dwva_ioctl_v(int fd, unsigned long r, void *k) { return (ioctl(fd, r, *(void **)k)); }
+__attribute__((used)) int dwva_open_v(const char *p, int d, void *k) { return (open_impl(p, d, (d & DARWIN_O_CREAT) ? *(int *)k : 0)); }
+__attribute__((used)) int dwva_fcntl_v(int fd, int c, void *k) { return (fcntl_impl(fd, c, *(long *)k)); }
+__attribute__((used)) int dwva_openat_v(int fd, const char *p, int d, void *k) { return (openat_impl(fd, p, d, (d & DARWIN_O_CREAT) ? *(int *)k : 0)); }
+__attribute__((used)) int dwva_sprintf_chk_v(char *d, int fl, size_t len, const char *f, void *k) { VA_OF(ap, k); return (vsnprintf(d, len, f, ap)); }
+__attribute__((used)) int dwva_snprintf_chk_v(char *d, size_t n, int fl, size_t len, const char *f, void *k) { VA_OF(ap, k); return (vsnprintf(d, n < len ? n : len, f, ap)); }
+#define	dw_open dwva_open
+#define	dw_fcntl dwva_fcntl
+#define	dw_openat dwva_openat
+#define	dw_sprintf_chk dwva_sprintf_chk
+#define	dw_snprintf_chk dwva_snprintf_chk
+#define	ARM64_VA_SHIMS \
+	{ "_printf", dwva_printf }, { "_fprintf", dwva_fprintf }, { "_sprintf", dwva_sprintf }, { "_snprintf", dwva_snprintf }, { "_asprintf", dwva_asprintf }, { "_dprintf", dwva_dprintf }, \
+	{ "_warn", dwva_warn }, { "_warnx", dwva_warnx }, { "_err", dwva_err }, { "_errx", dwva_errx }, { "_syslog", dwva_syslog }, { "_sscanf", dwva_sscanf }, { "_ioctl", dwva_ioctl },
+#else
+#define	ARM64_VA_SHIMS
+#endif
+
 static void *dw_memcpy_chk(void *d, const void *s, size_t n, size_t dl) { if (n > dl) abort(); return (memcpy(d, s, n)); }
 static void *dw_memmove_chk(void *d, const void *s, size_t n, size_t dl) { if (n > dl) abort(); return (memmove(d, s, n)); }
 static void *dw_memset_chk(void *d, int c, size_t n, size_t dl) { if (n > dl) abort(); return (memset(d, c, n)); }
@@ -570,6 +630,62 @@ dw_dispatch_sync(void *q, void *blk)
 }
 /* Frameworks of macOS that a program asks and that have no meaning here (code signatures, IOKit registry, DiskArbitration, login items, authorization, the Apple System Log):
  * calls that find nothing (NULL / 0) or fail with the error that "there is none" (a program that asks for a signature gets "unsigned") */
+
+/* ---- Mach calls that command line tools make (vm_stat, top, ...) ---- */
+static uint32_t dw_mach_host_self(void) { return (0x1d03); }
+static int dw_host_page_size(uint32_t host, uint64_t *size) { (void)host; *size = (uint64_t)getpagesize(); return (0); }
+static unsigned long
+sysctl_ul(const char *name)
+{
+	unsigned long v = 0; size_t l = sizeof(v);
+	unsigned int w = 0; size_t lw = sizeof(w);
+
+	if (sysctlbyname(name, &v, &l, NULL, 0) == 0 && l == sizeof(v)) return (v);
+	if (sysctlbyname(name, &w, &lw, NULL, 0) == 0) return (w);
+	return (0);
+}
+/* host_statistics64 / host_statistics: HOST_VM_INFO64 (4, 38 ints), HOST_VM_INFO (2, 15 ints), HOST_CPU_LOAD_INFO (3, 4 ints) */
+static int
+dw_host_statistics64(uint32_t host, int flavor, uint32_t *info, uint32_t *count)
+{
+	(void)host;
+	if (flavor == 4 && *count >= 38) {
+		uint64_t *w = (uint64_t *)(info + 4);
+
+		memset(info, 0, 38 * 4);
+		info[0] = (uint32_t)sysctl_ul("vm.stats.vm.v_free_count"); info[1] = (uint32_t)sysctl_ul("vm.stats.vm.v_active_count");
+		info[2] = (uint32_t)sysctl_ul("vm.stats.vm.v_inactive_count"); info[3] = (uint32_t)sysctl_ul("vm.stats.vm.v_wire_count");
+		w[0] = sysctl_ul("vm.stats.vm.v_zfod"); w[2] = sysctl_ul("vm.stats.vm.v_vnodepgsin"); w[3] = sysctl_ul("vm.stats.vm.v_vnodepgsout");
+		w[4] = sysctl_ul("vm.stats.vm.v_vm_faults"); w[5] = sysctl_ul("vm.stats.vm.v_cow_faults");
+		*count = 38;
+		return (0);
+	}
+	if (flavor == 2 && *count >= 15) {
+		memset(info, 0, 15 * 4);
+		info[0] = (uint32_t)sysctl_ul("vm.stats.vm.v_free_count"); info[1] = (uint32_t)sysctl_ul("vm.stats.vm.v_active_count");
+		info[2] = (uint32_t)sysctl_ul("vm.stats.vm.v_inactive_count"); info[3] = (uint32_t)sysctl_ul("vm.stats.vm.v_wire_count");
+		info[4] = (uint32_t)sysctl_ul("vm.stats.vm.v_zfod"); info[8] = (uint32_t)sysctl_ul("vm.stats.vm.v_vm_faults");
+		*count = 15;
+		return (0);
+	}
+	if (flavor == 3 && *count >= 4) {
+		long cp[5] = { 0 }; size_t l = sizeof(cp);
+
+		sysctlbyname("kern.cp_time", cp, &l, NULL, 0);
+		info[0] = (uint32_t)cp[0]; info[1] = (uint32_t)(cp[2] + cp[3]); info[2] = (uint32_t)cp[4]; info[3] = (uint32_t)cp[1];
+		*count = 4;
+		return (0);
+	}
+	return (4);			/* KERN_INVALID_ARGUMENT */
+}
+static uint32_t g_mach_task_self = 0x203;
+static long dw_minus1_enotsup(void) { errno = ENOTSUP; return (-1); }
+static long dw_minus1_esrch(void) { errno = ESRCH; return (-1); }
+static void dw_mach_error(const char *str, int kr) { fprintf(stderr, "%s %s (%d)\n", str ? str : "", kr == 0 ? "(os/kern) successful" : "(os/kern) failure", kr); }
+static int dw_compat_mode(const char *name, const char *mode) { (void)name; return (mode != NULL && strcmp(mode, "bsd") == 0 ? 0 : 1); }	/* the standards (unix2003) behaviour */
+static const char *dw_mach_error_string(int kr) { return (kr == 0 ? "(os/kern) successful" : "(os/kern) failure"); }
+
+
 static long dw_zero(void) { return (0); }
 /* libproc: the name and the path of a process by its pid (what Sloth and the activity monitors ask) */
 static int
@@ -674,6 +790,13 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "___stack_chk_guard", &g_stack_guard }, { "___stack_chk_fail", dw_stack_chk_fail }, { "dyld_stub_binder", dw_stub_binder },
 	{ "__NSGetArgv", dw_NSGetArgv }, { "__NSGetArgc", dw_NSGetArgc }, { "__NSGetEnviron", dw_NSGetEnviron },
 	{ "__NSGetProgname", dw_NSGetProgname }, { "__NSGetExecutablePath", dw_NSGetExecutablePath },
+	ARM64_VA_SHIMS
+	{ "_task_read_for_pid", dw_kern_failure }, { "_task_for_pid", dw_kern_failure }, { "_task_inspect_for_pid", dw_kern_failure }, { "_task_info", dw_kern_failure }, { "_task_threads", dw_kern_failure }, { "_thread_info", dw_kern_failure }, { "_thread_policy_get", dw_kern_failure }, { "_task_policy_get", dw_kern_failure }, { "_processor_set_default", dw_kern_failure }, { "_host_processor_set_priv", dw_kern_failure }, { "_processor_set_tasks_with_flavor", dw_kern_failure }, { "_pid_for_task", dw_kern_failure }, { "_mach_vm_region", dw_kern_failure }, { "_vm_read_overwrite", dw_kern_failure }, { "_host_processor_info", dw_kern_failure }, { "_task_suspend", dw_kern_failure }, { "_task_resume", dw_kern_failure }, { "_thread_get_state", dw_kern_failure },
+	{ "_mach_port_deallocate", dw_zero }, { "_vm_deallocate", dw_zero }, { "_mach_port_mod_refs", dw_zero },
+	{ "_getattrlist", dw_minus1_enotsup }, { "_getattrlistbulk", dw_minus1_enotsup }, { "_fgetattrlist", dw_minus1_enotsup }, { "_proc_pidinfo", dw_minus1_enotsup }, { "_proc_pid_rusage", dw_minus1_enotsup }, { "_proc_get_wakemon_params", dw_minus1_enotsup }, { "_proc_get_dirty", dw_minus1_enotsup }, { "_proc_get_cpumon_params", dw_minus1_enotsup }, { "_kpersona_pidinfo", dw_minus1_enotsup }, { "_proc_listpids", dw_minus1_enotsup },
+	{ "_mach_task_self_", &g_mach_task_self },
+	{ "_mach_host_self", dw_mach_host_self }, { "_host_page_size", dw_host_page_size }, { "_host_statistics64", dw_host_statistics64 }, { "_host_statistics", dw_host_statistics64 },
+	{ "_mach_error_string", dw_mach_error_string }, { "_compat_mode", dw_compat_mode }, { "_mach_error", dw_mach_error }, { "_vm_page_size", &g_vm_page_size }, { "_vm_kernel_page_size", &g_vm_page_size },
 	{ "_mach_absolute_time", dw_mach_absolute_time }, { "_mach_timebase_info", dw_mach_timebase_info }, { "___assert_rtn", dw_assert_rtn },
 	{ "___sprintf_chk", dw_sprintf_chk }, { "___snprintf_chk", dw_snprintf_chk }, { "___vsprintf_chk", dw_vsprintf_chk }, { "___vsnprintf_chk", dw_vsnprintf_chk },
 	{ "___memcpy_chk", dw_memcpy_chk }, { "___memmove_chk", dw_memmove_chk }, { "___memset_chk", dw_memset_chk },
