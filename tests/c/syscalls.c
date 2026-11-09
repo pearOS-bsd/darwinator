@@ -103,6 +103,22 @@ static i64 dsys8(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h)
 static volatile u64 psy_mx; static volatile int psy_state; static volatile unsigned dummy2 = 1;
 static void twait(u64 arg) { (void)arg; psy_state = 1; dsys(301, (i64)psy_mx, 0, 0, 0, 0, 0); psy_state = 2; }
 
+
+/* a Mach trap with seven arguments (mach_msg_trap): the seventh on the stack on x86-64, x6 on arm64 */
+static i64 dmach7(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g)
+{
+#if defined(__x86_64__)
+	register i64 r10 __asm__("r10") = d; register i64 r8 __asm__("r8") = e; register i64 r9 __asm__("r9") = f;
+	i64 ret = 0x1000000 | n;
+	__asm__ volatile("push %7; push $0; syscall; add $16, %%rsp" : "+a"(ret), "+d"(c), "+D"(a), "+S"(b), "+r"(r10), "+r"(r8), "+r"(r9) : "r"(g) : "rcx", "r11", "memory", "cc");
+	return ret;
+#else
+	register i64 x0 __asm__("x0") = a, x1 __asm__("x1") = b, x2 __asm__("x2") = c, x3 __asm__("x3") = d, x4 __asm__("x4") = e, x5 __asm__("x5") = f, x6 __asm__("x6") = g, x16 __asm__("x16") = -n;
+	__asm__ volatile("svc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6) : "r"(x16) : "memory", "cc");
+	return x0;
+#endif
+}
+
 static int fails;
 static void check(const char *name, int cond, i64 detail)
 {
@@ -402,7 +418,20 @@ int cmain(void)
 	  { unsigned tb[2] = { 0, 0 }; check("mach_timebase_info_trap (1/1: nanoseconds)", dmach(89, (i64)tb, 0, 0, 0, 0, 0) == 0 && tb[0] == 1 && tb[1] == 1, tb[0]); }
 	  { struct dtv t1, t2; i64 base = 0, kr; S(SYS_gettimeofday, &t1, 0, 0, 0, 0, 0); kr = dmach(90, 0, 0, 0, 0, 0, 0); (void)base; (void)t2;
 	    check("mach_wait_until_trap (a past time returns at once)", kr == 0, kr); }
-	  { i64 kr = dmach(31, 0, 0, 0, 0, 0, 0); check("mach_msg_trap fails with MACH_SEND_INVALID_DEST (no IPC)", kr == 0x10000003, kr); } }
+	  /* Mach IPC inside the process: a port, a send right, a message with data to itself and its reply port, a receive with a timeout, a bad destination */
+	  { unsigned pn = 0; i64 kr = dmach(16, (i64)task, 1, (i64)&pn, 0, 0, 0);
+	    check("mach_port_allocate (receive right)", kr == 0 && pn != 0, kr);
+	    kr = dmach(21, (i64)task, pn, pn, 20, 0, 0); check("mach_port_insert_right (MAKE_SEND)", kr == 0, kr);
+	    { unsigned rp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); unsigned msg[10] = { 19, 40, pn, rp, 0, 77, 0xcafe, 0xbabe, 0x1234, 0x5678 }; unsigned rcv[16]; int k;
+	      for (k = 0; k < 16; k++) rcv[k] = 0;
+	      kr = dmach7(31, (i64)msg, 1, 40, 0, 0, 0, 0); check("mach_msg send (header, id 77, 16 bytes of data)", kr == 0, kr);
+	      kr = dmach7(31, (i64)rcv, 2, 0, 64, pn, 0, 0); check("mach_msg receive: the same message", kr == 0 && rcv[1] == 40 && rcv[5] == 77 && rcv[6] == 0xcafe && rcv[9] == 0x5678, kr);
+	      check("  the reply port is the remote port, the destination the local port (swapped)", rcv[2] == rp && rcv[3] == pn, rcv[2]);
+	      kr = dmach7(31, (i64)rcv, 2 | 0x100, 0, 64, pn, 20, 0); check("mach_msg receive of an empty port with a timeout is MACH_RCV_TIMED_OUT", kr == 0x10004003, kr);
+	      msg[2] = 0x5555; kr = dmach7(31, (i64)msg, 1, 40, 0, 0, 0, 0); check("mach_msg send to a name that is no port is MACH_SEND_INVALID_DEST", kr == 0x10000003, kr);
+	      msg[2] = pn; dmach7(31, (i64)msg, 1, 40, 0, 0, 0, 0);
+	      kr = dmach7(31, (i64)rcv, 2, 0, 16, pn, 0, 0); check("mach_msg receive with a buffer that is too small is MACH_RCV_TOO_LARGE", kr == 0x10004004, kr); }
+	    kr = dmach(19, (i64)task, pn, 1, -1, 0, 0); check("mach_port_mod_refs (receive, -1) destroys the port", kr == 0, kr); } }
 
 	/* fgetattrlist; sysctl hw.tbfrequency */
 	{ struct { unsigned short n, res; unsigned cmn, vol, dir, file, fork; } fal = { 5, 0, 0x8, 0, 0, 0x200, 0 }; static char fb[128]; int fdf = (int)S(SYS_open, "/tmp/dsc/a", 0, 0, 0, 0, 0);
