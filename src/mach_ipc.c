@@ -16,7 +16,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
+#include <sys/capsicum.h>
 #include <sys/eventhandler.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
 #include <sys/kernel.h>
 #include <sys/limits.h>
 #include <sys/lock.h>
@@ -88,7 +91,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE };
 
 struct kmsg;
 struct kport {
@@ -102,6 +105,7 @@ struct kport {
 	struct kport	*set;			/* the port set that this port is a member of (a port is in one set at most) */
 	int		count;			/* KP_SEM: the value */
 	struct kport	*dn_port;		/* a dead-name notification is sent here when this port dies (mach_port_request_notification) */
+	struct file	*fp;			/* KP_FILE: a fileport holds the open file */
 	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
 };
@@ -164,6 +168,8 @@ kp_unref(struct kport *p)
 		TAILQ_REMOVE(&p->q, m, link);
 		kmsg_free(m);
 	}
+	if (p->fp != NULL)
+		(void)fdrop(p->fp, curthread);
 	free(p, M_DARWIN_IPC);
 }
 
@@ -595,6 +601,56 @@ darwin_semwait_signal(struct thread *td, struct darwin_args *uap)
 	}
 	td->td_retval[0] = 0;
 	return (kr == KERN_SUCCESS ? 0 : kr == 49 /* KERN_OPERATION_TIMED_OUT */ ? ETIMEDOUT : kr == 14 /* KERN_ABORTED */ ? EINTR : EINVAL);
+}
+
+/* fileport_makeport(fd, *portname) (430) and fileport_makefd(port) (431): an open file as a port, that can be sent in a message */
+int
+darwin_fileport_makeport(struct thread *td, struct darwin_args *uap)
+{
+	struct file *fp;
+	struct ktask *t;
+	struct kport *p;
+	struct kent *e;
+	uint32_t name = 0;
+	int error;
+
+	error = fget(td, (int)uap->a[0], &cap_no_rights, &fp);
+	if (error != 0)
+		return (error);
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) == NULL) { sx_xunlock(&km_sx); (void)fdrop(fp, td); return (ENOMEM); }
+	p = kp_new(KP_FILE);
+	p->fp = fp;
+	e = ent_add(t, p, MM_MAKE_SEND);
+	p->refs--;
+	if (e != NULL) name = e->name; else kp_unref(p);
+	sx_xunlock(&km_sx);
+	if (e == NULL)
+		return (ENOMEM);
+	return (copyout(&name, (void *)uap->a[1], sizeof(name)));
+}
+
+int
+darwin_fileport_makefd(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kent *e;
+	struct file *fp = NULL;
+	int fd, error;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[0])) != NULL && e->port->kind == KP_FILE && e->port->fp != NULL) {
+		fp = e->port->fp;
+		if (!fhold(fp)) fp = NULL;
+	}
+	sx_xunlock(&km_sx);
+	if (fp == NULL)
+		return (EINVAL);
+	error = finstall(td, fp, &fd, 0, NULL);
+	(void)fdrop(fp, td);
+	if (error == 0)
+		td->td_retval[0] = fd;
+	return (error);
 }
 
 /* ---- messages ---- */
