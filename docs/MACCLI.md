@@ -1,0 +1,18 @@
+# The command line tools of macOS 26.7 (Intel) through machrun
+
+`tools/maccli/sweep.sh` runs every Mach-O program of `/bin /sbin /usr/bin /usr/sbin /usr/libexec` of a real Mac (macOS 26.7.2, x86_64, in QEMU/KVM) through `machrun` on FreeBSD 14.5 amd64, one after the other, as the user `nobody`, with no arguments, no input and 8 seconds each
+(1265 programs; the Mac files are universal x86_64 + arm64e).  Results: `tools/maccli/results-macos26.7-intel.tsv` (after) and `results-before-shims.tsv` (before).
+
+| | before | after the shims of this commit |
+|---|---|---|
+| the program starts (it runs, prints something or ends) | 468 (37%) | **604 (48%)** |
+| it calls a symbol that machrun does not have | 692 | 546 |
+| it does not load (too many libraries, not for this architecture ...) | 105 | 115 |
+
+"Starts" only means that `machrun` did not stop it: not that the output is right (a tool with no arguments mostly prints its usage text).
+
+What the shims of this commit are (`dyld/shims.c`): `dispatch_once` and `dispatch_once_f`, `malloc_type_malloc/calloc/realloc/valloc/posix_memalign/aligned_alloc` (macOS 15 and later allocate with a type id), `_set_user_dir_suffix`,
+`__strlcpy_chk`, `__strlcat_chk`, `CFAbsoluteTimeGetCurrent`, `fcopyfile`, `os_transaction_create`, and "succeeds, does nothing" for `sandbox_init*`, `sandbox_check`, `os_variant_*`, `__os_feature_enabled_impl`, `setiopolicy_np`, `xpc_set_event_stream_handler`, `notify_set_options`.
+
+The symbols that stop most programs now: `xcselect_invoke_xcrun` (95: `git`, `clang`, `make` ... are launchers of Xcode), `_cupsSetLocale` (20), a C++ operator new with a type descriptor (16), `snmp_parse_args` (12), the Swift runtime (`swift_task_create`, `swift_getSingletonMetadata` ...),
+`xpc_connection_create_mach_service` and `vproc_swap_integer` (launchd and XPC), `IOServiceMatching` (IOKit), `krb5_init_context`, `apr_app_initialize`, `sasl_version`.
