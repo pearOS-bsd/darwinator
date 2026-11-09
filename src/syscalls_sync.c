@@ -6,7 +6,7 @@
  * counter of wake tokens, under one lock.  A wake with nobody waiting is remembered for a mutex (a drop before the wait must not be lost)
  * and forgotten for a condition variable (a signal with no waiter is lost, as POSIX says).  The generation numbers that xnu keeps in the word of
  * the lock are not interpreted: the value that comes back from psynch_mutexwait is the generation that was passed in.
- * Mach IPC (ports with messages, rights, a bootstrap server) is NOT here: mach_msg fails with MACH_SEND_INVALID_DEST.
+ * Mach IPC is here only inside one process (see below): no ports shared between processes, so no bootstrap server and no services.
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/queue.h>
 #include <sys/sx.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysent.h>
@@ -297,27 +298,260 @@ darwin_mach_vm_protect(struct thread *td, struct darwin_args *uap)	/* (target, a
 	return (kr_of(td, sys_mprotect(td, &ma)));
 }
 
-static volatile u_int mach_next_name = 0x1003;
+/* ---- Mach IPC inside a process: ports with a queue of messages ----
+ * A port is an entry of one table.  The name that a task uses is 0x1003 + 0x100 * index.  A name can hold the receive right and a send right at
+ * once (as in Mach).  Messages: a header and inline data (no descriptors: out-of-line memory and port rights in a message are not supported),
+ * copied into the queue; on receive the remote and local ports are swapped (the receiver sees the reply port as the remote port).  What is not
+ * here: ports shared between processes (so no bootstrap server and no services), port sets, notifications, rights in messages. */
 
-static int
-darwin_mach_port_allocate(struct thread *td, struct darwin_args *uap)	/* (target, right, *name): a name that nothing receives on */
+#define	MACH_PORT_RIGHT_SEND		0
+#define	MACH_PORT_RIGHT_RECEIVE		1
+#define	MACH_MSG_TYPE_MOVE_SEND		17
+#define	MACH_MSG_TYPE_COPY_SEND		19
+#define	MACH_MSG_TYPE_MAKE_SEND		20
+#define	MACH_SEND_MSG			0x00000001
+#define	MACH_RCV_MSG			0x00000002
+#define	MACH_RCV_TIMEOUT		0x00000100
+#define	MACH_MSGH_BITS_COMPLEX		0x80000000
+#define	MACH_SEND_INVALID_DATA		0x1000000c
+#define	MACH_SEND_TOO_LARGE		0x10000007
+#define	MACH_SEND_MSG_TOO_SMALL		0x10000008
+#define	MACH_RCV_INVALID_NAME		0x10004002
+#define	MACH_RCV_TIMED_OUT		0x10004003
+#define	MACH_RCV_TOO_LARGE		0x10004004
+#define	MACH_MSG_MAXSIZE		65536
+
+struct dmsg {
+	TAILQ_ENTRY(dmsg)	link;
+	uint32_t		size;
+	uint8_t			data[];
+};
+struct mport {
+	struct proc	*p;
+	pid_t		pid;
+	bool		used, recv, send;
+	int		waiters;
+	TAILQ_HEAD(, dmsg) q;
+};
+#define	MP_N	256
+static struct mport mp_tab[MP_N];
+static struct sx mp_sx;
+SX_SYSINIT(darwin_mp, &mp_sx, "darwin mach ports");
+#define	MP_NAME(i)	(0x1003u + 0x100u * (i))
+
+static struct mport *
+mp_lookup(struct proc *p, uint32_t name)
 {
-	uint32_t name = atomic_fetchadd_int(&mach_next_name, 0x100);
+	uint32_t i;
 
-	return (kr_of(td, copyout(&name, (void *)uap->a[2], sizeof(name))));
+	if (name < 0x1003 || ((name - 0x1003) & 0xff) != 0)
+		return (NULL);
+	i = (name - 0x1003) >> 8;
+	if (i >= MP_N || !mp_tab[i].used || mp_tab[i].p != p || mp_tab[i].pid != p->p_pid)
+		return (NULL);
+	return (&mp_tab[i]);
+}
+
+static uint32_t
+mp_new(struct proc *p, bool recv)
+{
+	int i, victim = -1;
+
+	for (i = 0; i < MP_N; i++) {
+		if (!mp_tab[i].used)
+			break;
+		if (victim < 0 && mp_tab[i].p != p && mp_tab[i].waiters == 0)
+			victim = i;
+	}
+	if (i == MP_N)
+		i = victim;			/* the table is full: a port of another process goes (its process may be gone) */
+	if (i < 0)
+		return (0);
+	if (mp_tab[i].used) {
+		struct dmsg *m;
+
+		while ((m = TAILQ_FIRST(&mp_tab[i].q)) != NULL) { TAILQ_REMOVE(&mp_tab[i].q, m, link); free(m, M_DARWIN); }
+	}
+	mp_tab[i] = (struct mport){ .p = p, .pid = p->p_pid, .used = true, .recv = recv, .send = false };
+	TAILQ_INIT(&mp_tab[i].q);
+	return (MP_NAME(i));
 }
 
 static int
-darwin_mach_port_nop(struct thread *td, struct darwin_args *uap __unused)
+darwin_mach_port_allocate(struct thread *td, struct darwin_args *uap)	/* (target, right, *name) */
 {
-	td->td_retval[0] = KERN_SUCCESS;
+	uint32_t name;
+	int error;
+
+	if ((int)uap->a[1] != MACH_PORT_RIGHT_RECEIVE) {
+		td->td_retval[0] = KERN_INVALID_ARGUMENT;
+		return (0);
+	}
+	sx_xlock(&mp_sx);
+	name = mp_new(td->td_proc, true);
+	sx_xunlock(&mp_sx);
+	if (name == 0) {
+		td->td_retval[0] = 6;		/* KERN_NO_SPACE */
+		return (0);
+	}
+	error = copyout(&name, (void *)uap->a[2], sizeof(name));
+	return (kr_of(td, error));
+}
+
+static int
+darwin_mach_port_insert_right(struct thread *td, struct darwin_args *uap)	/* (target, name, poly, polyPoly): a send right for a port that this task receives on */
+{
+	struct mport *m;
+	int kr = KERN_INVALID_ARGUMENT;
+
+	sx_xlock(&mp_sx);
+	if ((m = mp_lookup(td->td_proc, (uint32_t)uap->a[2])) != NULL && (uint32_t)uap->a[1] == (uint32_t)uap->a[2] &&
+	    (m->recv || m->send) && ((int)uap->a[3] == MACH_MSG_TYPE_MAKE_SEND || (int)uap->a[3] == MACH_MSG_TYPE_COPY_SEND ||
+	    (int)uap->a[3] == MACH_MSG_TYPE_MOVE_SEND)) {
+		m->send = true;
+		kr = KERN_SUCCESS;
+	}
+	sx_xunlock(&mp_sx);
+	td->td_retval[0] = kr;
+	return (0);
+}
+
+static int
+darwin_mach_port_deallocate(struct thread *td, struct darwin_args *uap)	/* (target, name) */
+{
+	struct mport *m;
+	int kr = KERN_INVALID_ARGUMENT;
+
+	sx_xlock(&mp_sx);
+	if ((m = mp_lookup(td->td_proc, (uint32_t)uap->a[1])) != NULL) {
+		if (m->recv)
+			m->send = false;	/* the send right goes, the receive right stays */
+		else
+			m->used = false;
+		kr = KERN_SUCCESS;
+	}
+	sx_xunlock(&mp_sx);
+	td->td_retval[0] = kr;
+	return (0);
+}
+
+static int
+darwin_mach_port_destroy(struct thread *td, struct darwin_args *uap)		/* mod_refs(target, name, right, delta) with the receive right and delta -1: the port goes */
+{
+	struct mport *m;
+	struct dmsg *d;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&mp_sx);
+	if ((m = mp_lookup(td->td_proc, (uint32_t)uap->a[1])) != NULL && (int)uap->a[2] == MACH_PORT_RIGHT_RECEIVE && (int)uap->a[3] < 0) {
+		while ((d = TAILQ_FIRST(&m->q)) != NULL) { TAILQ_REMOVE(&m->q, d, link); free(d, M_DARWIN); }
+		m->used = false;
+		wakeup(m);
+	} else if (m == NULL)
+		kr = KERN_INVALID_ARGUMENT;
+	sx_xunlock(&mp_sx);
+	td->td_retval[0] = kr;
 	return (0);
 }
 
 static int
 darwin_mach_reply_port(struct thread *td, struct darwin_args *uap __unused)
 {
-	td->td_retval[0] = atomic_fetchadd_int(&mach_next_name, 0x100);
+	uint32_t name;
+
+	sx_xlock(&mp_sx);
+	name = mp_new(td->td_proc, true);
+	if (name != 0)
+		mp_lookup(td->td_proc, name)->send = true;	/* the reply port can be sent to by its owner (a reply is made with a send right to it) */
+	sx_xunlock(&mp_sx);
+	td->td_retval[0] = name;
+	return (0);
+}
+
+static int
+mach_msg_common(struct thread *td, uint64_t msg, uint32_t option, uint32_t ssize, uint32_t rsize, uint32_t rname, uint32_t timeout_ms)
+{
+	struct proc *p = td->td_proc;
+	struct mport *m;
+	struct dmsg *d;
+	uint32_t hdr[6];
+	int error;
+
+	if (option & MACH_SEND_MSG) {
+		struct mport *dest;
+		uint32_t dname;
+
+		if (ssize < sizeof(hdr))
+			return (MACH_SEND_MSG_TOO_SMALL);
+		if (ssize > MACH_MSG_MAXSIZE)
+			return (MACH_SEND_TOO_LARGE);
+		d = malloc(sizeof(*d) + ssize, M_DARWIN, M_WAITOK);
+		if (copyin((void *)msg, d->data, ssize) != 0) {
+			free(d, M_DARWIN);
+			return (KERN_INVALID_ADDRESS);
+		}
+		d->size = ssize;
+		memcpy(hdr, d->data, sizeof(hdr));
+		if (hdr[0] & MACH_MSGH_BITS_COMPLEX) {		/* descriptors: not supported */
+			free(d, M_DARWIN);
+			return (MACH_SEND_INVALID_DATA);
+		}
+		dname = hdr[2];
+		sx_xlock(&mp_sx);
+		dest = mp_lookup(p, dname);
+		if (dest == NULL || !(dest->send || dest->recv)) {
+			sx_xunlock(&mp_sx);
+			free(d, M_DARWIN);
+			return (MACH_SEND_INVALID_DEST);
+		}
+		/* the receiver sees the reply port as the remote port and the destination as the local port */
+		hdr[2] = hdr[3]; hdr[3] = dname;
+		memcpy(d->data, hdr, sizeof(hdr));
+		TAILQ_INSERT_TAIL(&dest->q, d, link);
+		wakeup(dest);
+		sx_xunlock(&mp_sx);
+	}
+	if (option & MACH_RCV_MSG) {
+		int timo = (option & MACH_RCV_TIMEOUT) ? MAX(1, (int)((int64_t)timeout_ms * hz / 1000)) : 0;
+		uint32_t kr = 0;
+
+		sx_xlock(&mp_sx);
+		m = mp_lookup(p, rname);
+		if (m == NULL || !m->recv) {
+			sx_xunlock(&mp_sx);
+			return (MACH_RCV_INVALID_NAME);
+		}
+		m->waiters++;
+		error = 0;
+		while ((d = TAILQ_FIRST(&m->q)) == NULL && error == 0) {
+			error = sx_sleep(m, &mp_sx, PCATCH, "machmsg", timo);
+			if (!m->used)
+				error = EINVAL;
+		}
+		m->waiters--;
+		if (d == NULL) {
+			sx_xunlock(&mp_sx);
+			return (error == EWOULDBLOCK ? MACH_RCV_TIMED_OUT : KERN_INVALID_ARGUMENT);
+		}
+		if (d->size > rsize)
+			kr = MACH_RCV_TOO_LARGE;			/* the message stays queued */
+		else
+			TAILQ_REMOVE(&m->q, d, link);
+		sx_xunlock(&mp_sx);
+		if (kr != 0)
+			return (kr);
+		error = copyout(d->data, (void *)msg, d->size);
+		free(d, M_DARWIN);
+		if (error != 0)
+			return (KERN_INVALID_ADDRESS);
+	}
+	return (KERN_SUCCESS);
+}
+
+static int
+darwin_mach_msg(struct thread *td, struct darwin_args *uap)	/* (msg, option, send_size, rcv_size, rcv_name, timeout, notify) */
+{
+	td->td_retval[0] = mach_msg_common(td, uap->a[0], (uint32_t)uap->a[1], (uint32_t)uap->a[2], (uint32_t)uap->a[3], (uint32_t)uap->a[4], (uint32_t)uap->a[5]);
 	return (0);
 }
 
@@ -343,13 +577,6 @@ darwin_mach_host_self(struct thread *td, struct darwin_args *uap __unused)
 }
 
 static int
-darwin_mach_msg(struct thread *td, struct darwin_args *uap __unused)
-{
-	td->td_retval[0] = MACH_SEND_INVALID_DEST;	/* no IPC: there is nobody to send to */
-	return (0);
-}
-
-static int
 darwin_mach_unsupported(struct thread *td, struct darwin_args *uap __unused)
 {
 	td->td_retval[0] = KERN_NOT_SUPPORTED;
@@ -364,6 +591,8 @@ darwin_mach_timebase_info(struct thread *td, struct darwin_args *uap)	/* (*info)
 	return (kr_of(td, copyout(tb, (void *)uap->a[0], sizeof(tb))));
 }
 
+static int darwin_wait_chan;
+
 static int
 darwin_mach_wait_until(struct thread *td, struct darwin_args *uap)	/* (deadline, in nanoseconds of the clock of mach_absolute_time = the uptime) */
 {
@@ -376,7 +605,7 @@ darwin_mach_wait_until(struct thread *td, struct darwin_args *uap)	/* (deadline,
 		left = (int64_t)uap->a[0] - ((int64_t)now.tv_sec * 1000000000 + now.tv_nsec);
 		if (left <= 0)
 			break;
-		error = tsleep((void *)(uintptr_t)&mach_next_name, PCATCH, "machwait", MAX(1, (int)(left / (1000000000 / hz))));
+		error = tsleep((void *)&darwin_wait_chan, PCATCH, "machwait", MAX(1, (int)(left / (1000000000 / hz))));
 		if (error != 0 && error != EWOULDBLOCK)
 			break;
 		error = 0;
@@ -408,8 +637,9 @@ static const struct {
 	E(DARWIN_MACH_BASE + 14, 5, darwin_mach_vm_protect,	"_kernelrpc_mach_vm_protect_trap"),
 	E(DARWIN_MACH_BASE + 15, 6, darwin_mach_vm_map,		"_kernelrpc_mach_vm_map_trap"),
 	E(DARWIN_MACH_BASE + 16, 3, darwin_mach_port_allocate,	"_kernelrpc_mach_port_allocate_trap"),
-	E(DARWIN_MACH_BASE + 18, 2, darwin_mach_port_nop,	"_kernelrpc_mach_port_deallocate_trap"),
-	E(DARWIN_MACH_BASE + 19, 4, darwin_mach_port_nop,	"_kernelrpc_mach_port_mod_refs_trap"),
+	E(DARWIN_MACH_BASE + 18, 2, darwin_mach_port_deallocate,	"_kernelrpc_mach_port_deallocate_trap"),
+	E(DARWIN_MACH_BASE + 19, 4, darwin_mach_port_destroy,	"_kernelrpc_mach_port_mod_refs_trap"),
+	E(DARWIN_MACH_BASE + 21, 4, darwin_mach_port_insert_right,	"_kernelrpc_mach_port_insert_right_trap"),
 	E(DARWIN_MACH_BASE + 26, 0, darwin_mach_reply_port,	"mach_reply_port"),
 	E(DARWIN_MACH_BASE + 27, 0, darwin_mach_thread_self,	"thread_self_trap"),
 	E(DARWIN_MACH_BASE + 28, 0, darwin_mach_task_self,	"task_self_trap"),
