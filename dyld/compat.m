@@ -1147,11 +1147,22 @@ static void
 w_addRep(id self, SEL _cmd, id rep)
 {
 	Class bc = NSClassFromString(@"NSBitmapImageRep");
+	if (getenv("MACHRUN_DEBUG_BMP")) fprintf(stderr, "machrun: addRepresentation: %s\n", rep ? class_getName(object_getClass(rep)) : "nil");
 	if (bc != Nil && rep != nil && [rep isKindOfClass:bc]) {
 		NSInteger (*ni)(id, SEL) = (NSInteger (*)(id, SEL))objc_msgSend; BOOL (*bo)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend; unsigned char *(*bd)(id, SEL) = (unsigned char *(*)(id, SEL))objc_msgSend;
 		if (ni(rep, @selector(bitsPerPixel)) == 32 && ni(rep, @selector(samplesPerPixel)) == 3 && !bo(rep, @selector(hasAlpha)) && !bo(rep, @selector(isPlanar)) && bd(rep, @selector(bitmapData)) != NULL) {
 			unsigned char *p = bd(rep, @selector(bitmapData)); NSInteger rows = ni(rep, @selector(pixelsHigh)), bpr = ni(rep, @selector(bytesPerRow)), w = ni(rep, @selector(pixelsWide)), y, x;
-			for (y = 0; y < rows; y++) for (x = 0; x < w; x++) p[y * bpr + x * 4 + 3] = 0xFF;
+			/* a new representation of 4 samples with alpha (what the back end draws), the pixels copied with the fourth byte opaque */
+			id n = [NSClassFromString(@"NSBitmapImageRep") alloc];
+			n = ((id (*)(id, SEL, unsigned char **, NSInteger, NSInteger, NSInteger, NSInteger, BOOL, BOOL, NSString *, NSInteger, NSInteger))objc_msgSend)(n, @selector(initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bytesPerRow:bitsPerPixel:), NULL, w, rows, 8, 4, YES, NO, @"NSDeviceRGBColorSpace", 0, 32);
+			if (n != nil && bd(n, @selector(bitmapData)) != NULL) {
+				unsigned char *q = bd(n, @selector(bitmapData)); NSInteger qbpr = ni(n, @selector(bytesPerRow));
+				for (y = 0; y < rows; y++) for (x = 0; x < w; x++) { unsigned char *s4 = p + y * bpr + x * 4, *d4 = q + y * qbpr + x * 4; d4[0] = s4[0]; d4[1] = s4[1]; d4[2] = s4[2]; d4[3] = 0xFF; }
+				if (getenv("MACHRUN_DEBUG_BMP")) fprintf(stderr, "machrun: xRGB bitmap %ldx%ld given as RGBA, first pixel %02x%02x%02x\n", (long)w, (long)rows, p[0], p[1], p[2]);
+				((void (*)(id, SEL, id))o_addRep)(self, _cmd, n);
+				((void (*)(id, SEL))objc_msgSend)(n, @selector(release));
+				return;
+			}
 		}
 	}
 	((void (*)(id, SEL, id))o_addRep)(self, _cmd, rep);
