@@ -45,6 +45,9 @@ int	darwin_sigprocmask(struct thread *, struct darwin_args *);
 int	darwin_stat_out(struct thread *, const struct stat *, void *);
 int	darwin_msgflags_pub(int);
 void	darwin_event_syscalls_init(void);		/* syscalls_event.c */
+void	darwin_ipc_syscalls_init(void);		/* mach_ipc.c */
+void	darwin_mach_init(void);
+void	darwin_mach_fini(void);
 void	darwin_proc_syscalls_init(void);		/* syscalls_proc.c */
 int	darwin_sysctl_proc(struct thread *, int *, u_int, void *, void *, bool);
 int	darwin_sysctl_procargs2(struct thread *, int, void *, void *);

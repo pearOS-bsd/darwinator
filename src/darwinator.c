@@ -89,6 +89,7 @@ darwinator_modevent(module_t mod, int type, void *data)
 	switch (type) {
 	case MOD_LOAD:
 		darwin_sysvec_init();
+		darwin_mach_init();
 		error = exec_register(&macho_execsw);
 		if (error == 0)
 			printf("darwinator: Mach-O executables enabled (%s)\n",
@@ -98,6 +99,8 @@ darwinator_modevent(module_t mod, int type, void *data)
 		if (darwin_in_use())
 			return (EBUSY);
 		error = exec_unregister(&macho_execsw);
+		if (error == 0)
+			darwin_mach_fini();
 		break;
 	default:
 		error = EOPNOTSUPP;
