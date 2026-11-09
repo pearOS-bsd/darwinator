@@ -284,10 +284,82 @@ dw_futimes(int fd, const struct dtimeval *tv)
 	t[0].tv_sec = tv[0].sec; t[0].tv_usec = tv[0].usec; t[1].tv_sec = tv[1].sec; t[1].tv_usec = tv[1].usec;
 	return (futimes(fd, t));
 }
+/* sysctl KERN_PROC with the layout of Darwin: kinfo_proc of 648 bytes (extern_proc 296 + eproc 352; the offsets were read on a Mac, see src/syscalls_proc.c) */
+#include <sys/proc.h>
+#include <sys/ucred.h>
+static void dk32(char *b, int off, uint32_t v) { memcpy(b + off, &v, 4); }
+static void
+dk_fill(const struct kinfo_proc *k, char *b)
+{
+	int i, n;
+
+	memset(b, 0, 648);
+	{ uint64_t sec = (uint64_t)k->ki_start.tv_sec; uint32_t us = (uint32_t)k->ki_start.tv_usec; memcpy(b, &sec, 8); memcpy(b + 8, &us, 4); }
+	dk32(b, 32, 0x4 | ((k->ki_flag & 0x2 /* P_CONTROLT */) ? 0x2 : 0));
+	b[36] = k->ki_stat == SZOMB ? 5 : k->ki_stat == SSTOP ? 4 : k->ki_stat == SIDL ? 1 : 2;
+	dk32(b, 40, (uint32_t)k->ki_pid); dk32(b, 44, (uint32_t)k->ki_ppid);
+	b[242] = (char)k->ki_nice;
+	strlcpy(b + 243, k->ki_comm, 17);
+	dk32(b, 296 + 264, (uint32_t)k->ki_ppid); dk32(b, 296 + 268, (uint32_t)k->ki_pgid);
+	dk32(b, 296 + 276, k->ki_tdev == (dev_t)-1 || k->ki_tdev == 0 ? 0xffffffffu : (uint32_t)k->ki_tdev);
+	dk32(b, 296 + 280, (uint32_t)k->ki_tpgid);
+	dk32(b, 296 + 16 + 80, k->ki_ruid); dk32(b, 296 + 16 + 84, k->ki_svuid); dk32(b, 296 + 16 + 88, k->ki_rgid); dk32(b, 296 + 16 + 92, k->ki_svgid);
+	dk32(b, 296 + 120, 1); dk32(b, 296 + 120 + 4, k->ki_uid);
+	n = k->ki_ngroups > 16 ? 16 : k->ki_ngroups;
+	{ uint16_t ng = (uint16_t)n; memcpy(b + 296 + 120 + 8, &ng, 2); }
+	for (i = 0; i < n; i++) dk32(b, 296 + 120 + 12 + 4 * i, k->ki_groups[i]);
+}
+/* KERN_PROC what: Darwin ALL 0, PID 1, PGRP 2, TTY 3, UID 4, RUID 5; FreeBSD ALL 0, PID 1, PGRP 2, SESSION 3, TTY 4, UID 5, RUID 6 */
+static int
+dk_kern_proc(int *name, u_int namelen, void *oldp, size_t *oldlenp)
+{
+	int mib[4] = { CTL_KERN, KERN_PROC, 0, 0 };
+	size_t len = 0, cnt, i;
+	struct kinfo_proc *kp;
+	int w = name[2];
+
+	mib[2] = w >= 3 ? w + 1 : w;
+	if (namelen > 3) mib[3] = name[3];
+	if (sysctl(mib, namelen < 4 ? 3 : 4, NULL, &len, NULL, 0) != 0) return (-1);
+	kp = malloc(len + 16 * sizeof(*kp));
+	if (kp == NULL) { errno = ENOMEM; return (-1); }
+	len += 16 * sizeof(*kp);
+	if (sysctl(mib, namelen < 4 ? 3 : 4, kp, &len, NULL, 0) != 0) { free(kp); return (-1); }
+	cnt = len / sizeof(*kp);
+	if (oldp == NULL) { *oldlenp = cnt * 648; free(kp); return (0); }
+	for (i = 0; i < cnt && (i + 1) * 648 <= *oldlenp; i++)
+		dk_fill(&kp[i], (char *)oldp + i * 648);
+	if (i < cnt) { *oldlenp = i * 648; free(kp); errno = ENOMEM; return (-1); }
+	*oldlenp = cnt * 648;
+	free(kp);
+	return (0);
+}
+/* KERN_PROCARGS2 (49): argc, the path, NULs, the arguments (no environment) */
+static int
+dk_procargs2(int *name, void *oldp, size_t *oldlenp)
+{
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ARGS, name[2] }, argc = 0;
+	size_t len = 65536, total;
+	char *a = malloc(len), *out;
+
+	if (a == NULL) { errno = ENOMEM; return (-1); }
+	if (sysctl(mib, 4, a, &len, NULL, 0) != 0 || len == 0) { free(a); errno = EINVAL; return (-1); }
+	{ size_t i; for (i = 0; i < len; i++) if (a[i] == 0) argc++; }
+	total = 4 + strlen(a) + 1 + len;
+	if (oldp == NULL) { *oldlenp = total; free(a); return (0); }
+	out = malloc(total + 1);
+	memcpy(out, &argc, 4); strcpy(out + 4, a); memcpy(out + 4 + strlen(a) + 1, a, len);
+	if (total > *oldlenp) total = *oldlenp;
+	memcpy(oldp, out, total); *oldlenp = total;
+	free(out); free(a);
+	return (0);
+}
 static int
 dw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 {
 	int n[2];
+	if (namelen >= 3 && name[0] == CTL_KERN && name[1] == KERN_PROC && newp == NULL) return (dk_kern_proc(name, namelen, oldp, oldlenp));
+	if (namelen == 3 && name[0] == CTL_KERN && name[1] == 49 /* KERN_PROCARGS2 */ && newp == NULL) return (dk_procargs2(name, oldp, oldlenp));
 	if (namelen == 2 && name[0] == 6) {			/* CTL_HW */
 		n[0] = 6;
 		switch (name[1]) { case 24: n[1] = 5; break; case 25: n[1] = 3; break; default: n[1] = name[1]; }	/* HW_MEMSIZE -> HW_PHYSMEM, HW_AVAILCPU -> HW_NCPU */
@@ -679,6 +751,35 @@ dw_host_statistics64(uint32_t host, int flavor, uint32_t *info, uint32_t *count)
 	return (4);			/* KERN_INVALID_ARGUMENT */
 }
 static uint32_t g_mach_task_self = 0x203;
+/* getmntinfo: Darwin's struct statfs (see sfs_out) in a buffer that stays */
+static int
+dw_getmntinfo(struct dstatfs **bufp, int flags)
+{
+	static struct dstatfs *buf; static int room;
+	int n = getfsstat(NULL, 0, flags);
+
+	if (n <= 0) return (n);
+	if (n > room) { free(buf); buf = calloc((size_t)n + 4, sizeof(*buf)); room = n + 4; if (buf == NULL) { room = 0; return (0); } }
+	n = dw_getfsstat(buf, room * (int)sizeof(*buf), flags);
+	*bufp = buf;
+	return (n);
+}
+/* getattrlist(path, attrlist, buf, size, options): only what df asks for, ATTR_VOL_INFO|ATTR_VOL_SPACEUSED (a 64 bit number of used bytes) */
+static int
+dw_getattrlist(const char *path, uint32_t *al, void *buf, size_t sz, unsigned long opt)
+{
+	struct statfs f;
+
+	(void)opt;
+	if (al[0] >= 5 && al[1] == 0 && al[2] == 0x80800000u && al[3] == 0 && al[4] == 0 && sz >= 12 && statfs(path, &f) == 0) {
+		uint32_t len = 12; uint64_t used = (uint64_t)(f.f_blocks - f.f_bfree) * f.f_bsize;
+
+		memcpy(buf, &len, 4); memcpy((char *)buf + 4, &used, 8);
+		return (0);
+	}
+	errno = ENOTSUP;
+	return (-1);
+}
 static long dw_minus1_enotsup(void) { errno = ENOTSUP; return (-1); }
 static long dw_minus1_esrch(void) { errno = ESRCH; return (-1); }
 static void dw_mach_error(const char *str, int kr) { fprintf(stderr, "%s %s (%d)\n", str ? str : "", kr == 0 ? "(os/kern) successful" : "(os/kern) failure", kr); }
@@ -793,7 +894,7 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	ARM64_VA_SHIMS
 	{ "_task_read_for_pid", dw_kern_failure }, { "_task_for_pid", dw_kern_failure }, { "_task_inspect_for_pid", dw_kern_failure }, { "_task_info", dw_kern_failure }, { "_task_threads", dw_kern_failure }, { "_thread_info", dw_kern_failure }, { "_thread_policy_get", dw_kern_failure }, { "_task_policy_get", dw_kern_failure }, { "_processor_set_default", dw_kern_failure }, { "_host_processor_set_priv", dw_kern_failure }, { "_processor_set_tasks_with_flavor", dw_kern_failure }, { "_pid_for_task", dw_kern_failure }, { "_mach_vm_region", dw_kern_failure }, { "_vm_read_overwrite", dw_kern_failure }, { "_host_processor_info", dw_kern_failure }, { "_task_suspend", dw_kern_failure }, { "_task_resume", dw_kern_failure }, { "_thread_get_state", dw_kern_failure },
 	{ "_mach_port_deallocate", dw_zero }, { "_vm_deallocate", dw_zero }, { "_mach_port_mod_refs", dw_zero },
-	{ "_getattrlist", dw_minus1_enotsup }, { "_getattrlistbulk", dw_minus1_enotsup }, { "_fgetattrlist", dw_minus1_enotsup }, { "_proc_pidinfo", dw_minus1_enotsup }, { "_proc_pid_rusage", dw_minus1_enotsup }, { "_proc_get_wakemon_params", dw_minus1_enotsup }, { "_proc_get_dirty", dw_minus1_enotsup }, { "_proc_get_cpumon_params", dw_minus1_enotsup }, { "_kpersona_pidinfo", dw_minus1_enotsup }, { "_proc_listpids", dw_minus1_enotsup },
+	{ "_getattrlist", dw_getattrlist }, { "_getmntinfo$INODE64", dw_getmntinfo }, { "_getmntinfo", dw_getmntinfo }, { "_getattrlistbulk", dw_minus1_enotsup }, { "_fgetattrlist", dw_minus1_enotsup }, { "_proc_pidinfo", dw_minus1_enotsup }, { "_proc_pid_rusage", dw_minus1_enotsup }, { "_proc_get_wakemon_params", dw_minus1_enotsup }, { "_proc_get_dirty", dw_minus1_enotsup }, { "_proc_get_cpumon_params", dw_minus1_enotsup }, { "_kpersona_pidinfo", dw_minus1_enotsup }, { "_proc_listpids", dw_minus1_enotsup },
 	{ "_mach_task_self_", &g_mach_task_self },
 	{ "_mach_host_self", dw_mach_host_self }, { "_host_page_size", dw_host_page_size }, { "_host_statistics64", dw_host_statistics64 }, { "_host_statistics", dw_host_statistics64 },
 	{ "_mach_error_string", dw_mach_error_string }, { "_compat_mode", dw_compat_mode }, { "_mach_error", dw_mach_error }, { "_vm_page_size", &g_vm_page_size }, { "_vm_kernel_page_size", &g_vm_page_size },
