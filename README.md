@@ -41,6 +41,12 @@ dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
 
+A double click on `AppCleaner.app` on the desktop of the image starts it through the Finder (`macapp`):
+
+![AppCleaner started by a double click in the Finder of pearOS](docs/screenshot-finder-doubleclick.png)
+
+(Driven with `tools/qmp-click.py`: QEMU's monitor command `mouse_move` does not move the absolute tablet, QMP `input-send-event` does.)
+
 The Unarchiver 3.11 (the original Mac application, Objective-C) shows its Preferences window and extracts zip, tar.gz, tar.bz2, tar.xz and 7z archives, and with a short path of the archive extracts them reliably in the test (a path of 27 to 33 characters makes it crash: not found yet) (`docs/UNARCHIVER.md`, `tests/unar.sh`).
 
 ![The Unarchiver 3.11 (the unmodified Mac application) running in pearOS](docs/screenshot-unarchiver.png)
