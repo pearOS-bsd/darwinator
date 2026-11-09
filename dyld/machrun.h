@@ -3,6 +3,15 @@
 #define _MACHRUN_H_
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
+
+/* Variadic calls: on arm64 Darwin passes the variable arguments on the stack (not in x1..x7 like the AAPCS64 of FreeBSD), so a shim that takes "..." starts its va_list at the
+ * incoming stack pointer (the CFA of the function): a va_list of AAPCS64 with no register save area.  On x86-64 both systems agree. */
+#if defined(__aarch64__)
+#define	DW_VA_START(ap, last)	do { (ap).__stack = __builtin_dwarf_cfa(); (ap).__gr_top = 0; (ap).__vr_top = 0; (ap).__gr_offs = 0; (ap).__vr_offs = 0; } while (0)
+#else
+#define	DW_VA_START(ap, last)	va_start(ap, last)
+#endif
 
 extern int machrun_verbose;
 #define	VLOG(...)	do { if (machrun_verbose) fprintf(stderr, "machrun: " __VA_ARGS__); } while (0)

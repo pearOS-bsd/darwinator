@@ -57,6 +57,8 @@ XLD, a converter of audio files with plug-ins that are Mach-O bundles (`docs/XLD
 
 What recent applications need beyond that (AppCleaner is the test): `LC_DYLD_CHAINED_FIXUPS`, nibs in the `NIBArchive` format of Xcode 16 (converted to the keyed archive that GNUstep loads, `compat.m`), the constant literals of the compiler (`@[...]`, `@{...}`, `@1` as structures in the file), direct references to the program's own classes, `objc_alloc`, `objc_opt_new` and the other fast paths of newer compilers, libdispatch objects that the compiler retains with `objc_retain`, CoreGraphics and CoreFoundation from libopal and GNUstep corebase, and stand-ins for Sparkle, SF Symbols and asset catalogs.
 
+iOS 16 command line tools (`vm_stat`, `df`, `ps`, `taskinfo`) also start on FreeBSD arm64: see `docs/IOS.md`.
+
 ## In the pearOS image
 
 `wsbsd/iso/build.sh` fetches this repository, builds `dyld/` (machrun, `libmachcompat.so`, `libexctrace.so`) and the kernel module, and installs them: `/usr/local/bin/machrun`, `/usr/local/bin/macapp`, `/usr/local/libexec/wrapapp.sh`, `/usr/local/lib/libmachcompat.so`, `/boot/modules/darwinator.ko` (not loaded by default). `loader.conf` loads `imgact_binmisc`; the rc script `wsbsd_machrun` registers the Mach-O magic numbers (thin and universal) with it, so a Mach-O executable runs like any program (`./kekaxz --version`); `macapp /path/App.app` starts a whole application (the bundle is wrapped in `~/Library/Caches/machrun`, as GNUstep wants it). `machrun` sets what Objective-C programs need by itself (`MACHRUN_LENIENT`, `MALLOC_CONF=junk:true`; `MACHRUN_STRICT=1` turns the first off).
