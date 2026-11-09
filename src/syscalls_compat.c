@@ -505,6 +505,15 @@ darwin_eperm(struct thread *td __unused, struct darwin_args *uap __unused)
 }
 
 static int
+darwin_renameatx(struct thread *td, struct darwin_args *uap)		/* (fromfd, from, tofd, to, flags): the flags (swap, exclusive) are not supported */
+{
+	if ((uint32_t)uap->a[4] != 0)
+		return (ENOTSUP);
+	return (kern_renameat(td, (int)uap->a[0] == -2 ? AT_FDCWD : (int)uap->a[0], (const char *)uap->a[1], (int)uap->a[2] == -2 ? AT_FDCWD : (int)uap->a[2],
+	    (const char *)uap->a[3], UIO_USERSPACE));
+}
+
+static int
 darwin_ptrace(struct thread *td, struct darwin_args *uap)	/* PT_DENY_ATTACH (31) is accepted: nobody may attach anyway; the rest is not supported */
 {
 	if ((int)uap->a[0] == 31 /* PT_DENY_ATTACH */ || (int)uap->a[0] == 0 /* PT_TRACE_ME */) {
@@ -632,6 +641,11 @@ static const struct {
 	E(486, 5, darwin_guarded_pwrite, "guarded_pwrite_np"),
 	E(487, 4, darwin_guarded_writev, "guarded_writev_np"),
 	E(26,  4, darwin_ptrace,	"ptrace"),
+	E(488, 5, darwin_renameatx,	"renameatx_np"),
+	E(551, 3, darwin_enotsup,	"freadlink"),
+	E(418, 4, sys_msgsnd,		"msgsnd_nocancel"),
+	E(419, 5, sys_msgrcv,		"msgrcv_nocancel"),
+	E(312, 3, darwin_ok,		"psynch_cvclrprepost"),
 	E(142, 2, darwin_gethostuuid,	"gethostuuid"),
 	E(348, 1, darwin_pthread_chdir,	"__pthread_chdir"),
 	E(349, 1, darwin_pthread_fchdir, "__pthread_fchdir"),

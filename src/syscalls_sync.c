@@ -345,6 +345,10 @@ static const struct {
 	E(307, 5, darwin_psynch_rw_wait,	"psynch_rw_wrlock"),
 	E(308, 5, darwin_psynch_rw_unlock,	"psynch_rw_unlock"),
 	E(309, 5, darwin_psynch_rw_unlock,	"psynch_rw_unlock2"),
+	E(297, 5, darwin_psynch_rw_wait,	"psynch_rw_longrdlock"),
+	E(298, 5, darwin_psynch_rw_wait,	"psynch_rw_yieldwrlock"),
+	E(299, 5, darwin_psynch_rw_unlock,	"psynch_rw_downgrade"),
+	E(300, 5, darwin_psynch_rw_wait,	"psynch_rw_upgrade"),
 	E(367, 0, darwin_workq_open,		"workq_open"),
 	E(368, 4, darwin_workq_kernreturn,	"workq_kernreturn"),
 	/* Mach traps (DARWIN_MACH_BASE + n) */

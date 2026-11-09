@@ -644,6 +644,22 @@ darwin_getattrlist(struct thread *td, struct darwin_args *uap)
 	return (error != 0 ? error : attr_fill(td, uap, &sb, path));
 }
 
+/* getattrlistat(fd, path, alist, buffer, size, options): relative to a directory */
+static int
+darwin_getattrlistat(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_args a = *uap;
+	char path[MAXPATHLEN];
+	struct stat sb;
+	int error = copyinstr((void *)uap->a[1], path, sizeof(path), NULL);
+
+	if (error != 0)
+		return (error);
+	a.a[1] = uap->a[2]; a.a[2] = uap->a[3]; a.a[3] = uap->a[4]; a.a[4] = uap->a[5];
+	error = kern_statat(td, ((uint32_t)uap->a[5] & 1) ? AT_SYMLINK_NOFOLLOW : 0, (int)uap->a[0] == -2 ? AT_FDCWD : (int)uap->a[0], path, UIO_SYSSPACE, &sb);
+	return (error != 0 ? error : attr_fill(td, &a, &sb, path));
+}
+
 /* fgetattrlist(fd, alist, buffer, size, options): the name comes from the path of the vnode when the kernel knows one */
 static int
 darwin_fgetattrlist(struct thread *td, struct darwin_args *uap)
@@ -688,6 +704,8 @@ static const struct {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
 	E(220, 5, darwin_getattrlist,	AUE_GETATTRLIST,	"getattrlist"),
 	E(228, 5, darwin_fgetattrlist,	AUE_GETATTRLIST,	"fgetattrlist"),
+	E(476, 6, darwin_getattrlistat,	AUE_GETATTRLIST,	"getattrlistat"),
+	E(410, 1, darwin_sigsuspend,	AUE_SIGSUSPEND,		"sigsuspend_nocancel"),
 	E(14,  3, darwin_mknod,		AUE_MKNOD,		"mknod"),
 	E(347, 3, darwin_getfsstat64,	AUE_GETFSSTAT,		"getfsstat64"),
 	E(362, 0, sys_kqueue,		AUE_KQUEUE,		"kqueue"),
