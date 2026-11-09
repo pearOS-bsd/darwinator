@@ -11,3 +11,12 @@ vnode_if*.h
 opt_*.h
 tools/macprobe/macprobe-out/
 tools/macprobe/macprobe-out.tar.gz
+# files that come from Apple (copied from a Mac or extracted from its dyld shared cache) are never put in this repository
+*.dylib
+dyld
+dyld.*
+dyld_shared_cache*
+*.ipsw
+*.dmg
+macbins/
+maclibs/
