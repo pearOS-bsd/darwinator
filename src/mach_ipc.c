@@ -1133,7 +1133,7 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, 0, buf, sizeof(buf));
 		}
 		return (true);
-	case 217: case 220:				/* host_statistics / host_statistics64(host, flavor, *info, *count) */
+	case 216: case 219:				/* host_statistics / host_statistics64(host, flavor, *info, *count) */
 		{
 			uint32_t buf[1 + 40];
 			uint64_t q[16];
@@ -1141,14 +1141,14 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 
 			a = m->size >= 40 ? rd32(d, 32) : 0;
 			memset(buf, 0, sizeof(buf));
-			if (a == 4 && id == 220) {			/* HOST_VM_INFO64: vm_statistics64, 38 ints */
+			if (a == 4 && id == 219) {			/* HOST_VM_INFO64: vm_statistics64, 38 ints */
 				uint32_t *v = buf + 1;
 				uint64_t w[9] = { VM_CNT_FETCH(v_zfod), 0, VM_CNT_FETCH(v_vnodepgsin), VM_CNT_FETCH(v_vnodepgsout), VM_CNT_FETCH(v_vm_faults), VM_CNT_FETCH(v_cow_faults), 0, 0, 0 };
 
 				v[0] = vm_free_count(); v[1] = (uint32_t)physmem - vm_free_count() - vm_wire_count(); v[2] = 0; v[3] = vm_wire_count();
 				memcpy(v + 4, w, sizeof(w));			/* zero_fill, reactivations, pageins, pageouts, faults, cow_faults, lookups, hits, purges */
 				cnt = 38;
-			} else if (a == 2 && id == 217) {			/* HOST_VM_INFO: vm_statistics, 15 ints */
+			} else if (a == 2 && id == 216) {			/* HOST_VM_INFO: vm_statistics, 15 ints */
 				uint32_t *v = buf + 1;
 
 				v[0] = vm_free_count(); v[1] = (uint32_t)physmem - vm_free_count() - vm_wire_count(); v[2] = 0; v[3] = vm_wire_count();

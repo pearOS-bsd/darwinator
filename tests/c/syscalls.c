@@ -504,10 +504,10 @@ int cmain(void)
 	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 24; q[2] = 0x1d03; q[3] = rpm; q[5] = 202;
 	    kr4 = dmach7(31, (i64)q, 3, 24, 96, rpm, 2000, 0); check("_host_page_size (id 202)", kr4 == 0 && q[8] == 0 && q[9] >= 4096, q[9]); }
 	  { unsigned q[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr4;
-	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 220; q[8] = 4; q[9] = 38;
-	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics64 (id 220, HOST_VM_INFO64): 38 ints, free pages", kr4 == 0 && q[8] == 0 && q[9] == 38 && q[10] > 0, q[5] * 1000 + q[8]);
-	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 217; q[8] = 3; q[9] = 4;
-	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics (id 217, HOST_CPU_LOAD_INFO): 4 ints", kr4 == 0 && q[8] == 0 && q[9] == 4, q[9]); }
+	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 219; q[8] = 4; q[9] = 38;
+	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics64 (id 219, HOST_VM_INFO64): 38 ints, free pages", kr4 == 0 && q[8] == 0 && q[9] == 38 && q[10] > 0, q[5] * 1000 + q[8]);
+	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 216; q[8] = 3; q[9] = 4;
+	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics (id 216, HOST_CPU_LOAD_INFO): 4 ints", kr4 == 0 && q[8] == 0 && q[9] == 4, q[9]); }
 	  /* mach_port_request_notification (id 3213): a dead-name notification (id 72) arrives when the port dies */
 	  { unsigned P = 0, N = 0, q[64], rb[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr5;
 	    dmach(16, (i64)task, 1, (i64)&P, 0, 0, 0); dmach(21, (i64)task, P, P, 20, 0, 0);
