@@ -521,6 +521,17 @@ int cmain(void)
 	    for (k = 0; k < 64; k++) rb[k] = 0;
 	    kr5 = dmach7(31, (i64)rb, 2 | 0x100, 0, 256, N, 500, 0);
 	    check("the dead-name notification (id 72) arrives with the name of the port", kr5 == 0 && rb[5] == 72 && rb[8] == P, rb[5]); }
+	  /* mach_port_names (id 3200): two out-of-line arrays; the port that was just made is in the list with the receive and send bits */
+	  { unsigned P = 0, q[64], rb[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k, found = 0; i64 kr5; unsigned *nm, *ty, n;
+	    dmach(16, (i64)task, 1, (i64)&P, 0, 0, 0); dmach(21, (i64)task, P, P, 20, 0, 0);
+	    for (k = 0; k < 64; k++) { q[k] = 0; rb[k] = 0; }
+	    q[0] = 19 | (21 << 8); q[1] = 32; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3200;
+	    kr5 = dmach7(31, (i64)q, 3, 32, 256, rpm, 2000, 0);
+	    n = q[17];
+	    nm = (unsigned *)(unsigned long)(((unsigned long)q[7] << 0) | ((unsigned long)q[8] << 32)); ty = (unsigned *)(unsigned long)(((unsigned long)q[11] << 0) | ((unsigned long)q[12] << 32));
+	    check("mach_port_names (id 3200): a complex reply with two arrays", kr5 == 0 && q[5] == 3300 && q[6] == 2 && n >= 3 && q[18] == n, kr5 * 1000 + q[5]);
+	    if (kr5 == 0 && n >= 3 && n < 100) for (k = 0; k < (int)n; k++) if (nm[k] == P && ty[k] == ((1u << 17) | (1u << 16))) found = 1;
+	    check("  the new port is listed with RECEIVE and SEND", found, n); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);

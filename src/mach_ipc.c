@@ -964,6 +964,19 @@ mig_reply_data(struct kmsg *req, int id, int kr, const void *data, size_t datale
 	wakeup(rp);
 }
 
+static uint32_t
+entry_type(const struct kent *e)
+{
+	uint32_t type = 0;
+
+	if (e->recv) type |= 1 << 17;				/* MACH_PORT_TYPE_RECEIVE */
+	if (e->send > 0) type |= 1 << 16;			/* MACH_PORT_TYPE_SEND */
+	if (e->sonce > 0) type |= 1 << 18;			/* MACH_PORT_TYPE_SEND_ONCE */
+	if (e->port->dead && !e->recv) type |= 1 << 20;		/* MACH_PORT_TYPE_DEAD_NAME */
+	if (e->port->kind == KP_SET) type = 1 << 19;		/* MACH_PORT_TYPE_PORT_SET */
+	return (type);
+}
+
 /* the routines that only answer questions: the answers are what this system can say */
 static bool
 mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m, int id)
@@ -978,14 +991,10 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 	case 3201:					/* mach_port_type(task, name, *ptype) */
 		{
 			struct kent *e = m->size >= 36 ? ent_by_name(t, rd32(d, 32)) : NULL;
-			uint32_t type = 0;
+			uint32_t type;
 
 			if (e == NULL) { mig_reply_data(m, id, KERN_INVALID_NAME, NULL, 0); return (true); }
-			if (e->recv) type |= 1 << 17;				/* MACH_PORT_TYPE_RECEIVE */
-			if (e->send > 0) type |= 1 << 16;			/* MACH_PORT_TYPE_SEND */
-			if (e->sonce > 0) type |= 1 << 18;			/* MACH_PORT_TYPE_SEND_ONCE */
-			if (e->port->dead && !e->recv) type |= 1 << 20;		/* MACH_PORT_TYPE_DEAD_NAME */
-			if (e->port->kind == KP_SET) type = 1 << 19;		/* MACH_PORT_TYPE_PORT_SET */
+			type = entry_type(e);
 			mig_reply_data(m, id, 0, &type, 4);
 			return (true);
 		}
@@ -1176,6 +1185,36 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 				m->reply.port->qn++;
 				wakeup(m->reply.port);
 			}
+		}
+		break;
+	case 3200:				/* mach_port_names(task, *names[], *namesCnt, *types[], *typesCnt): two out-of-line arrays */
+		{
+			struct kmsg *r;
+			struct kport *rp = m->reply.port;
+			uint8_t *rd;
+			uint32_t *nm, *ty, n = 0;
+			int i;
+
+			if (rp == NULL || rp->dead)
+				break;
+			nm = malloc(KE_N * 4, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			ty = malloc(KE_N * 4, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			for (i = 0; i < KE_N; i++)
+				if (t->e[i].used) { nm[n] = t->e[i].name; ty[n] = entry_type(&t->e[i]); n++; }
+			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->data = rd = malloc(76, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->size = 76;
+			wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+			wr32(rd, 4, 76); wr32(rd, 20, id + 100); wr32(rd, 24, 2);
+			r->ool[0].type = 1; r->ool[0].off = 28; r->ool[0].size = n * 4; r->ool[0].data = (uint8_t *)nm;
+			r->ool[1].type = 1; r->ool[1].off = 44; r->ool[1].size = n * 4; r->ool[1].data = (uint8_t *)ty;
+			r->nool = 2;
+			wr32(rd, 28 + 12, n * 4); rd[28 + 11] = 1;
+			wr32(rd, 44 + 12, n * 4); rd[44 + 11] = 1;
+			wr32(rd, 68, n); wr32(rd, 72, n);
+			TAILQ_INSERT_TAIL(&rp->q, r, link);
+			rp->qn++;
+			wakeup(rp);
 		}
 		break;
 	case 3403:				/* mach_ports_register(task, ports[], count): up to 3 ports that the children get */
