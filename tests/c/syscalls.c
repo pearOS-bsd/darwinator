@@ -503,6 +503,11 @@ int cmain(void)
 	    kr4 = dmach7(31, (i64)q, 3, 40, 96, rpm, 2000, 0); check("host_info (id 200, HOST_BASIC_INFO) to the host port: 12 ints, the number of CPUs, the CPU type", kr4 == 0 && q[8] == 0 && q[9] == 12 && q[10] >= 1 && (q[13] == 0x01000007 || q[13] == 0x0100000c), q[13]);
 	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 24; q[2] = 0x1d03; q[3] = rpm; q[5] = 202;
 	    kr4 = dmach7(31, (i64)q, 3, 24, 96, rpm, 2000, 0); check("_host_page_size (id 202)", kr4 == 0 && q[8] == 0 && q[9] >= 4096, q[9]); }
+	  { unsigned q[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr4;
+	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 220; q[8] = 4; q[9] = 38;
+	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics64 (id 220, HOST_VM_INFO64): 38 ints, free pages", kr4 == 0 && q[8] == 0 && q[9] == 38 && q[10] > 0, q[5] * 1000 + q[8]);
+	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 217; q[8] = 3; q[9] = 4;
+	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics (id 217, HOST_CPU_LOAD_INFO): 4 ints", kr4 == 0 && q[8] == 0 && q[9] == 4, q[9]); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
