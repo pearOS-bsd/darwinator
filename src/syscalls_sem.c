@@ -86,6 +86,13 @@ darwin_sem_post(struct thread *td, struct darwin_args *uap)
 	return (sys_ksem_post(td, &a));
 }
 
+/* R_OK W_OK X_OK (4 2 1) or, as the real macOS also takes them, _READ_OK _WRITE_OK _EXECUTE_OK (1 << 9, 10, 11) */
+static int
+access_mode(int flags)
+{
+	return ((flags & 7) | ((flags >> 9) & 7)) & 7;
+}
+
 /*
  * access_extended(entries, size, results, uid): entries is an array of {uint32 ad_name_offset; int ad_flags; int ad_pad[2]} (16 bytes) followed by the
  * names; the first offset says where the array ends.  results[i] is the errno of entry i.  (ACLs are not checked: R_OK W_OK X_OK only.)
@@ -122,7 +129,7 @@ darwin_access_extended(struct thread *td, struct darwin_args *uap)
 			res[i] = EINVAL;
 			continue;
 		}
-		res[i] = kern_accessat(td, AT_FDCWD, buf + off, UIO_SYSSPACE, 0, flags & 7);
+		res[i] = kern_accessat(td, AT_FDCWD, buf + off, UIO_SYSSPACE, 0, access_mode(flags));
 		res[i] = darwin_errno(res[i]);
 	}
 	error = copyout(res, (void *)uap->a[2], n * sizeof(int));
