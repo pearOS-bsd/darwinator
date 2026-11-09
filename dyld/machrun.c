@@ -862,6 +862,18 @@ fatal_handler(int sig, siginfo_t *si, void *ucv)
 			fp = (void **)fp[0];
 		}
 	}
+	{	/* the memory around the registers that look like pointers: written to a pipe (a bad address is an error there, not another fault) and read back */
+		static int pfd[2] = { -1, -1 }; unsigned long regs[6]; int r; unsigned char tmp[64];
+#if defined(__x86_64__)
+		regs[0] = uc->uc_mcontext.mc_rdi; regs[1] = uc->uc_mcontext.mc_rsi; regs[2] = uc->uc_mcontext.mc_rdx; regs[3] = uc->uc_mcontext.mc_rcx; regs[4] = uc->uc_mcontext.mc_rbx; regs[5] = uc->uc_mcontext.mc_r12;
+#else
+		for (r = 0; r < 6; r++) regs[r] = 0;
+#endif
+		if (pipe(pfd) == 0) for (r = 0; r < 6; r++) {
+			ssize_t n = regs[r] > 0x10000 ? write(pfd[1], (void *)regs[r], 64) : -1;
+			if (n == 64 && read(pfd[0], tmp, 64) == 64) { int k; dprintf(2, "  mem[reg%d %#lx]:", r, regs[r]); for (k = 0; k < 64; k++) dprintf(2, " %02x", tmp[k]); dprintf(2, "  |"); for (k = 0; k < 64; k++) dprintf(2, "%c", tmp[k] >= 32 && tmp[k] < 127 ? tmp[k] : '.'); dprintf(2, "|\n"); }
+		}
+	}
 	if (getenv("MACHRUN_SEGV_HOLD")) { dprintf(2, "machrun: holding (pid %d) for procstat\n", (int)getpid()); sleep(90); }
 	_exit(139);
 }
