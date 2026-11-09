@@ -464,6 +464,19 @@ int cmain(void)
 	      kr2 = dmach7(31, (i64)cm, 1, 40, 0, 0, 0, 0); check("mach_msg with a port descriptor (MAKE_SEND of Q) is sent", kr2 == 0, kr2);
 	      kr2 = dmach7(31, (i64)rv, 2, 0, 64, P, 0, 0); check("  received: the descriptor holds the name of Q with the disposition 17 (PORT_SEND)", kr2 == 0 && rv[7] == Q && ((rv[9] >> 16) & 0xff) == 17, rv[9]);
 	      { unsigned m3[7] = { 19, 28, Q, 0, 0, 56, 0x77 }, r3[16]; for (k = 0; k < 16; k++) r3[k] = 0; kr2 = dmach7(31, (i64)m3, 1, 28, 0, 0, 0, 0); kr2 |= dmach7(31, (i64)r3, 2, 0, 64, Q, 0, 0); check("  and the right works: a message to Q arrives", kr2 == 0 && r3[5] == 56, kr2); } }
+	  /* MIG routines of the task and the host port (the ids come from the .defs of xnu: mach_port 3200, task 3400, host 200) */
+	  { unsigned q[24]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0), PT = 0; int k; i64 kr4;
+	    dmach(16, (i64)task, 1, (i64)&PT, 0, 0, 0); dmach(21, (i64)task, PT, PT, 20, 0, 0);
+	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 36; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3201; q[8] = PT;
+	    kr4 = dmach7(31, (i64)q, 3, 36, 96, rpm, 2000, 0); check("mach_port_type (id 3201): receive and send rights (the bits 1<<17 and 1<<16)", kr4 == 0 && q[5] == 3301 && q[8] == 0 && q[9] == ((1u << 17) | (1u << 16)), q[9]);
+	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 44; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3217; q[8] = PT; q[9] = 2; q[10] = 10;
+	    kr4 = dmach7(31, (i64)q, 3, 44, 96, rpm, 2000, 0); check("mach_port_get_attributes (id 3217, RECEIVE_STATUS): 10 ints, queue limit 5", kr4 == 0 && q[8] == 0 && q[9] == 10 && q[10 + 4] == 5, q[9]);
+	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3405; q[8] = 20; q[9] = 12;
+	    kr4 = dmach7(31, (i64)q, 3, 40, 96, rpm, 2000, 0); check("task_info (id 3405, MACH_TASK_BASIC_INFO): 12 ints, a virtual size", kr4 == 0 && q[8] == 0 && q[9] == 12 && (q[10] | q[11]) != 0, q[9]);
+	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 200; q[8] = 1; q[9] = 12;
+	    kr4 = dmach7(31, (i64)q, 3, 40, 96, rpm, 2000, 0); check("host_info (id 200, HOST_BASIC_INFO) to the host port: 12 ints, the number of CPUs, the CPU type", kr4 == 0 && q[8] == 0 && q[9] == 12 && q[10] >= 1 && (q[13] == 0x01000007 || q[13] == 0x0100000c), q[13]);
+	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 24; q[2] = 0x1d03; q[3] = rpm; q[5] = 202;
+	    kr4 = dmach7(31, (i64)q, 3, 24, 96, rpm, 2000, 0); check("_host_page_size (id 202)", kr4 == 0 && q[8] == 0 && q[9] >= 4096, q[9]); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);

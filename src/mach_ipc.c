@@ -27,6 +27,10 @@
 #include <sys/queue.h>
 #include <sys/sx.h>
 #include <sys/syscallsubr.h>
+#include <sys/smp.h>
+#include <vm/vm.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <bsm/audit_kevents.h>
@@ -898,6 +902,151 @@ mig_reply(struct ktask *t, struct kmsg *req, int id, int kr, struct kport *give,
 	(void)t;
 }
 
+
+/* a reply with the return code and inline data after it (the layout of MIG for simple routines: header 24, NDR 8, RetCode 4, data) */
+static void
+mig_reply_data(struct kmsg *req, int id, int kr, const void *data, size_t datalen)
+{
+	struct kmsg *r;
+	struct kport *rp;
+	size_t size = 36 + (kr == 0 ? roundup2(datalen, 4) : 0);
+	uint8_t *d;
+
+	if (req->reply.port == NULL || req->reply.port->dead)
+		return;
+	rp = req->reply.port;
+	r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->data = d = malloc(size, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->size = size;
+	wr32(d, 0, MM_MOVE_SEND_ONCE);
+	wr32(d, 4, size);
+	wr32(d, 20, id + 100);
+	wr32(d, 32, (uint32_t)kr);
+	if (kr == 0 && datalen > 0)
+		memcpy(d + 36, data, datalen);
+	TAILQ_INSERT_TAIL(&rp->q, r, link);
+	rp->qn++;
+	wakeup(rp);
+}
+
+/* the routines that only answer questions: the answers are what this system can say */
+static bool
+mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m, int id)
+{
+	uint8_t *d = m->data;
+	struct proc *p = dest->kind == KP_TASK && dest->kp != NULL ? dest->kp : td->td_proc;
+	uint32_t a, b, out[64];
+	int n;
+
+	memset(out, 0, sizeof(out));
+	switch (id) {
+	case 3201:					/* mach_port_type(task, name, *ptype) */
+		{
+			struct kent *e = m->size >= 36 ? ent_by_name(t, rd32(d, 32)) : NULL;
+			uint32_t type = 0;
+
+			if (e == NULL) { mig_reply_data(m, id, KERN_INVALID_NAME, NULL, 0); return (true); }
+			if (e->recv) type |= 1 << 17;				/* MACH_PORT_TYPE_RECEIVE */
+			if (e->send > 0) type |= 1 << 16;			/* MACH_PORT_TYPE_SEND */
+			if (e->sonce > 0) type |= 1 << 18;			/* MACH_PORT_TYPE_SEND_ONCE */
+			if (e->port->dead && !e->recv) type |= 1 << 20;		/* MACH_PORT_TYPE_DEAD_NAME */
+			if (e->port->kind == KP_SET) type = 1 << 19;		/* MACH_PORT_TYPE_PORT_SET */
+			mig_reply_data(m, id, 0, &type, 4);
+			return (true);
+		}
+	case 3217:					/* mach_port_get_attributes(task, name, flavor, *info, *count) */
+		{
+			struct kent *e = m->size >= 44 ? ent_by_name(t, rd32(d, 32)) : NULL;
+
+			a = m->size >= 44 ? rd32(d, 36) : 0;
+			if (e == NULL) { mig_reply_data(m, id, KERN_INVALID_NAME, NULL, 0); return (true); }
+			if (a == 1) { out[0] = 1; out[1] = 5; n = 1; }				/* MACH_PORT_LIMITS_INFO: the queue limit (5) */
+			else if (a == 2) {							/* MACH_PORT_RECEIVE_STATUS: mach_port_status_t, 10 ints */
+				out[0] = 1; out[1] = 0 /* mps_pset */; out[2] = 0 /* seqno */; out[3] = 0 /* mscount */; out[4] = 5 /* qlimit */;
+				out[5] = (uint32_t)e->port->qn /* msgcount */; out[6] = 0; out[7] = 0; out[8] = 0; out[9] = 0; n = 10;
+				out[0] = 0; out[1] = e->port->set != NULL ? 1 : 0;
+			} else if (a == 3) { out[0] = 0; n = 1; }				/* MACH_PORT_DNREQUESTS_SIZE */
+			else { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			{
+				uint32_t buf[2 + 16];
+
+				buf[0] = (uint32_t)n;
+				memcpy(buf + 1, out, n * 4);
+				mig_reply_data(m, id, 0, buf, (n + 1) * 4);			/* infoCnt, then the info */
+			}
+			return (true);
+		}
+	case 3218:					/* mach_port_set_attributes: accepted */
+	case 3229:					/* mach_port_set_context */
+	case 3407: case 3408:				/* task_suspend, task_resume */
+	case 3406:					/* task_set_info */
+	case 3413:					/* task_set_exception_ports: the handlers are not called here */
+	case 3420: case 3421: case 3423:		/* task_policy_set/get/task_policy */
+	case 3444: case 3445:				/* task_register_dyld_image_infos / unregister */
+	case 3447: case 3448:				/* dyld shared cache image info / state */
+		mig_reply_data(m, id, 0, NULL, 0);
+		return (true);
+	case 3228:					/* mach_port_get_context(task, name, *context: 8 bytes) */
+		mig_reply_data(m, id, 0, out, 8);
+		return (true);
+	case 3405:					/* task_info(task, flavor, *info, *count) */
+		a = m->size >= 40 ? rd32(d, 32) : 0;
+		{
+			uint64_t vsz = 0, rss = 0;
+
+			if (p->p_vmspace != NULL) { vsz = p->p_vmspace->vm_map.size; rss = (uint64_t)pmap_resident_count(vmspace_pmap(p->p_vmspace)) * PAGE_SIZE; }
+			if (a == 20) {						/* MACH_TASK_BASIC_INFO: virtual, resident, resident max (u64 each), user and system time (2 ints each), policy, suspend count */
+				uint64_t q[3] = { vsz, rss, rss };
+
+				memcpy(out, q, 24); out[6] = out[7] = out[8] = out[9] = 0; out[10] = 1; out[11] = 0; n = 12;
+			} else if (a == 5) {					/* TASK_BASIC_INFO_64: the same without the maximum */
+				uint64_t q[2] = { vsz, rss };
+
+				memcpy(out, q, 16); out[4] = out[5] = out[6] = out[7] = 0; out[8] = 1; out[9] = 0; n = 10;
+			} else if (a == 17) {					/* TASK_DYLD_INFO: all_image_info_addr (u64), size (u64), format (int): nothing registered */
+				n = 5;
+			} else { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+		}
+		{
+			uint32_t buf[1 + 16];
+
+			buf[0] = (uint32_t)n;
+			memcpy(buf + 1, out, n * 4);
+			mig_reply_data(m, id, 0, buf, (n + 1) * 4);
+		}
+		return (true);
+	case 200:					/* host_info(host, flavor, *info, *count): HOST_BASIC_INFO (1) */
+		a = m->size >= 40 ? rd32(d, 32) : 0;
+		if (a != 1) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+		{
+			uint32_t buf[1 + 12];
+			uint64_t mem = (uint64_t)ptoa((uint64_t)physmem);
+
+			memset(buf, 0, sizeof(buf));
+			buf[0] = 12; buf[1] = (uint32_t)mp_ncpus; buf[2] = (uint32_t)mp_ncpus; buf[3] = (uint32_t)MIN(mem, (uint64_t)UINT32_MAX);
+#if defined(__amd64__)
+			buf[4] = 0x01000007;		/* CPU_TYPE_X86_64 */
+#else
+			buf[4] = 0x0100000c;		/* CPU_TYPE_ARM64 */
+#endif
+			buf[7] = (uint32_t)mp_ncpus; buf[8] = (uint32_t)mp_ncpus; buf[9] = (uint32_t)mp_ncpus; buf[10] = (uint32_t)mp_ncpus;
+			memcpy(&buf[11], &mem, 8);
+			mig_reply_data(m, id, 0, buf, sizeof(buf));
+		}
+		return (true);
+	case 202:					/* _host_page_size(host, *page_size: 8 bytes) */
+		{
+			uint64_t ps = PAGE_SIZE;
+
+			mig_reply_data(m, id, 0, &ps, 8);
+		}
+		return (true);
+	default:
+		(void)b;
+		return (false);
+	}
+}
+
 static void
 mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m)
 {
@@ -905,7 +1054,8 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 	int id = (int)rd32(d, 20);
 	uint32_t which;
 
-	(void)td;
+	if (mig_info(td, t, dest, m, id))
+		return;
 	if (dest->kind != KP_TASK) {
 		mig_reply(t, m, id, 0x10000 /* MIG_BAD_ID-like */ - 303, NULL, NULL, 0, NULL, 0);
 		return;
