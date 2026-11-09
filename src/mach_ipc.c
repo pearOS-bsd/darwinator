@@ -32,6 +32,7 @@
 #include <sys/syscallsubr.h>
 #include <sys/smp.h>
 #include <sys/pcpu.h>
+#include <sys/ptrace.h>
 #include <sys/vmmeter.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -1258,6 +1259,60 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
 			m->reply.port->qn++;
 			wakeup(m->reply.port);
+			return (true);
+		}
+	case 4808:					/* mach_vm_read_overwrite(task, address, size, data, *outsize): into the memory of the caller */
+	case 4804:					/* mach_vm_read(task, address, size, *data[], *dataCnt): out of line memory in the reply */
+		{
+			uint64_t addr, size, dst = 0;
+			uint8_t *kb;
+			int error;
+
+			if (m->size < 48) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			addr = rd64(d, 32); size = rd64(d, 40);
+			if (id == 4808) { if (m->size < 56) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); } dst = rd64(d, 48); }
+			if (size == 0 || size > (1 << 20)) { mig_reply_data(m, id, size == 0 ? 0 : KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			kb = malloc(size, M_DARWIN_IPC, M_WAITOK);
+			sx_xunlock(&km_sx);					/* the memory of a process is read with the lock dropped (it can fault and sleep) */
+			error = p == td->td_proc ? copyin((void *)(uintptr_t)addr, kb, size) : proc_readmem(td, p, (vm_offset_t)addr, kb, size) == (ssize_t)size ? 0 : EFAULT;
+			if (error == 0 && id == 4808)
+				error = copyout(kb, (void *)(uintptr_t)dst, size);
+			sx_xlock(&km_sx);
+			if (error != 0) { free(kb, M_DARWIN_IPC); mig_reply_data(m, id, 1 /* KERN_INVALID_ADDRESS */, NULL, 0); return (true); }
+			if (id == 4808) {
+				uint64_t os = size;
+
+				free(kb, M_DARWIN_IPC);
+				mig_reply_data(m, id, 0, &os, 8);
+			} else if (m->reply.port != NULL && !m->reply.port->dead) {
+				struct kmsg *r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+				uint8_t *rd = r->data = malloc(56, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+
+				r->size = 56;
+				wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+				wr32(rd, 4, 56); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+				r->ool[0].type = 1; r->ool[0].off = 28; r->ool[0].size = (uint32_t)size; r->ool[0].data = kb;
+				r->nool = 1;
+				wr32(rd, 28 + 12, (uint32_t)size); rd[28 + 11] = 1;
+				wr32(rd, 52, (uint32_t)size);
+				TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+				m->reply.port->qn++;
+				wakeup(m->reply.port);
+			} else
+				free(kb, M_DARWIN_IPC);
+			return (true);
+		}
+	case 4806:					/* mach_vm_write(task, address, data (out of line), dataCnt) */
+		{
+			uint64_t addr;
+			int error;
+
+			if (m->size < 64 || m->nool != 1 || m->ool[0].type != 1) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			addr = rd64(d, 52);			/* hdr 24, ndesc 4, descriptor 16, NDR 8, then the address */
+			sx_xunlock(&km_sx);
+			error = p == td->td_proc ? copyout(m->ool[0].data, (void *)(uintptr_t)addr, m->ool[0].size) : proc_writemem(td, p, (vm_offset_t)addr, m->ool[0].data, m->ool[0].size) == (ssize_t)m->ool[0].size ? 0 : EFAULT;
+			sx_xlock(&km_sx);
+			mig_reply_data(m, id, error == 0 ? 0 : 1, NULL, 0);
 			return (true);
 		}
 	case 3204:					/* mach_port_allocate(task, right, *name) */

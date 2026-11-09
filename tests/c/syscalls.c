@@ -616,6 +616,18 @@ int cmain(void)
 	    kr5 = dmach7(31, (i64)q, 3, 48, 256, rpm, 2000, 0);
 	    { u64 st = ((u64)q[13] << 32) | q[12], sz = ((u64)q[15] << 32) | q[14];
 	      check("mach_vm_region (id 4816): a region that contains the stack, readable and writable", kr5 == 0 && q[5] == 4916 && q[16] == 9 && st <= here && here < st + sz && (q[17] & 3) == 3, q[17]); } }
+	  /* mach_vm_write (4806), mach_vm_read (4804), mach_vm_read_overwrite (4808) on this very task (layout from the .defs, not checked on a Mac) */
+	  { static char target[16], src[16] = "vm write test!", back[16]; unsigned q[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr5; u64 ta = (u64)target, sa = (u64)src, ba = (u64)back;
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8) | 0x80000000u; q[1] = 64; q[2] = (unsigned)task; q[3] = rpm; q[5] = 4806; q[6] = 1;
+	    q[7] = (unsigned)sa; q[8] = (unsigned)(sa >> 32); q[9] = 0; q[10] = 16 | 0 /* size */; q[9] = (1u << 24);	/* descriptor: address, deallocate/copy/pad, type 1 (OOL) , size */
+	    q[11] = 0; q[12] = 0; q[13] = (unsigned)ta; q[14] = (unsigned)(ta >> 32); q[15] = 16;
+	    kr5 = dmach7(31, (i64)q, 3, 64, 256, rpm, 2000, 0);
+	    check("mach_vm_write (id 4806) into this task", kr5 == 0 && q[5] == 4906 && q[8] == 0 && target[0] == 'v' && target[6] == 't', q[8]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 56; q[2] = (unsigned)task; q[3] = rpm; q[5] = 4808; q[8] = (unsigned)ta; q[9] = (unsigned)(ta >> 32); q[10] = 14; q[11] = 0; q[12] = (unsigned)ba; q[13] = (unsigned)(ba >> 32);
+	    kr5 = dmach7(31, (i64)q, 3, 56, 256, rpm, 2000, 0);
+	    check("mach_vm_read_overwrite (id 4808): 14 bytes read back", kr5 == 0 && q[8] == 0 && q[9] == 14 && back[0] == 'v' && back[13] == '!', q[9]); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
