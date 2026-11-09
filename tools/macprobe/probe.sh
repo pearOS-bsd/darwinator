@@ -1,6 +1,6 @@
 #!/bin/sh
 # probe.sh: run on a Mac (Apple silicon or Intel).  It builds and runs probe.c (sizes, constants, sysctl values and the results of some calls: what darwinator assumes about Darwin) and, if you
-# agree, traces the system calls of some applications with dtruss (needs sudo; on a Mac with SIP on, dtruss may refuse: then only probe.txt is made).  Nothing is sent anywhere and nothing outside
+# agree, traces the system calls of some applications with dtruss (needs sudo; with SIP on, dtruss cannot start applications ("Operation not permitted"): then only probe.txt is made, which is the useful part).  Nothing is sent anywhere and nothing outside
 # the folder ./macprobe-out is written.  Send the file macprobe-out.tar.gz.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"; OUT="$PWD/macprobe-out"; mkdir -p "$OUT"

@@ -17,6 +17,7 @@
 #include <sys/sysctl.h>
 #include <sys/attr.h>
 #include <sys/ucontext.h>
+#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -25,7 +26,7 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <pthread.h>
-#include <ucontext.h>
+
 
 #define SZ(t) printf("sizeof %s = %zu\n", #t, sizeof(t))
 #define OFF(t, f) printf("offsetof %s.%s = %zu\n", #t, #f, __builtin_offsetof(t, f))
