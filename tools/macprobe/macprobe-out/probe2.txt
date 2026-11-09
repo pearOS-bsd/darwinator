@@ -1,0 +1,29 @@
+sizeof(posix_spawnattr_t) 8  sizeof(posix_spawn_file_actions_t) 8
+spawn echo: r=0 pid>1=1 status=0 out=[hello spawn
+]
+spawn missing: r=2 pid=-5
+spawn chdir+dup2: r=0 out=[/usr
+]
+spawn SETPGROUP: r=0 pid=3523 out=[3523 3523
+]
+spawn env: r=0 out=[FOO=bar
+SPAWN=1
+]
+spawn exit 7: r=0 status=1792
+sem_open: ok  value-as-int=3  errno=2
+wait 0  trywait 0  trywait at zero -1 errno 35  post 0  trywait 0  close 0
+unlink 0
+open without O_CREAT: SEM_FAILED errno 2
+access_extended flags=0x4: r=0 errno=0 res=[0,2]
+access_extended flags=0x2: r=0 errno=0 res=[30,2]
+access_extended flags=0x1: r=0 errno=0 res=[0,2]
+access_extended flags=0x0: r=0 errno=0 res=[0,2]
+access_extended flags=0x200: r=0 errno=0 res=[0,2]
+access_extended flags=0x400: r=0 errno=0 res=[30,2]
+access_extended flags=0x800: r=0 errno=0 res=[0,2]
+sizeof(struct statfs) 2168  statfs 0 fstatfs 0  bsize 4096 blocks>0 1 type=apfs on=/
+raw syscall 157 (statfs): 0, same f_bsize as libc: 0
+Darwin MacBook-Air.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 22:05:39 PDT 2026; root:xnu-13432.1.9~3/RELEASE_ARM64_T8103 arm64
+ProductName:		macOS
+ProductVersion:		27.0
+BuildVersion:		26A5416b
