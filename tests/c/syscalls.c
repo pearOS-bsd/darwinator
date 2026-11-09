@@ -595,6 +595,20 @@ int cmain(void)
 	    q[0] = 19 | (21 << 8); q[1] = 40; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3207; q[8] = N2; q[9] = 1;
 	    kr5 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0);
 	    check("  the name is gone afterwards (KERN_INVALID_NAME 15)", kr5 == 0 && q[8] == 15, q[8]); }
+	  /* threads: task_threads (3402) gives ports, thread_info (3612) answers for them and for thread_self */
+	  { unsigned q[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr5;
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 32; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3402;
+	    kr5 = dmach7(31, (i64)q, 3, 32, 256, rpm, 2000, 0);
+	    check("task_threads (id 3402): a complex reply with an array of at least one port", kr5 == 0 && q[5] == 3502 && q[6] == 1 && q[13] >= 1, q[13]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x103; q[3] = rpm; q[5] = 3612; q[8] = 4; q[9] = 6;
+	    kr5 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0);
+	    check("thread_info (id 3612, THREAD_IDENTIFIER_INFO) to thread_self: 6 ints, a thread id", kr5 == 0 && q[8] == 0 && q[9] == 6 && q[10] != 0, q[10]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x103; q[3] = rpm; q[5] = 3612; q[8] = 3; q[9] = 10;
+	    kr5 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0);
+	    check("thread_info (THREAD_BASIC_INFO): 10 ints", kr5 == 0 && q[8] == 0 && q[9] == 10, q[9]); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
