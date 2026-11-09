@@ -1,0 +1,19 @@
+uc_mcsize 1032  uc_mcontext-uc -1136  sizeof(ucontext_t) 56  sizeof(mcontext64) 712
+es: trapno 0x85 err 0x2000025 faultvaddr 0
+ss: rax 0 rbx 0x5555555555555555 rcx 0x7ff7b6475430 rdx 0 rdi 0x570 rsi 0x1e rbp 0x7ff7b6475480 rsp 0x7ff7b6475430
+ss: r8 0x7ff852351720 r9 0 r10 0x440 r11 0x202 r12 0x1111111111111111 r13 0x2222222222222222 r14 0x3333333333333333 r15 0x4444444444444444
+ss: rip 0x109a8a600 rflags 0x202 cs 0x7 fs 0 gs 0
+fs: fcw 0x37f mxcsr 0x1f80  sizeof(float_state64) 524
+handler ran: 1
+raw open(/nonexistent): rax=2 carry=1
+raw getpid: rax=1392 (== getpid() 1392) carry=0
+raw pipe: rax=3 rdx=4 carry=0
+raw fork (parent): rax=pid>0 1 rdx=0
+thread_get_state x86_THREAD_STATE64: kr 0 count 42 (want 42) sizeof 168
+x86_FLOAT_STATE64: kr 0 count 131 sizeof 524
+x86_EXCEPTION_STATE64: kr 0 count 4 sizeof 16
+flavors: THREAD_STATE64 4 FLOAT_STATE64 5 EXCEPTION_STATE64 6 x86_THREAD_STATE 7
+Darwin mac.local 25.6.0 Darwin Kernel Version 25.6.0: Mon Oct 12 00:33:09 PDT 2026; root:xnu-12377.161.15.701.48~2/RELEASE_X86_64 x86_64
+ProductName:		macOS
+ProductVersion:		26.7.2
+BuildVersion:		25G332

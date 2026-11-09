@@ -23,7 +23,7 @@ static void on_usr1(int sig, siginfo_t *si, void *uc)
 	printf("ss: rax %#llx rbx %#llx rcx %#llx rdx %#llx rdi %#llx rsi %#llx rbp %#llx rsp %#llx\n", m->__ss.__rax, m->__ss.__rbx, m->__ss.__rcx, m->__ss.__rdx, m->__ss.__rdi, m->__ss.__rsi, m->__ss.__rbp, m->__ss.__rsp);
 	printf("ss: r8 %#llx r9 %#llx r10 %#llx r11 %#llx r12 %#llx r13 %#llx r14 %#llx r15 %#llx\n", m->__ss.__r8, m->__ss.__r9, m->__ss.__r10, m->__ss.__r11, m->__ss.__r12, m->__ss.__r13, m->__ss.__r14, m->__ss.__r15);
 	printf("ss: rip %#llx rflags %#llx cs %#llx fs %#llx gs %#llx\n", m->__ss.__rip, m->__ss.__rflags, m->__ss.__cs, m->__ss.__fs, m->__ss.__gs);
-	printf("fs: fcw %#x mxcsr %#x  sizeof(float_state64) %zu\n", (unsigned)m->__fs.__fpu_fcw, (unsigned)m->__fs.__fpu_mxcsr, sizeof(m->__fs));
+	printf("fs: fcw %#x mxcsr %#x  sizeof(float_state64) %zu\n", (unsigned)*(unsigned short *)&m->__fs.__fpu_fcw, (unsigned)m->__fs.__fpu_mxcsr, sizeof(m->__fs));
 }
 
 static void signal_frame(void)
@@ -46,11 +46,13 @@ static void raw(void)
 	ret = 0x2000014; unsigned char cf2;			/* getpid */
 	__asm__ volatile("syscall; setc %1" : "+a"(ret), "=q"(cf2) : : "rcx", "rdx", "r11", "memory", "cc");
 	printf("raw getpid: rax=%ld (== getpid() %d) carry=%d\n", ret, getpid(), cf2);
-	long r2 = 0x2000002a, rd = 0xdead;			/* pipe: fds in rax and rdx */
-	__asm__ volatile("syscall; setc %1" : "+a"(r2), "=q"(cf2), "+d"(rd) : : "rcx", "r11", "memory", "cc");
-	printf("raw pipe: rax=%ld rdx=%ld carry=%d\n", r2, rd, cf2);
-	long f = 0x2000002, rdx = 0xdead;			/* fork: child has rdx = 1, parent 0 */
-	__asm__ volatile("syscall" : "+a"(f), "+d"(rdx) : : "rcx", "r11", "memory", "cc");
+	{						/* pipe: the descriptors come back in rax and rdx */
+		long r2 = 0x2000000 | 42, rd2 = 0xdead; unsigned char cf3;
+		__asm__ volatile("syscall; setc %1" : "+a"(r2), "=q"(cf3), "+d"(rd2) : : "rcx", "r11", "rdi", "rsi", "r8", "r9", "r10", "memory", "cc");
+		printf("raw pipe: rax=%ld rdx=%ld carry=%d\n", r2, rd2, cf3);
+	}
+	long f = 0x2000002, rdx = 0xdead;			/* fork: the child has rdx = 1, the parent 0 */
+	__asm__ volatile("syscall" : "+a"(f), "+d"(rdx) : : "rcx", "r11", "rdi", "rsi", "r8", "r9", "r10", "memory", "cc");
 	if (rdx == 1) _exit(0);
 	printf("raw fork (parent): rax=pid>0 %d rdx=%ld\n", f > 0, rdx);
 	wait(NULL);
@@ -69,7 +71,7 @@ static void thread_state(void)
 	printf("flavors: THREAD_STATE64 %d FLOAT_STATE64 %d EXCEPTION_STATE64 %d x86_THREAD_STATE %d\n", x86_THREAD_STATE64, x86_FLOAT_STATE64, x86_EXCEPTION_STATE64, x86_THREAD_STATE);
 	pthread_t th; pthread_create(&th, NULL, thr, NULL); pthread_join(th, NULL);
 }
-int main(void) { signal_frame(); raw(); thread_state(); return 0; }
+int main(void) { setvbuf(stdout, NULL, _IONBF, 0); signal_frame(); raw(); thread_state(); return 0; }
 #else
 int main(void) { printf("not x86-64 (this is the Intel-only probe)\n"); return 0; }
 #endif

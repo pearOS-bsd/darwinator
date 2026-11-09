@@ -1,0 +1,4 @@
+/Users/alex/mp/macprobe/probe4.c:26:73: error: operand of type 'struct __darwin_fp_control' where arithmetic or pointer type is required
+   26 |         printf("fs: fcw %#x mxcsr %#x  sizeof(float_state64) %zu\n", (unsigned)m->__fs.__fpu_fcw, (unsigned)m->__fs.__fpu_mxcsr, sizeof(m->__fs));
+      |                                                                                ^~~~~~~~~~~~~~~~~
+1 error generated.

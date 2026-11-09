@@ -29,3 +29,14 @@ of `proc_bsdinfo` (136) and `proc_taskinfo` (96) were read from `reference-macos
 `dtruss` of Keka (SIP off; 14043 calls, 53 distinct) showed what a real application asks of the kernel: `kdebug_trace64` and `kdebug_trace_string` (11000 of 14000: tracing, here accepted and ignored), `bsdthread_ctl`,
 `workq_kernreturn` (answers 0), `gettid` (ESRCH on the Mac: fixed, it was EINVAL here), `kevent_id` and `kevent_qos` (the workloops and the queues of libdispatch: implemented), `ulock_wait2`, `psynch_mutexwait`
 and `psynch_mutexdrop`, `getattrlist`, `fstatfs64`, `getdirentries64`, `crossarch_trap` (ENOTSUP, as on the Mac), `csrctl` (EPERM), `__mac_syscall` (0), `fsgetpath` (found a path on the Mac: ENOTSUP here), `proc_info`.
+
+## An Intel Mac (macOS 26.7.2, x86_64, in QEMU/KVM with OSX-KVM): `tools/macprobe/intel/`
+
+`probe.sh`, `probe2.sh`, `probe3.sh`, `probe4.sh` were run on macOS 26.7.2 (Tahoe, xnu-12377, Intel) and the results are in `tools/macprobe/intel/`.  The comparison with the Apple silicon result (`reference-macos27-arm64*.txt`):
+
+* **The same on both architectures** (so the arm64 reads are good for amd64 too): `posix_spawn` (all the cases of `probe2`), the named semaphores, `access_extended` (including the `_READ_OK` bits), `statfs` and the old `statfs` (157), `sizeof` of `kinfo_proc` (648), `extern_proc` (296), `eproc` (352), `proc_bsdinfo` (136), `proc_taskinfo` (96), `proc_taskallinfo` (232).
+* **Differs, and darwinator already has the Intel value:** `hw.pagesize` 4096 (16384 on arm64), the timebase is 1/1 (125/3 on arm64), `getdirentries` and the number of entries of `/` are those of the file system.
+* **The x86-64 specifics of `probe4`:**
+  * the system call convention is what darwinator does: class 2 in the top byte of rax, the carry flag is the error flag with errno in rax, `pipe` gives the two descriptors in rax and rdx, `fork` gives rdx 0 in the parent and 1 in the child, `getpid` has no error;
+  * the registers of `x86_THREAD_STATE64`: rax rbx rcx rdx rdi rsi rbp rsp r8-r15 rip rflags cs fs gs (21 registers, 168 bytes, count 42), `x86_FLOAT_STATE64` has count 131 (524 bytes), `x86_EXCEPTION_STATE64` count 4 (16 bytes); the flavors are 4, 5, 6 and `x86_THREAD_STATE` is 7;
+  * **the signal frame differs in two details from what darwinator builds:** `sizeof(ucontext_t)` is 56 and `sizeof(mcontext64)` 712 as in darwinator, but the real kernel reports `uc_mcsize` 1032 (the AVX state is part of the context) and puts the mcontext *below* the ucontext (`uc_mcontext - uc` is -1136), where darwinator puts it right above (+56) with `uc_mcsize` 712 and no floating point state.  A handler that follows the pointer is not affected; one that reads `uc_mcsize` or the floating point registers is.  `fcw` is 0x37f and `mxcsr` 0x1f80 in the handler, `rflags` 0x206, `cs` 7, `fs` and `gs` 0, `trapno` 0x85 and `err` 0x2000025 (the system call that sent the signal).
