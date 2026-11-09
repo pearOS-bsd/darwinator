@@ -33,8 +33,7 @@ memory that is read without having been written. Found:
   does not depend on any of the `MACHRUN_NO*` switches): the program sends `autorelease` over and over to a string that it took out of a dictionary (`-[GSDictionary objectForKey:]`) and does not own, in the data
   source of its table of file types (the same object every time, then `caseInsensitiveCompare:`). Each of those is a release too many. On a Mac this does no harm: such strings are tagged pointers or constants,
   whose retain and release do nothing; the strings of GNUstep (`GSCInlineString`) are real objects, they are freed at the next pool drain, the main thread's pool then holds a freed object or the freed memory is
-  reused. `NSZombieEnabled=YES` keeps the objects alive, which is why it helps; the price is memory that is not given back. A better fix would make the strings of such a table immortal (a string class that
-  ignores retain and release) or ignore `autorelease` on them.
+  reused. `NSZombieEnabled=YES` keeps the objects alive, which is why it helps; the price is memory that is not given back. **Fix in use:** `MACHRUN_IMMORTAL_STRINGS=1` (`compat.m`) makes `autorelease` of the string classes a no-op: 0 crashes in 20 runs (4 of 20 without it) and no `NSZombieEnabled` needed; the strings that are autoreleased legitimately leak (memory only for strings).
 
 `MACHRUN_SEGV=1` prints the frames of the crash (`frame[n]`, by the frame pointers) and `MACHRUN_SEGV_HOLD=1` keeps the process for 90 seconds so that `procstat -v PID` can show its memory.
 

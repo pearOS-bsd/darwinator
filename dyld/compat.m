@@ -1176,6 +1176,19 @@ addrep_init(void)
 	if ((m = class_getInstanceMethod(k, @selector(addRepresentation:))) != NULL) o_addRep = method_setImplementation(m, (IMP)w_addRep);
 }
 
+
+/* MACHRUN_IMMORTAL_STRINGS=1: autorelease of a string does nothing (the string leaks).  The Unarchiver autoreleases strings that a dictionary owns; on a Mac they are tagged pointers or constants, here the
+ * pool frees them under their owner.  The same price as NSZombieEnabled (memory), but only for strings. */
+static IMP o_strAutorelease;
+static id w_strAutorelease(id self, SEL _cmd) { return self; }
+__attribute__((constructor)) static void
+immortal_init(void)
+{
+	const char *names[] = { "GSCInlineString", "GSCBufferString", "GSMutableString", "NSGString", "NSGMutableString", "GSInlineString", "GSTinyString", "GSUnicodeInlineString", NULL }; int i; Method m;
+	if (!getenv("MACHRUN_IMMORTAL_STRINGS")) return;
+	for (i = 0; names[i]; i++) { Class k = objc_getClass(names[i]); if (k != Nil && (m = class_getInstanceMethod(k, @selector(autorelease))) != NULL) { if (!o_strAutorelease) o_strAutorelease = method_getImplementation(m); method_setImplementation(m, (IMP)w_strAutorelease); } }
+}
+
 /* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
 static const char *(*class_image_path)(Class);
 static IMP o_bundleForClass;
