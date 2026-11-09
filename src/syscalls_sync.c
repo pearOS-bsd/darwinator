@@ -300,13 +300,6 @@ darwin_mach_vm_protect(struct thread *td, struct darwin_args *uap)	/* (target, a
 }
 
 static int
-darwin_mach_unsupported(struct thread *td, struct darwin_args *uap __unused)
-{
-	td->td_retval[0] = KERN_NOT_SUPPORTED;
-	return (0);
-}
-
-static int
 darwin_mach_timebase_info(struct thread *td, struct darwin_args *uap)	/* (*info): the absolute time is in nanoseconds */
 {
 	uint32_t tb[2] = { 1, 1 };
@@ -359,10 +352,6 @@ static const struct {
 	E(DARWIN_MACH_BASE + 12, 3, darwin_mach_vm_deallocate,	"_kernelrpc_mach_vm_deallocate_trap"),
 	E(DARWIN_MACH_BASE + 14, 5, darwin_mach_vm_protect,	"_kernelrpc_mach_vm_protect_trap"),
 	E(DARWIN_MACH_BASE + 15, 6, darwin_mach_vm_map,		"_kernelrpc_mach_vm_map_trap"),
-	E(DARWIN_MACH_BASE + 33, 1, darwin_mach_unsupported,	"semaphore_signal_trap"),
-	E(DARWIN_MACH_BASE + 34, 1, darwin_mach_unsupported,	"semaphore_signal_all_trap"),
-	E(DARWIN_MACH_BASE + 36, 1, darwin_mach_unsupported,	"semaphore_wait_trap"),
-	E(DARWIN_MACH_BASE + 38, 3, darwin_mach_unsupported,	"semaphore_timedwait_trap"),
 	E(DARWIN_MACH_BASE + 89, 1, darwin_mach_timebase_info,	"mach_timebase_info_trap"),
 	E(DARWIN_MACH_BASE + 90, 1, darwin_mach_wait_until,	"mach_wait_until_trap"),
 #undef E
