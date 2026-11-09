@@ -286,6 +286,12 @@ kt_task(struct proc *p)
 	hp = kp_new(KP_HOST);
 	e = ent_add(t, tp, MM_MAKE_SEND); e->name = NAME_TASK_SELF; tp->refs--;	/* the entry holds the reference that kp_new gave */
 	e = ent_add(t, hp, MM_MAKE_SEND); e->name = NAME_HOST_SELF; hp->refs--;
+	{
+		struct kport *th = kp_new(KP_THREAD);		/* thread_self: kpid 0 means the thread that asks */
+
+		th->kp = p;
+		e = ent_add(t, th, MM_MAKE_SEND); e->name = NAME_THREAD_SELF; th->refs--;
+	}
 	t->next = 0x20;
 	return (t);
 }
@@ -1167,6 +1173,51 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			}
 			return (true);
 		}
+	case 3612:					/* thread_info(thread, flavor, *info, *count): THREAD_BASIC_INFO (3), THREAD_IDENTIFIER_INFO (4) */
+		{
+			uint32_t buf[1 + 12];
+			uint64_t tid = dest->kpid != 0 ? (uint64_t)dest->kpid : (uint64_t)td->td_tid;
+
+			if (dest->kind != KP_THREAD) return (false);
+			a = m->size >= 40 ? rd32(d, 32) : 0;
+			memset(buf, 0, sizeof(buf));
+			if (a == 3) { buf[0] = 10; buf[6] = 1 /* POLICY_TIMESHARE */; buf[7] = 1 /* TH_STATE_RUNNING */; }
+			else if (a == 4) { buf[0] = 6; memcpy(&buf[1], &tid, 8); }
+			else { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			mig_reply_data(m, id, 0, buf, (buf[0] + 1) * 4);
+			return (true);
+		}
+	case 3603:					/* thread_get_state(thread, flavor, *state, *count): x86_THREAD_STATE64 (4) of the calling thread */
+		{
+			if (dest->kind != KP_THREAD) return (false);
+#if defined(__amd64__)
+			a = m->size >= 40 ? rd32(d, 32) : 0;
+			if (a == 4 && dest->kpid == 0) {
+				uint64_t r[21];
+				struct trapframe *tf = td->td_frame;
+
+				r[0] = tf->tf_rax; r[1] = tf->tf_rbx; r[2] = tf->tf_rcx; r[3] = tf->tf_rdx; r[4] = tf->tf_rdi; r[5] = tf->tf_rsi;
+				r[6] = tf->tf_rbp; r[7] = tf->tf_rsp; r[8] = tf->tf_r8; r[9] = tf->tf_r9; r[10] = tf->tf_r10; r[11] = tf->tf_r11;
+				r[12] = tf->tf_r12; r[13] = tf->tf_r13; r[14] = tf->tf_r14; r[15] = tf->tf_r15; r[16] = tf->tf_rip; r[17] = tf->tf_rflags;
+				r[18] = tf->tf_cs; r[19] = 0; r[20] = 0;
+				{
+					uint32_t buf[1 + 42];
+
+					buf[0] = 42;
+					memcpy(buf + 1, r, sizeof(r));
+					mig_reply_data(m, id, 0, buf, sizeof(buf));
+				}
+				return (true);
+			}
+#endif
+			mig_reply_data(m, id, KERN_FAILURE, NULL, 0);
+			return (true);
+		}
+	case 3605: case 3606: case 3607: case 3608: case 3609:		/* thread_suspend, resume, abort, abort_safely, depress_abort: accepted */
+	case 3613: case 3617: case 3604: case 3611: case 3600:		/* thread_set_exception_ports, policy_set, set_state, set_special_port, terminate: accepted, nothing happens */
+		if (dest->kind != KP_THREAD) return (false);
+		mig_reply_data(m, id, 0, NULL, 0);
+		return (true);
 	case 3204:					/* mach_port_allocate(task, right, *name) */
 		{
 			uint32_t right = m->size >= 36 ? rd32(d, 32) : 99;
@@ -1430,6 +1481,30 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			TAILQ_INSERT_TAIL(&rp->q, r, link);
 			rp->qn++;
 			wakeup(rp);
+		}
+		break;
+	case 3402:				/* task_threads(task, *threads[], *count): a port for every thread */
+		{
+			struct kport *arr[64];
+			lwpid_t tids[64];
+			struct proc *tp = dest->kind == KP_TASK && dest->kp != NULL ? dest->kp : td->td_proc;
+			struct thread *tdx;
+			uint32_t n = 0;
+			int i;
+
+			PROC_LOCK(tp);
+			FOREACH_THREAD_IN_PROC(tp, tdx) {
+				if (n < 64)
+					tids[n++] = tdx->td_tid;
+			}
+			PROC_UNLOCK(tp);
+			for (i = 0; i < (int)n; i++) {
+				arr[i] = kp_new(KP_THREAD);
+				arr[i]->kp = tp; arr[i]->kpid = tids[i];
+			}
+			mig_reply(t, m, id, 0, NULL, NULL, 0, arr, n);
+			for (i = 0; i < (int)n; i++)
+				kp_unref(arr[i]);
 		}
 		break;
 	case 3403:				/* mach_ports_register(task, ports[], count): up to 3 ports that the children get */
