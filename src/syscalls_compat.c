@@ -5,7 +5,7 @@
  * has not: ENOTSUP for the file system features of APFS and HFS+ (clonefile, exchangedata, searchfs, setattrlist ...: programs check for it and go
  * on without), success for the hints that change nothing (kdebug, iopolicy, process_policy), ENOSYS for the rest (audit, MAC, networking
  * extensions, the nexus and channel kernel networking, coalitions ...).  What is NOT here: posix_spawn, the aio_* calls, sem_open and the other named
- * semaphores, waitid, pselect, proc_info.
+ * semaphores, proc_info (and posix_spawn: a child that starts in the kernel needs the fork machinery of FreeBSD; machrun gives programs FreeBSD's posix_spawn).
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -30,6 +30,7 @@
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <bsm/audit_kevents.h>
 
 #include "darwinator.h"
@@ -303,6 +304,67 @@ darwin_sigwait(struct thread *td, struct darwin_args *uap)
 	return (uap->a[1] != 0 ? copyout(&sig, (void *)uap->a[1], sizeof(sig)) : 0);
 }
 
+
+/* ---- waitid(idtype, id, siginfo_t *, options): P_ALL 0, P_PID 1, P_PGID 2 and other option bits; the siginfo of Darwin is 104 bytes ---- */
+
+static int
+darwin_waitid(struct thread *td, struct darwin_args *uap)
+{
+	siginfo_t si;
+	char out[104];
+	int opts = (int)uap->a[3], fo = 0, status = 0, error;
+	enum idtype it;
+
+	switch ((int)uap->a[0]) {
+	case 0: it = P_ALL; break;
+	case 1: it = P_PID; break;
+	case 2: it = P_PGID; break;
+	default: return (EINVAL);
+	}
+	if (opts & 0x0001) fo |= WNOHANG;
+	if (opts & 0x0004) fo |= WEXITED;
+	if (opts & 0x0008) fo |= WUNTRACED;
+	if (opts & 0x0010) fo |= WCONTINUED;
+	if (opts & 0x0020) fo |= WNOWAIT;
+	memset(&si, 0, sizeof(si));
+	error = kern_wait6(td, it, (id_t)uap->a[1], &status, fo, NULL, &si);
+	if (error != 0)
+		return (error);
+	memset(out, 0, sizeof(out));
+	memcpy(out, &si, MIN(sizeof(si), sizeof(out)));
+	td->td_retval[0] = 0;
+	return (uap->a[2] != 0 ? copyout(out, (void *)uap->a[2], sizeof(out)) : 0);
+}
+
+/* ---- pselect(nd, in, ou, ex, timespec *, sigmask *): the mask is 32 bits, the time is a timespec ---- */
+
+static int
+darwin_pselect(struct thread *td, struct darwin_args *uap)
+{
+	struct timespec ts;
+	struct timeval tv, *tvp = NULL;
+	sigset_t set, *setp = NULL;
+	uint32_t m;
+	int error, i;
+
+	if (uap->a[4] != 0) {
+		if ((error = copyin((void *)uap->a[4], &ts, sizeof(ts))) != 0)
+			return (error);
+		TIMESPEC_TO_TIMEVAL(&tv, &ts);
+		tvp = &tv;
+	}
+	if (uap->a[5] != 0) {
+		if ((error = copyin((void *)uap->a[5], &m, sizeof(m))) != 0)
+			return (error);
+		SIGEMPTYSET(set);
+		for (i = 1; i <= 32; i++)
+			if (m & (1U << (i - 1)))
+				SIGADDSET(set, i);
+		setp = &set;
+	}
+	return (kern_pselect(td, (int)uap->a[0], (fd_set *)uap->a[1], (fd_set *)uap->a[2], (fd_set *)uap->a[3], tvp, setp, sizeof(long) * 8));
+}
+
 /* ---- sendfile(fd, s, offset, *len, hdtr, flags): FreeBSD takes the length by value and gives the sent bytes in another pointer ---- */
 
 static int
@@ -546,6 +608,10 @@ static const struct {
 	E(554, 4, darwin_mknodat,	"mknodat"),
 	E(196, 4, darwin_getdirentries,	"getdirentries"),
 	E(330, 2, darwin_sigwait,	"__sigwait"),
+	E(173, 4, darwin_waitid,	"waitid"),
+	E(416, 4, darwin_waitid,	"waitid_nocancel"),
+	E(394, 6, darwin_pselect,	"pselect"),
+	E(395, 6, darwin_pselect,	"pselect_nocancel"),
 	E(422, 2, darwin_sigwait,	"__sigwait_nocancel"),
 	E(337, 6, darwin_sendfile,	"sendfile"),
 	E(266, 3, darwin_shm_open,	"shm_open"),
