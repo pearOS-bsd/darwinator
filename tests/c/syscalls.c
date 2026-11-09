@@ -508,6 +508,19 @@ int cmain(void)
 	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics64 (id 220, HOST_VM_INFO64): 38 ints, free pages", kr4 == 0 && q[8] == 0 && q[9] == 38 && q[10] > 0, q[5] * 1000 + q[8]);
 	    for (k = 0; k < 64; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 217; q[8] = 3; q[9] = 4;
 	    kr4 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0); check("host_statistics (id 217, HOST_CPU_LOAD_INFO): 4 ints", kr4 == 0 && q[8] == 0 && q[9] == 4, q[9]); }
+	  /* mach_port_request_notification (id 3213): a dead-name notification (id 72) arrives when the port dies */
+	  { unsigned P = 0, N = 0, q[64], rb[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr5;
+	    dmach(16, (i64)task, 1, (i64)&P, 0, 0, 0); dmach(21, (i64)task, P, P, 20, 0, 0);
+	    dmach(16, (i64)task, 1, (i64)&N, 0, 0, 0);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8) | 0x80000000u; q[1] = 60; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3213; q[6] = 1; q[7] = N; q[9] = (21u << 16); q[10] = 0; q[11] = 0;
+	    q[12] = P; q[13] = 72; q[14] = 0;
+	    kr5 = dmach7(31, (i64)q, 3, 60, 256, rpm, 2000, 0);
+	    check("mach_port_request_notification (id 3213) is answered with a complex reply", kr5 == 0 && q[5] == 3313 && q[6] == 1, q[5]);
+	    dmach(19, (i64)task, P, 1, -1, 0, 0);
+	    for (k = 0; k < 64; k++) rb[k] = 0;
+	    kr5 = dmach7(31, (i64)rb, 2 | 0x100, 0, 256, N, 500, 0);
+	    check("the dead-name notification (id 72) arrives with the name of the port", kr5 == 0 && rb[5] == 72 && rb[8] == P, rb[5]); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
