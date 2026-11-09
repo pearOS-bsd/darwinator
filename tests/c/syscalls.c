@@ -443,7 +443,7 @@ int cmain(void)
 	/* threads: bsdthread_register, bsdthread_create (the registers of the new thread), bsdthread_terminate */
 	{ i64 base = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0), top; static volatile unsigned dummy = 1;
 	  check("bsdthread_create without bsdthread_register is EINVAL", S(SYS_bsdthread_create, tfunc, 1, base + 65000, 0x1000, 0, 0) == -22, 0);
-	  r = S(SYS_bsdthread_register, thread_entry, 0, 0, 0, 0, 0); check("bsdthread_register", r == 0, r);
+	  r = S(SYS_bsdthread_register, thread_entry, 0, 0, 0, 0, 0); check("bsdthread_register gives the features of the kernel side (0x4000001f)", r == 0x4000001f, r);
 	  top = (base + 65536 - 64) & ~15L; thread_val = 0; thread_port = 0;
 	  r = S(SYS_bsdthread_create, tfunc, 0x1234, top, 0xabc000, 0, 0); check("bsdthread_create gives the pthread back", r == 0xabc000, r);
 	  for (i = 0; i < 300 && thread_val == 0; i++) S(SYS_ulock_wait, 1, &dummy, 1, 10000, 0, 0);

@@ -452,7 +452,8 @@ darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)
 	pth_reg[slot].start = uap->a[0];
 	pth_reg[slot].wqstart = uap->a[1];
 	mtx_unlock(&pth_mtx);
-	td->td_retval[0] = 0;		/* the features of the kernel side: none (no workqueue, no kevent workloop) */
+	/* the features of the kernel side (PTHREAD_FEATURE_*): dispatch function, fine priorities, bsdthread_ctl, set self, QoS maintenance and default; libpthread keeps them and libdispatch asks for them at its start (a value of 0 means: not initialized).  No kevent and no workloop: the workqueue itself is not implemented */
+	td->td_retval[0] = 0x4000001f;
 	return (0);
 }
 

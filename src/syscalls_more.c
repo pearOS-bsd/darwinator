@@ -697,12 +697,15 @@ darwin_sysctlbyname(struct thread *td, struct darwin_args *uap)
 
 	if (len == 0 || len >= sizeof(name))
 		return (ENOENT);
-	if (uap->a[4] != 0 && uap->a[5] != 0)
-		return (EPERM);
 	error = copyin((void *)uap->a[0], name, len);
 	if (error != 0)
 		return (error);
 	name[len] = '\0';
+	if (uap->a[4] != 0 && uap->a[5] != 0) {
+		if (strncmp(name, "kern.wq_", 8) == 0)	/* the limits of the workqueue (libdispatch sets kern.wq_limit_cooperative_threads at its start): accepted, there is no workqueue to limit */
+			return (0);
+		return (EPERM);
+	}
 	for (i = 0; i < nitems(darwin_sysctls); i++)
 		if (strcmp(darwin_sysctls[i].name, name) == 0)
 			return (darwin_sysctl_value(td, &darwin_sysctls[i], (void *)uap->a[2], NULL, 1,

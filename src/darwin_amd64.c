@@ -79,6 +79,9 @@ darwin_fetch_syscall_args(struct thread *td)
 				(void)copyinstr((void *)frame->tf_rdi, path, sizeof(path), &done); break;
 			case 463: case 470:
 				(void)copyinstr((void *)frame->tf_rsi, path, sizeof(path), &done); break;
+			case 336:						/* proc_info: callnum, pid, flavor */
+				snprintf(path, sizeof(path), "callnum %ld pid %ld flavor %ld", (long)frame->tf_rdi, (long)frame->tf_rsi, (long)frame->tf_rdx);
+				break;
 			case 92:						/* fcntl: the command */
 				snprintf(path, sizeof(path), "fd %ld cmd %ld arg %#lx", (long)frame->tf_rdi, (long)frame->tf_rsi, (u_long)frame->tf_rdx);
 				break;
