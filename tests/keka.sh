@@ -1,10 +1,10 @@
 #!/bin/sh
 # Runs the command line tools of Keka (the original Mach-O files) through machrun and checks them against the system tools.
 # The Keka files are not in this repository: unpack Keka-x.y.z.dmg (7z x) and point KEKA_DIR at Keka.app/Contents/MacOS.
-#   KEKA_DIR=/root/keka sh tests/keka.sh        (machrun from ../dyld, built with make -C dyld)
+#   KEKA_DIR=/root/keka sh tests/keka.sh        (machrun from MACHRUN, else ./dyld/machrun built with make -C dyld, else the installed one)
 set -u
 cd "$(dirname "$0")/.."
-K="${KEKA_DIR:?set KEKA_DIR to Keka.app/Contents/MacOS}"; M="$PWD/dyld/machrun"; T="$(mktemp -d)"; fail=0
+K="${KEKA_DIR:?set KEKA_DIR to Keka.app/Contents/MacOS}"; M="${MACHRUN:-$PWD/dyld/machrun}"; [ -x "$M" ] || M=/usr/local/bin/machrun; T="$(mktemp -d)"; fail=0
 ok() { echo "ok   $1"; }; bad() { echo "FAIL $1"; fail=1; }
 
 mkdir -p $T/src/sub; (for i in $(seq 1 5000); do echo "line $i: the quick brown fox"; done) > $T/src/text.txt
