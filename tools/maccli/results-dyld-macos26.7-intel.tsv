@@ -1,0 +1,1262 @@
+bin/[	EXIT2	0x2000226:#unimplemented,	[: missing ]
+bin/bash	EXIT0	0x2000226:#unimplemented,	
+bin/chmod	EXIT1		usage:	chmod [-fhv] [-R [-H | -L | -P]] [-a | +a | =a  [i][# [ n]]] mode|entry file ...
+bin/cp	EXIT64		usage: cp [-R [-H | -L | -P]] [-fi | -n] [-aclpSsvXx] source_file target_file
+bin/csh	EXIT0	0x20000b8:#unimplemented,0x2000226:#unimplemented,	
+bin/dash	EXIT0	0x2000226:#unimplemented,	
+bin/date	EXIT0	0x2000226:#unimplemented,	Mon Nov  9 19:56:32 UTC 2026
+bin/df	EXIT0		Filesystem      1K-blocks     Used Available Capacity iused    ifree %iused  Mounted on
+bin/echo	EXIT0	0x2000226:#unimplemented,	
+bin/ed	EXIT2	0x2000226:#unimplemented,	/tmp/ed.eN2NLY: Too many open files
+bin/expr	EXIT2	0x2000226:#unimplemented,	expr: syntax error
+bin/hostname	EXIT0	0x2000226:#unimplemented,	fbsdbuild
+bin/ksh	SIG11	0x2000226:#unimplemented,	Segmentation fault
+bin/link	EXIT1		usage: link source_file target_file
+bin/ln	EXIT1		usage: ln [-s [-F] | -L | -P] [-f | -i] [-hnv] source_file [target_file]
+bin/ls	EXIT1		ls: fts_read: Operation not supported
+bin/mkdir	EXIT64		usage: mkdir [-pv] [-m mode] directory_name ...
+bin/mv	EXIT64		usage: mv [-f | -i | -n] [-hv] source target
+bin/pax	EXIT1		pax: End of archive volume 1 reached
+bin/ps	EXIT1	0x2000226:#unimplemented,	  PID TTY           TIME CMD
+bin/pwd	EXIT0	0x2000226:#unimplemented,	/tmp/mrwork
+bin/realpath	EXIT0	0x2000226:#unimplemented,	/tmp/mrwork
+bin/rmdir	EXIT1		usage: rmdir [-pv] directory ...
+bin/sh	EXIT1	0x2000226:#unimplemented,	Failed to exec /bin/bash as variant for /bin/sh (2: No such file or directory).
+bin/sleep	EXIT1	0x2000226:#unimplemented,	usage: sleep number[unit] [...]
+bin/stty	EXIT1	0x2000226:#unimplemented,	stty: stdin isn't a terminal
+bin/sync	EXIT0	0x2000226:#unimplemented,	
+bin/tcsh	EXIT0	0x20000b8:#unimplemented,0x2000226:#unimplemented,	
+bin/test	EXIT1	0x2000226:#unimplemented,	
+bin/unlink	EXIT64		usage: rm [-f | -i] [-dIPRrvWx] file ...
+bin/wait4path	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/bin/wait4path <object on mount point>
+bin/zsh	EXIT0	0x2000226:#unimplemented,	
+sbin/apfs_unlockfv	EXIT69		apfs_unlockfv: Failed to find appropriate data volume for path /: (45): Operation not supported
+sbin/disklabel	EXIT1	0x2000226:#unimplemented,	disklabel: usage: One of 
+sbin/dmesg	EXIT1	0x2000226:#unimplemented,	Unable to size kernel buffer: Operation not permitted
+sbin/dynamic_pager	EXIT0	0x2000226:#unimplemented,	Failed to get swapfile name prefix: Operation not permitted
+sbin/fibreconfig	EXIT	0x2000226:#unimplemented,	usage: fibreconfig [-l] [-c PortWWN [-a, -s, -t]] [-r] [-v]
+sbin/fstyp	EXIT64	0x2000226:#unimplemented,	usage: fstyp device
+sbin/fstyp_hfs	EXIT0	0x2000226:#unimplemented,	usage: fstyp_hfs device
+sbin/fstyp_msdos	EXIT0	0x2000226:#unimplemented,	usage: fstyp_msdos device
+sbin/fstyp_ntfs	EXIT0	0x2000226:#unimplemented,	usage: fstyp_ntfs device
+sbin/fstyp_udf	EXIT0	0x2000226:#unimplemented,	usage: fstyp_udf device
+sbin/ifconfig	EXIT1	0x2000226:#unimplemented,	ifconfig: getifaddrs: No such file or directory
+sbin/kextload	EXIT64	0x2000226:#unimplemented,	No kernel extensions specified; name kernel extension bundles
+sbin/kextunload	EXIT77	0x2000226:#unimplemented,	You must be running as root to unload kexts, terminate services, or remove driver personalities.
+sbin/launchd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+sbin/md5	EXIT0	0x2000226:#unimplemented,	d41d8cd98f00b204e9800998ecf8427e
+sbin/md5sum	EXIT0	0x2000226:#unimplemented,	d41d8cd98f00b204e9800998ecf8427e  -
+sbin/mknod	EXIT1		usage: mknod [-rR] [-F format] [-m mode] [-g group]
+sbin/mount	EXIT0	0x2000226:#unimplemented,	/dev/gpt/rootfs on / (ufs, local, noowners)
+sbin/mount_9p	EXIT1	0x2000226:#unimplemented,	usage: mount_9p [-r] fs_tag
+sbin/mount_afp	SIG127	0x2000226:#unimplemented,	*** AFP Network Disk Obsoletion Warning ***
+sbin/mount_devfs	EXIT1	0x2000226:#unimplemented,	usage: mount_devfs [-o options] devfs mount_point
+sbin/mount_fdesc	EXIT1	0x2000226:#unimplemented,	usage: mount_fdesc [-o options] fdesc mount_point
+sbin/mount_nfs	EXIT22	0x2000226:#unimplemented,	mount_nfs: /etc/nfs.conf: Too many open files
+sbin/mount_smbfs	EXIT64	0x2000226:#unimplemented,	usage: mount_smbfs [-N] [-o options] [-d mode] [-f mode] [-h] [-s] [-v] [-t "@GMT token"] 
+sbin/mount_webdav	EXIT22	0x2000226:#unimplemented,	usage: mount_webdav [-i] [-s] [-S] [-o options] [-v <volume name>]
+sbin/mpioutil	EXIT	0x2000226:#unimplemented,	mpioutil
+sbin/nfsd	EXIT2	0x2000226:#unimplemented,	
+sbin/nfsiod	EXIT1	0x2000226:#unimplemented,	nfsiod: sysctl(vfs.generic.nfs.client.nfsiod_thread_max): Operation not permitted
+sbin/nologin	EXIT1	0x2000226:#unimplemented,	This account is currently not available.
+sbin/pfctl	EXIT1	0x2000226:#unimplemented,	usage: pfctl [-AdeglhmNnOqRrvz] [-a anchor] [-D macro=value] [-F modifier]
+sbin/ping	EXIT	0x2000226:#unimplemented,	usage: ping [-AaDdfnoQqRrv] [-c count] [-G sweepmaxsize]
+sbin/ping6	EXIT	0x2000226:#unimplemented,	usage: ping6 [-DdfHmnNoqrRtvwW] [-a addrtype] [-b bufsiz] [-c count]
+sbin/quotacheck	EXIT1	0x2000226:#unimplemented,	usage:	quotacheck -a [-guv]
+sbin/route	EXIT64	0x2000226:#unimplemented,	usage: route [-dnqtv] command [[modifiers] args]
+sbin/sha1	EXIT0	0x2000226:#unimplemented,	da39a3ee5e6b4b0d3255bfef95601890afd80709
+sbin/sha1sum	EXIT0	0x2000226:#unimplemented,	da39a3ee5e6b4b0d3255bfef95601890afd80709  -
+sbin/sha224	EXIT0	0x2000226:#unimplemented,	d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f
+sbin/sha224sum	EXIT0	0x2000226:#unimplemented,	d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f  -
+sbin/sha256	EXIT0	0x2000226:#unimplemented,	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+sbin/sha256sum	EXIT0	0x2000226:#unimplemented,	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -
+sbin/sha384	EXIT0	0x2000226:#unimplemented,	38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b
+sbin/sha384sum	EXIT0	0x2000226:#unimplemented,	38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b  -
+sbin/sha512	EXIT0	0x2000226:#unimplemented,	cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b9
+sbin/sha512sum	EXIT0	0x2000226:#unimplemented,	cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b9
+sbin/umount	EXIT1	0x2000226:#unimplemented,	usage: umount [-fv] [-t fstypelist] special | node
+usr/bin/aa	EXIT		Usage: aa command <options>
+usr/bin/actool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/aea	EXIT		sysctlbyname: Operation not permitted
+usr/bin/afclip	EXIT	0x2000226:#unimplemented,	
+usr/bin/afconvert	EXIT2	0x2000226:#unimplemented,	
+usr/bin/afhash	EXIT	0x2000226:#unimplemented,	
+usr/bin/afida	EXIT	0x2000226:#unimplemented,	
+usr/bin/afinfo	EXIT	0x2000226:#unimplemented,	
+usr/bin/afktool	EXIT	0x2000226:#unimplemented,	Arguments did not match expected patterns
+usr/bin/afplay	EXIT1	0x2000226:#unimplemented,	
+usr/bin/afscexpand	EXIT1		Usage:
+usr/bin/agentxtrap	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/agvtool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/app-sso	EXIT	0x2000226:#unimplemented,	Usage:
+usr/bin/applesingle	EXIT	0x2000226:#unimplemented,	applesingle 1.0 - Oct 12 2026 04:11:23
+usr/bin/apply	EXIT1	0x2000226:#unimplemented,	usage: apply [-a magic] [-d] [-0123456789] command arguments ...
+usr/bin/ar	EXIT	0x2000226:#unimplemented,	Usage: /usr/local/bin/ar [emulation options] [-]{dmpqrstx}[abcDfilMNoOPsSTuvV] [--plugin <name>] [me
+usr/bin/arch	EXIT0	0x2000226:#unimplemented,	i386RC=0
+usr/bin/archiveutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/as	EXIT0	0x2000226:#unimplemented,	
+usr/bin/asa	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/AssetCacheLocatorUtil	SIG4	0x2000226:#unimplemented,	2026-11-09 19:57:01.623 AssetCacheLocatorUtil[54594:100353] AssetCacheLocatorUtil version 140.120.2,
+usr/bin/AssetCacheManagerUtil	EXIT64	0x2000226:#unimplemented,	2026-11-09 19:57:01.963 AssetCacheManagerUtil[54615:102025] Usage: AssetCacheManagerUtil [options] c
+usr/bin/AssetCacheTetheratorUtil	EXIT1	0x2000226:#unimplemented,	2026-11-09 19:57:02.303 AssetCacheTetheratorUtil[54636:100136] Usage: AssetCacheTetheratorUtil [-j|-
+usr/bin/assetutil	EXIT	0x2000226:#unimplemented,	usage: assetutil [OPTION...] inputfile
+usr/bin/at	EXIT1	0x2000226:#unimplemented,	at: cannot access user database: Too many open files
+usr/bin/atos	SIG4	0x2000226:#unimplemented,	[invalid usage]: no processes or executables specified
+usr/bin/atq	EXIT1	0x2000226:#unimplemented,	atq: cannot access user database: Too many open files
+usr/bin/atrm	EXIT1	0x2000226:#unimplemented,	atrm: cannot access user database: Too many open files
+usr/bin/atsutil	EXIT0	0x2000226:#unimplemented,	Usage: atsutil <verb> <options> [<path>]
+usr/bin/automationmodetool	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/automator	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/auvaltool	EXIT0	0x2000226:#unimplemented,	
+usr/bin/avbanalyse	EXIT1	0x2000226:#unimplemented,	usage:
+usr/bin/avbcapture	EXIT0	0x2000226:#unimplemented,	Must specify an output path
+usr/bin/avbdiagnose	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/avbutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/avconvert	EXIT	0x2000226:#unimplemented,	avconvert:  --source must be specified
+usr/bin/avmediainfo	EXIT	0x2000226:#unimplemented,	avmediainfo:  Input media file must be specified
+usr/bin/avmetareadwrite	EXIT	0x2000226:#unimplemented,	
+usr/bin/awk	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/usr/bin/awk [-F fs] [-v var=value] [-f progfile | 'prog'] [file ...]
+usr/bin/b64decode	EXIT1	0x2000226:#unimplemented,	b64decode: stdin: missing or bad "begin" line
+usr/bin/b64encode	EXIT1	0x2000226:#unimplemented,	usage: uuencode [-m] [-o outfile] [infile] remotefile
+usr/bin/banner	EXIT0	0x2000226:#unimplemented,	Message: RC=0
+usr/bin/base64	EXIT0	0x2000226:#unimplemented,	
+usr/bin/basename	EXIT1	0x2000226:#unimplemented,	usage: basename string [suffix]
+usr/bin/batch	EXIT1	0x2000226:#unimplemented,	batch: cannot access user database: Too many open files
+usr/bin/bc	EXIT0	0x2000226:#unimplemented,	
+usr/bin/binhex	EXIT	0x2000226:#unimplemented,	binhex 1.0 - Oct 12 2026 04:11:20
+usr/bin/bintrans	EXIT64	0x2000226:#unimplemented,	usage: bintrans <uuencode | uudecode> ...
+usr/bin/bioutil	EXIT	0x2000226:#unimplemented,	You must select whether to read or write biometrics configuration or perform a biometric operation (
+usr/bin/bison	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/bm4	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/bputil	SIG127	0x2000226:#unimplemented,	This tool is not supported on x86 platform
+usr/bin/brctl	EXIT	0x2000226:#unimplemented,	Usage: brctl <command> [command-options and arguments]
+usr/bin/bsdtar	EXIT1	0x2000226:#unimplemented,	bsdtar: Failed to set default locale
+usr/bin/bspatch	EXIT1	0x2000226:#unimplemented,	usage: bspatch oldfile newfile patchfile
+usr/bin/bunzip2	EXIT2	0x2000226:#unimplemented,	
+usr/bin/bzcat	EXIT2	0x2000226:#unimplemented,	
+usr/bin/bzegrep	EXIT2	0x2000226:#unimplemented,	usage: bzegrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/bzfgrep	EXIT2	0x2000226:#unimplemented,	usage: bzfgrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/bzgrep	EXIT2	0x2000226:#unimplemented,	usage: bzgrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/bzip2	EXITBZh9rE8Pê0	0x2000226:#unimplemented,	BZh9rE8P
+usr/bin/bzip2recover	EXIT1	0x2000226:#unimplemented,	bzip2recover 1.0.8: extracts blocks from damaged .bz2 files.
+usr/bin/c++	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/c++filt	EXIT0	0x2000226:#unimplemented,	
+usr/bin/c89	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/c99	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/caffeinate	EXIT1	0x2000226:#unimplemented,	Failed to create PreventUserIdleSystemSleep assertion
+usr/bin/cal	EXIT0	0x2000226:#unimplemented,	cal: setlocale: Inappropriate file type or format
+usr/bin/calendar	EXIT0	0x2000226:#unimplemented,	calendar: can't open calendar file "calendar"
+usr/bin/cancel	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/cap_mkdb	EXIT1	0x2000226:#unimplemented,	usage: cap_mkdb [-v] [-f outfile] file1 [file2 ...]
+usr/bin/cc	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/certtool	EXIT	0x2000226:#unimplemented,	usage:
+usr/bin/chflags	EXIT1		usage: chflags [-fhvx] [-R [-H | -L | -P]] flags file ...
+usr/bin/chfn	EXIT1	0x2000226:#unimplemented,	chfn: unknown user: uid 65534
+usr/bin/chgrp	EXIT1		usage: chgrp [-fhnvx] [-R [-H | -L | -P]] group file ...
+usr/bin/chpass	EXIT1	0x2000226:#unimplemented,	chpass: unknown user: uid 65534
+usr/bin/chsh	EXIT1	0x2000226:#unimplemented,	chsh: unknown user: uid 65534
+usr/bin/cksum	EXIT0		4294967295 0
+usr/bin/clang	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/clang++	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/clangd	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/clear	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/cmp	EXIT2	0x2000226:#unimplemented,	usage: cmp [-l | -s | -x] [-bhz] [-i num1[:num2] | --ignore-initial=num1[:num2]] [-n num | --bytes=n
+usr/bin/cmpdylib	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/codecctl	EXIT	0x2000226:#unimplemented,	Choose a device:
+usr/bin/codesign	EXIT2	0x2000226:#unimplemented,	Usage: codesign -s identity [-fv*] [-o flags] [-r reqs] [-i ident] path ... # sign
+usr/bin/codesign_allocate	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/col	EXIT0	0x2000226:#unimplemented,	
+usr/bin/colrm	EXIT0	0x2000226:#unimplemented,	
+usr/bin/column	EXIT0	0x2000226:#unimplemented,	
+usr/bin/comm	EXIT1	0x2000226:#unimplemented,	usage: comm [-123i] file1 file2
+usr/bin/compress	EXIT1		compress: /dev/stdin: Too many open files
+usr/bin/compression_tool	EXIT	0x2000226:#unimplemented,	sysctlbyname: Operation not permitted
+usr/bin/cpio	EXIT1	0x2000226:#unimplemented,	cpio: Failed to set default locale
+usr/bin/cpp	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/cpuctl	EXIT71	0x2000226:#unimplemented,	cpuctl: host_get_host_priv_port() failed
+usr/bin/crlrefresh	EXIT1	0x2000226:#unimplemented,	Usage
+usr/bin/crontab	EXIT1	0x2000226:#unimplemented,	crontab: your UID isn't in the passwd file, bailing out
+usr/bin/csfdiagnose	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/csplit	EXIT1	0x2000226:#unimplemented,	usage: csplit [-ks] [-f prefix] [-n number] file args ...
+usr/bin/csreq	EXIT2	0x2000226:#unimplemented,	Usage: csreq [-v] -r requirement           # check
+usr/bin/csrutil	EXIT	0x2000226:#unimplemented,	usage: csrutil <command>
+usr/bin/ctags	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/ctf_insert	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/cu	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/bin/cu: must specify system, line, port or speed
+usr/bin/cupstestppd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/curl	EXIT	0x2000226:#unimplemented,	Auto configuration failed
+usr/bin/cut	EXIT1	0x2000226:#unimplemented,	usage: cut -b list [-n] [file ...]
+usr/bin/db_archive	EXIT0	0x2000226:#unimplemented,	
+usr/bin/db_checkpoint	EXIT1	0x2000226:#unimplemented,	db_checkpoint: at least one of -1, -k and -p must be specified
+usr/bin/db_codegen	EXIT0	0x2000226:#unimplemented,	
+usr/bin/db_deadlock	EXIT1	0x2000226:#unimplemented,	db_deadlock: open: No such file or directory
+usr/bin/db_dump	EXIT1	0x2000226:#unimplemented,	usage: db_dump [-klNprRV]
+usr/bin/db_hotbackup	EXIT1	0x2000226:#unimplemented,	db_hotbackup: no source database environment specified
+usr/bin/db_load	EXIT1	0x2000226:#unimplemented,	usage: db_load [-nTV] [-c name=value] [-f file]
+usr/bin/db_printlog	EXIT0	0x2000226:#unimplemented,	
+usr/bin/db_recover	EXIT0	0x2000226:#unimplemented,	
+usr/bin/db_stat	EXIT1	0x2000226:#unimplemented,	usage: db_stat -d file [-fN] [-h home] [-P password] [-s database]
+usr/bin/db_upgrade	EXIT1	0x2000226:#unimplemented,	usage: db_upgrade [-NsVv] [-h home] [-P password] db_file ...
+usr/bin/db_verify	EXIT1	0x2000226:#unimplemented,	usage: db_verify [-NoqV] [-h home] [-P password] db_file ...
+usr/bin/dc	EXIT0	0x2000226:#unimplemented,	
+usr/bin/dddiagnose	EXIT1	0x2000226:#unimplemented,	
+usr/bin/defaults	EXIT	0x2000226:#unimplemented,	Command line interface to a user's defaults.
+usr/bin/delv	SIG4		Illegal instruction
+usr/bin/demandoc	EXIT0	0x2000226:#unimplemented,	
+usr/bin/DeRez	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/derq	EXIT64	0x2000226:#unimplemented,	please provide a subcommand
+usr/bin/desdp	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/devicectl	EXIT1	0x2000226:#unimplemented,	devicectl is installed by Xcode. Please install Xcode from the App Store or download it from https:/
+usr/bin/devmodectl	SIG6		dyld[56989]: Library not loaded: /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A
+usr/bin/diff	EXIT	0x2000226:#unimplemented,	usage: diff [-aBbdilpTtw] [-c | -e | -f | -n | -q | -u] [--ignore-case]
+usr/bin/diff3	EXIT2	0x2000226:#unimplemented,	usage: diff3 [-3aAeEimTxX] [-L label1] [-L label2] [-L label3] file1 file2 file3
+usr/bin/diffstat	EXIT0	0x2000226:#unimplemented,	 0 files changed
+usr/bin/dig	SIG4		Illegal instruction
+usr/bin/dirname	EXIT1	0x2000226:#unimplemented,	usage: dirname string [...]
+usr/bin/dist_package_tool	EXIT0	0x2000226:#unimplemented,	Must provide a command, see help for more information.
+usr/bin/ditto	EXIT	0x2000226:#unimplemented,	Usage: ditto [ <options> ] src [ ... src ] dst
+usr/bin/dmc	EXIT1	0x2000226:#unimplemented,	usage: dmc <commands...>
+usr/bin/dns-sd	EXIT	0x2000226:#unimplemented,	dns-sd -E                          (Enumerate recommended registration domains)
+usr/bin/drutil	EXIT		Usage: drutil -drive [drive-arguments] command [command-options-and-arguments]
+usr/bin/dscacheutil	EXIT64	0x2000226:#unimplemented,	Usage: dscacheutil -h
+usr/bin/dscl	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/dserr	EXIT64	0x2000226:#unimplemented,	Usage: /root/macbins/usr/bin/dserr errCode
+usr/bin/dsexport	EXIT1	0x2000226:#unimplemented,	usage: dsexport [--N] [-r record_list] [-e exclude_attributes]
+usr/bin/dsimport	EXIT	0x2000226:#unimplemented,	Usage:  dsimport filePath nodePath <O|M|A|I|N> [options]
+usr/bin/dsmemberutil	EXIT3	0x2000226:#unimplemented,	Usage: dsmemberutil [flags] <command> [options]
+usr/bin/dsymutil	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/du	EXIT0		104	.
+usr/bin/dwarfdump	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/dyld_info	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/dyld_usage	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/egrep	EXIT2	0x2000226:#unimplemented,	usage: egrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/encode_keychange	SIG104	0x2000226:#unimplemented,	The -t option is mandatory.
+usr/bin/env	EXIT0	0x2000226:#unimplemented,	SSH_CLIENT=10.0.2.2 56960 22
+usr/bin/eslogger	EXIT64	0x2000226:#unimplemented,	Error: No event types specified
+usr/bin/expand	EXIT0	0x2000226:#unimplemented,	
+usr/bin/expect	SIG6		dyld[57567]: Library not loaded: /System/Library/Tcl/8.5/expect5.45/libexpect5.45.dylib
+usr/bin/false	EXIT1		
+usr/bin/fdesetup	EXIT12	0x2000226:#unimplemented,	Error: This tool requires one or more parameters to run. Use the man page, or 'fdesetup help'.
+usr/bin/fgrep	EXIT2	0x2000226:#unimplemented,	usage: fgrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/file	EXIT1	0x2000226:#unimplemented,	file: cannot read magic file `/usr/share/file/magic' (Too many open files) (Too many open files)
+usr/bin/fileproviderctl	EXIT	0x2000226:#unimplemented,	File Provider control utility.
+usr/bin/filtercalltree	EXIT	0x2000226:#unimplemented,	[invalid usage]: no call tree filename specified
+usr/bin/find	EXIT1	0x2000226:#unimplemented,	usage: find [-H | -L | -P] [-EXdsx] [-f path] path ... [expression]
+usr/bin/finger	EXIT0	0x2000226:#unimplemented,	No one logged on.
+usr/bin/flex	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/flex++	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/fmt	EXIT0	0x2000226:#unimplemented,	
+usr/bin/fold	EXIT0	0x2000226:#unimplemented,	
+usr/bin/footprint	EXIT	0x2000226:#unimplemented,	footprint: Must specify at least one process or memgraph
+usr/bin/fping	EXIT4	0x2000226:#unimplemented,	
+usr/bin/fs_usage	SIG4	0x2000226:#unimplemented,	Cleaning up tracing state because of assertion failed: 23G0: ktrace + 764669 [B68BE4CD-4484-3839-BAA
+usr/bin/funzip	EXIT2	0x2000226:#unimplemented,	funzip error: cannot find stdin
+usr/bin/g++	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/gatherheaderdoc	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/gcc	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/gcore	EXIT64	0x2000226:#unimplemented,	gcore: no process specified
+usr/bin/gcov	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/gencat	EXIT1	0x2000226:#unimplemented,	usage: gencat [-new] [-or] [-lang C|C++|ANSIC]
+usr/bin/genstrings	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/getconf	EXIT64	0x2000226:#unimplemented,	usage: getconf -a [pathname]
+usr/bin/GetFileInfo	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/getopt	EXIT0	0x2000226:#unimplemented,	 --
+usr/bin/git	EXIT	0x2000226:#unimplemented,	usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+usr/bin/git-receive-pack	SIG1	0x2000226:#unimplemented,	fatal: you must specify a directory
+usr/bin/git-shell	EXIT128	0x2000226:#unimplemented,	fatal: Interactive git shell is not enabled.
+usr/bin/git-upload-archive	EXIT128	0x2000226:#unimplemented,	0008ACK
+usr/bin/git-upload-pack	SIG1	0x2000226:#unimplemented,	usage: git-upload-pack [--[no-]strict] [--timeout=<n>] [--stateless-rpc]
+usr/bin/gktool	EXIT0	0x2000226:#unimplemented,	Must provide a command, see help for more information
+usr/bin/gm4	EXIT0	0x2000226:#unimplemented,	
+usr/bin/gnumake	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/gperf	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/grep	EXIT2	0x2000226:#unimplemented,	usage: grep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/groups	EXIT0	0x2000226:#unimplemented,	0
+usr/bin/gunzip	EXIT1		gunzip: (stdin): unexpected end of file
+usr/bin/gzcat	EXIT1		gzcat: (stdin): unexpected end of file
+usr/bin/gzip	EXITãÃ%Ú0		
+usr/bin/hdid	EXIT1	0x2000226:#unimplemented,	hdid: Could not execute "/usr/bin/hdiutil": No such file or directory
+usr/bin/hdiutil	EXIT1	0x2000226:#unimplemented,	hdiutil: failed during framework init - No such file or directory
+usr/bin/hdxml2manxml	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/head	EXIT0	0x2000226:#unimplemented,	
+usr/bin/headerdoc2html	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/heap	EXIT	0x2000226:#unimplemented,	[invalid usage]: no process id or name specified
+usr/bin/hexdump	EXIT0	0x2000226:#unimplemented,	
+usr/bin/hidutil	EXIT1	0x2000226:#unimplemented,	
+usr/bin/hiutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/host	SIG4		Illegal instruction
+usr/bin/hostinfo	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/bin/hostinfo (os/unix) unknown error code (fed1)
+usr/bin/hpmdiagnose	EXIT0	0x2000226:#unimplemented,	
+usr/bin/ibtool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/ibv_devices	EXIT2		/root/macbins/usr/bin/ibv_devices: 1: Syntax error: "(" unexpected
+usr/bin/ibv_devinfo	EXIT2		/root/macbins/usr/bin/ibv_devinfo: 
+usr/bin/ibv_uc_pingpong	EXIT2		/root/macbins/usr/bin/ibv_uc_pingpong: 1: Syntax error: "(" unexpected
+usr/bin/iconutil	EXIT1	0x2000226:#unimplemented,	Usage: iconutil --convert ( icns | iconset) [--output file] file [icon-name]
+usr/bin/iconv	EXIT1	0x2000226:#unimplemented,	Usage:	iconv [-cs] -f <from_code> -t <to_code> [file ...]
+usr/bin/ictool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/id	EXIT0	0x2000226:#unimplemented,	uid=65534 gid=65534 groups=0
+usr/bin/indent	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/infocmp	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/install	EXIT64		usage: install [-bCcpSsUv] [-f flags] [-g group] [-m mode] [-o owner]
+usr/bin/install_name_tool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/IOAccelMemory	EXIT1	0x2000226:#unimplemented,	Failed to acquire power assertion: rc = 0xE00002C9
+usr/bin/IOMFB_FDR_Loader	EXIT2		/root/macbins/usr/bin/IOMFB_FDR_Loader: 1: Syntax error: word unexpected (expecting ")")
+usr/bin/IOSDebug	EXIT0	0x2000226:#unimplemented,	2026-11-09 19:58:12.233 IOSDebug[58987:102012] Failed to find matching service IOSurfaceRoot
+usr/bin/ipcrm	EXIT0		
+usr/bin/ipcs	EXIT1		ipcs: sysctlbyname IPCS_MSG_SYSCTL: Operation not permitted
+usr/bin/iperf3-darwin	EXIT	0x2000226:#unimplemented,	iperf3: parameter error - must either be a client (-c) or server (-s)
+usr/bin/ippeveprinter	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/ippfind	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/ipptool	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/jar	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jarsigner	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/java	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/javac	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/javadoc	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/javap	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/javaws	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jcmd	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jconsole	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jcontrol	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jdb	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jdeps	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jhsdb	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jimage	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jinfo	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jjs	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jlink	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jmap	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/join	EXIT1	0x2000226:#unimplemented,	usage: join [-a fileno | -v fileno ] [-e string] [-1 field] [-2 field]
+usr/bin/jot	EXIT1	0x2000226:#unimplemented,	usage: jot [-cnr] [-b word] [-w word] [-s string] [-p precision]
+usr/bin/jpackage	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jps	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jq	EXIT0	0x2000226:#unimplemented,	
+usr/bin/jrunscript	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jshell	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jstack	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jstat	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/jstatd	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/kcc	EXIT1	0x2000226:#unimplemented,	kcc: krb5_init_context failed: 24
+usr/bin/kdestroy	EXIT1	0x2000226:#unimplemented,	kdestroy: krb5_init_context failed: 24
+usr/bin/kextutil	EXIT64	0x2000226:#unimplemented,	No kernel extensions specified; name kernel extension bundles
+usr/bin/keytool	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/kgetcred	EXIT1	0x2000226:#unimplemented,	kgetcred: krb5_init_context failed: 24
+usr/bin/kinit	EXIT1	0x2000226:#unimplemented,	kinit: krb5_init_context failed: 24
+usr/bin/kmutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/kpasswd	EXIT1	0x2000226:#unimplemented,	kpasswd: krb5_init_context failed: 24
+usr/bin/ktrace	EXIT	0x2000226:#unimplemented,	usage:	/root/macbins/usr/bin/ktrace info
+usr/bin/lam	EXIT1	0x2000226:#unimplemented,	usage: lam [ -f min.max ] [ -s sepstring ] [ -t c ] file ...
+usr/bin/last	EXIT0	0x2000226:#unimplemented,	
+usr/bin/lastcomm	EXIT1	0x2000226:#unimplemented,	lastcomm: /var/account/acct: Too many open files
+usr/bin/latency	EXIT1	0x2000226:#unimplemented,	'latency' must be run as root...
+usr/bin/layerutil	EXIT	0x2000226:#unimplemented,	usage: layerutil [OPTIONS] FILE
+usr/bin/ld	EXIT1	0x2000226:#unimplemented,	/usr/local/bin/ld: no input files
+usr/bin/ldapcompare	EXIT	0x2000226:#unimplemented,	usage: ldapcompare [options] DN <attr:value|attr::b64value>
+usr/bin/ldapdelete	SIG127	0x2000226:#unimplemented,	ldap_sasl_interactive_bind_s: Can't contact LDAP server (-1)
+usr/bin/ldapexop	EXIT	0x2000226:#unimplemented,	Issue LDAP extended operations
+usr/bin/ldapmodify	SIG127	0x2000226:#unimplemented,	ldap_sasl_interactive_bind_s: Can't contact LDAP server (-1)
+usr/bin/ldapmodrdn	SIG127	0x2000226:#unimplemented,	ldap_sasl_interactive_bind_s: Can't contact LDAP server (-1)
+usr/bin/ldappasswd	SIG127	0x2000226:#unimplemented,	ldap_sasl_interactive_bind_s: Can't contact LDAP server (-1)
+usr/bin/ldapsearch	SIG127	0x2000226:#unimplemented,	ldap_sasl_interactive_bind_s: Can't contact LDAP server (-1)
+usr/bin/ldapurl	EXIT0	0x2000226:#unimplemented,	ldap://:389
+usr/bin/ldapwhoami	SIG127	0x2000226:#unimplemented,	ldap_sasl_interactive_bind_s: Can't contact LDAP server (-1)
+usr/bin/leaks	EXIT	0x2000226:#unimplemented,	[invalid usage]: no process specified
+usr/bin/leave	EXIT0	0x2000226:#unimplemented,	When do you have to leave? RC=0
+usr/bin/less	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/lessecho	EXIT0	0x2000226:#unimplemented,	
+usr/bin/lesskey	EXIT1	0x2000226:#unimplemented,	-1 errors; no output produced
+usr/bin/lex	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/libtool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/lipo	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/lldb	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/llvm-g++	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/llvm-gcc	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/locale	EXIT0	0x2000226:#unimplemented,	LANG="C.UTF-8"
+usr/bin/localedef	EXIT4	0x2000226:#unimplemented,	Usage: localedef [options] localename
+usr/bin/locate	EXIT1	0x2000226:#unimplemented,	usage: locate [-0Scims] [-l limit] [-d database] pattern ...
+usr/bin/lockf	EXIT64	0x2000226:#unimplemented,	usage: lockf [-knsw] [-t seconds] file command [arguments]
+usr/bin/lockstat	EXIT2	0x2000226:#unimplemented,	lockstat: cannot open dtrace library: DTrace device not available on system
+usr/bin/log	EXIT64	0x2000226:#unimplemented,	usage:
+usr/bin/logger	EXIT0	0x2000226:#unimplemented,	
+usr/bin/logname	EXIT0	0x2000226:#unimplemented,	root
+usr/bin/look	EXIT2	0x2000226:#unimplemented,	usage: look [-df] [-t char] string [file ...]
+usr/bin/lorder	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/lp	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/lpoptions	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/lpq	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/lpr	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/lprm	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/lpstat	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/lsappinfo	SIG4		Illegal instruction
+usr/bin/lsbom	EXIT	0x2000226:#unimplemented,	Usage: lsbom [-h] [-s] [-f] [-d] [-l] [-b] [-c] [-m] [-x]
+usr/bin/lskq	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/usr/bin/lskq [-vher] [-a | -p <pid>]
+usr/bin/lsm	EXIT1	0x2000226:#unimplemented,	lsm (create | update | evaluate | cluster | info | dump) opts... map args...
+usr/bin/lsmp	EXIT1	0x200021b:#unimplemented,0x2000226:#unimplemented,	warning: should run as root for best output (cross-ref to other tasks' ports).
+usr/bin/lsvfs	EXIT1	0x2000226:#unimplemented,	lsvfs: sysctl(vfs.generic.maxtypenum): Operation not permitted
+usr/bin/m4	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/macbinary	EXIT	0x2000226:#unimplemented,	macbinary 1.0 - Oct 12 2026 04:11:20
+usr/bin/machine	EXIT0	0x2000226:#unimplemented,	x86_64hRC=0
+usr/bin/macoserror	EXIT0	0x2000226:#unimplemented,	
+usr/bin/mail	EXIT1	0x2000226:#unimplemented,	mail: /var/mail/root: Too many open files
+usr/bin/mailx	EXIT1	0x2000226:#unimplemented,	mailx: /var/mail/root: Too many open files
+usr/bin/make	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/malloc_history	EXIT	0x2000226:#unimplemented,	[invalid usage]: no process id or name specified
+usr/bin/mandoc	EXIT0	0x2000226:#unimplemented,	()                                                                          ()
+usr/bin/mcxquery	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/mcxrefresh	EXIT1	0x2000226:#unimplemented,	2026-11-09 19:58:46.733 mcxrefresh[61162:100155] mcxrefresh- requires uid or username parameter
+usr/bin/mddiagnose	SIG127	0x2000226:#unimplemented,	objc[61183]: Class _MDSPathFilter is implemented in both /System/Library/PrivateFrameworks/Spotlight
+usr/bin/mdfind	EXIT	0x2000226:#unimplemented,	/root/macbins/usr/bin/mdfind: no query specified.
+usr/bin/mdimport	EXIT	0x2000226:#unimplemented,	Usage: /root/macbins/usr/bin/mdimport [options] path {path...}
+usr/bin/mdls	EXIT1	0x2000226:#unimplemented,	(null): no filename specified!
+usr/bin/mdutil	EXIT	0x2000226:#unimplemented,	Usage: mdutil -pEsa -i (on|off) -d volume ...
+usr/bin/memacct	EXIT0	0x2000226:#unimplemented,	
+usr/bin/memory_pressure	SIG127	0x2000226:#unimplemented,	hw.memsize: Operation not permitted
+usr/bin/mesg	EXIT2	0x2000226:#unimplemented,	mesg: ttyname: Inappropriate ioctl for device
+usr/bin/mg	EXIT1	0x2000226:#unimplemented,	panic: standard input and output must be a terminal
+usr/bin/mig	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/mkbom	EXIT1	0x2000226:#unimplemented,	Usage: mkbom [-h] [-s] directory bom
+usr/bin/mkfifo	EXIT1		usage: mkfifo [-m mode] fifo_name ...
+usr/bin/mktemp	EXIT0	0x2000226:#unimplemented,	/var/tmp/tmp.RzKV3Aty9k
+usr/bin/mnthome	SIG11	0x2000226:#unimplemented,	Segmentation fault
+usr/bin/modelcatalogdump	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/modelmanagerdump	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/more	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/mpsgraphtool	EXIT	0x2000226:#unimplemented,	/root/macbins/usr/bin/mpsgraphtool 
+usr/bin/nbdst	EXIT1	0x2000226:#unimplemented,	usage: nbdst <devnode> <shadowfile> <options>
+usr/bin/nc	EXIT	0x2000226:#unimplemented,	usage: nc [-46AacCDdEFhklMnOortUuvz] [-K tc] [-b boundif] [-i interval] [-p source_port]
+usr/bin/ncal	EXIT0	0x2000226:#unimplemented,	ncal: setlocale: Inappropriate file type or format
+usr/bin/ncctl	EXIT	0x2000226:#unimplemented,	ncctl: No command specified.
+usr/bin/nettop	EXIT70	0x2000226:#unimplemented,	nettop: NStatManagerCreate failed
+usr/bin/networkQuality	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/newgrp	EXIT1	0x2000226:#unimplemented,	newgrp: need root permissions to function properly, check setuid bit
+usr/bin/nfsstat	EXIT	0x200009b:#unimplemented,0x2000226:#unimplemented,	nfsstat: nfssvc failed: Function not implemented
+usr/bin/nice	EXIT1	0x2000226:#unimplemented,	usage: nice [-n increment] utility [argument ...]
+usr/bin/nl	EXIT0	0x2000226:#unimplemented,	
+usr/bin/nm	EXIT0	0x2000226:#unimplemented,	/usr/local/bin/nm: a.out: no symbols
+usr/bin/nmedit	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/nohup	EXIT127	0x2000226:#unimplemented,	usage: nohup [--] utility [arguments]
+usr/bin/notifyutil	EXIT0	0x2000226:#unimplemented,	
+usr/bin/nscurl	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/nslookup	SIG4		Illegal instruction
+usr/bin/nsupdate	SIG4		Illegal instruction
+usr/bin/objdump	EXIT	0x2000226:#unimplemented,	Usage: /usr/local/bin/objdump <option(s)> <file(s)>
+usr/bin/ocspcheck	EXIT1	0x2000226:#unimplemented,	usage: ocspcheck [-Nv] [-C CAfile] [-i staplefile] [-o staplefile] file
+usr/bin/od	EXIT0	0x2000226:#unimplemented,	
+usr/bin/odutil	EXIT64	0x2000226:#unimplemented,	Usage: odutil show [cache | nodes | requests | connections | sessions | nodenames | users | statisti
+usr/bin/open	EXIT	0x2000226:#unimplemented,	Usage: open [-e] [-t] [-f] [-W] [-R] [-n] [-g] [-h] [-s <partial SDK name>][-b <bundle identifier>] 
+usr/bin/opendiff	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/openssl	EXIT	0x2000226:#unimplemented,	140698834538048:error:02FFF018:system library:func(4095):Too many open files:/AppleInternal/Library/
+usr/bin/orbd	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/osacompile	EXIT1	0x2000226:#unimplemented,	osacompile: can't open default scripting component.
+usr/bin/osadecompile	EXIT2	0x2000226:#unimplemented,	usage: osadecompile script-file
+usr/bin/osalang	EXIT0	0x2000226:#unimplemented,	
+usr/bin/osascript	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/otool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/pack200	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/pagestuff	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/parl	EXIT79	0x2000226:#unimplemented,	perl: warning: Setting locale failed.
+usr/bin/parl5.34	EXIT79	0x2000226:#unimplemented,	perl: warning: Setting locale failed.
+usr/bin/parldyn	SIG6		dyld[62286]: Library not loaded: /System/Library/Perl/5.34/darwin-thread-multi-2level/CORE/libperl.d
+usr/bin/parldyn5.34	SIG6		dyld[62307]: Library not loaded: /System/Library/Perl/5.34/darwin-thread-multi-2level/CORE/libperl.d
+usr/bin/paste	EXIT1	0x2000226:#unimplemented,	usage: paste [-s] [-d delimiters] file ...
+usr/bin/patch	EXIT2	0x2000226:#unimplemented,	patch: **** can't create '/tmp/patchp296IPHlIFS': Too many open files
+usr/bin/pathchk	EXIT1		usage: pathchk [-Pp] pathname ...
+usr/bin/pbcopy	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/pbpaste	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/pcsctest	SIG4	0x2000226:#unimplemented,	
+usr/bin/perl	SIG6		dyld[62454]: Library not loaded: /System/Library/Perl/5.34/darwin-thread-multi-2level/CORE/libperl.d
+usr/bin/perl5.34	SIG6		dyld[62475]: Library not loaded: /System/Library/Perl/5.34/darwin-thread-multi-2level/CORE/libperl.d
+usr/bin/pgrep	EXIT2	0x2000226:#unimplemented,	usage: pgrep [-Lfilnoqvx] [-d delim] [-F pidfile] [-G gid]
+usr/bin/pico	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/pip3	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/pkgbuild	EXIT1	0x2000226:#unimplemented,	Usage: pkgbuild [options] --root <root-path> [--component-plist <plist-path>] <package-output-path>
+usr/bin/pl	EXIT0	0x2000226:#unimplemented,	
+usr/bin/plockstat	EXIT2	0x2000226:#unimplemented,	Usage:
+usr/bin/pluginkit	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/plutil	EXIT1	0x2000226:#unimplemented,	No files specified.
+usr/bin/pmset	EXIT1	0x2000226:#unimplemented,	Usage: pmset <options>
+usr/bin/policytool	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/powermetrics	EXIT1	0x2000226:#unimplemented,	powermetrics must be invoked as the superuser
+usr/bin/ppdc	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/ppdhtml	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/ppdi	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/ppdmerge	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/ppdpo	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/pr	EXIT0	0x2000226:#unimplemented,	
+usr/bin/printenv	EXIT0	0x2000226:#unimplemented,	SSH_CLIENT=10.0.2.2 56960 22
+usr/bin/printf	EXIT1	0x2000226:#unimplemented,	usage: printf format [arguments ...]
+usr/bin/productbuild	EXIT	0x2000226:#unimplemented,	Usage: productbuild [--product <requirements-plist>] {--component <component-path> <install-path>} <
+usr/bin/productsign	EXIT1	0x2000226:#unimplemented,	Usage: productsign [options] --sign <identity> <input-product-path> <output-product-path>
+usr/bin/profiles	EXIT1	0x2000226:#unimplemented,	profiles: requires one or more parameters to run.  Use 'profiles help' for instructions, or use the 
+usr/bin/psm	SIG60	0x2000226:#unimplemented,	failed to get default disk
+usr/bin/pwpolicy	EXIT	0x2000226:#unimplemented,	Usage: pwpolicy [-h]
+usr/bin/python3	EXIT0	0x2000226:#unimplemented,	
+usr/bin/quota	EXIT0	0x2000226:#unimplemented,	Disk quotas for user (no account) (uid 65534): none
+usr/bin/ranlib	EXIT	0x2000226:#unimplemented,	Usage: /usr/local/bin/ranlib [options] archive
+usr/bin/rdma_ctl	EXIT2		/root/macbins/usr/bin/rdma_ctl: 1: Syntax error: "(" unexpected
+usr/bin/readlink	EXIT1		
+usr/bin/renice	EXIT1	0x2000226:#unimplemented,	usage: renice priority [[-p] pid ...] [[-g] pgrp ...] [[-u] user ...]
+usr/bin/ResMerger	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/resolveLinks	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/rev	EXIT0	0x2000226:#unimplemented,	
+usr/bin/Rez	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/rmic	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/rmid	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/rmiregistry	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/rpcgen	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/rs	EXIT0	0x2000226:#unimplemented,	
+usr/bin/rsync	EXIT	0x2000226:#unimplemented,	usage: rsync [-0468BCDEFHIKLOPRSTWVabcdghiklnopqrtuvxyz] [-e program]
+usr/bin/ruby	EXIT	0x2000226:#unimplemented,	<main>: [BUG] Illegal instruction at 0x00007ff81c29ada6
+usr/bin/SafeEjectGPU	EXIT	0x2000226:#unimplemented,	usage: /root/macbins/usr/bin/SafeEjectGPU [Commands...]
+usr/bin/sample	EXIT	0x2000226:#unimplemented,	[invalid usage]: no process id or name or memgraph specified
+usr/bin/sandbox-exec	EXIT64	0x2000226:#unimplemented,	Usage: sandbox-exec [options] command [args]
+usr/bin/say	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/sc_usage	EXIT1	0x2000226:#unimplemented,	'sc_usage' must be run as root...
+usr/bin/scp	SIG127	0x2000226:#unimplemented,	/root/macbins/usr/bin/scp: unknown user 65534
+usr/bin/screen	EXIT1	0x2000226:#unimplemented,	getpwuid() can't identify your account!
+usr/bin/script	EXIT1	0x2000226:#unimplemented,	script: typescript: Too many open files
+usr/bin/sdef	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/sdiff	EXIT2	0x2000226:#unimplemented,	usage: sdiff [-abdilstHW] [-I regexp] [-o outfile] [-w width] file1 file2
+usr/bin/sdp	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/searchdiagnose	EXIT1	0x2000226:#unimplemented,	Error: confstr(_CS_DARWIN_USER_CACHE_DIR): Input/output error
+usr/bin/security	EXIT	0x2000226:#unimplemented,	Usage: security [-h] [-i] [-l] [-p prompt] [-q] [-v] [command] [opt ...]
+usr/bin/sed	EXIT0	0x2000226:#unimplemented,	
+usr/bin/segedit	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/seq	EXIT1	0x2000226:#unimplemented,	usage: seq [-w] [-f format] [-s string] [-t string] [first [incr]] last
+usr/bin/serialver	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/servertool	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/SetFile	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/setregion	EXIT1	0x2000226:#unimplemented,	bootstrap_register(): (os/kern) failure
+usr/bin/sfltool	EXIT0	0x2000226:#unimplemented,	Usage: sfltool csinfo|dumpbtm|archive|clear|resetbtm|resetlist|list|list-info [options] 
+usr/bin/sftp	EXIT1	0x2000226:#unimplemented,	usage: sftp [-46AaCfNpqrv] [-B buffer_size] [-b batchfile] [-c cipher]
+usr/bin/shazam	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/shlock	EXIT1	0x2000226:#unimplemented,	shlock: USAGE: shlock [-du] [-p PID] -f file
+usr/bin/shortcuts	SIG4	0x2000226:#unimplemented,	Assertion failed: (platformBinary), function +[WFActionKitStaticInitializer load], file ActionKit.m,
+usr/bin/showmount	EXIT1	0x2000226:#unimplemented,	showmount: can't resolve host: localhost
+usr/bin/sips	EXIT	0x2000226:#unimplemented,	sips - scriptable image processing system.
+usr/bin/size	EXIT0	0x2000226:#unimplemented,	   text	   data	    bss	    dec	    hex	filename
+usr/bin/smbutil	EXIT1	0x2000226:#unimplemented,	
+usr/bin/snmpbulkget	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpbulkwalk	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpdelta	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpdf	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpget	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpgetnext	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpnetstat	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpset	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpstatus	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmptable	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmptest	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmptranslate	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmptrap	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpusm	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpvacm	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/snmpwalk	EXIT	0x2000226:#unimplemented,	No log handling enabled - using stderr logging
+usr/bin/sntp	EXIT64	0x2000226:#unimplemented,	sntp: Exactly one argument is required: Undefined error: 0
+usr/bin/soelim	EXIT0	0x2000226:#unimplemented,	
+usr/bin/sort	EXIT0	0x2000226:#unimplemented,	sysconf pages: Operation not permitted
+usr/bin/sourcekit-lsp	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/split	EXIT66	0x2000226:#unimplemented,	split: fdopen: Too many open files
+usr/bin/SplitForks	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/sqlite3	EXIT0	0x2000226:#unimplemented,	
+usr/bin/ssh	SIG127	0x2000226:#unimplemented,	No user exists for uid 65534
+usr/bin/ssh-add	EXIT2	0x2000226:#unimplemented,	Could not open a connection to your authentication agent.
+usr/bin/ssh-agent	SIG127	0x2000226:#unimplemented,	ssh-agent: getrlimit: Invalid argument
+usr/bin/ssh-keygen	SIG127	0x2000226:#unimplemented,	No user exists for uid 65534
+usr/bin/ssh-keyscan	EXIT1	0x2000226:#unimplemented,	usage: ssh-keyscan [-46cDHqv] [-f file] [-O option] [-p port] [-T timeout]
+usr/bin/stapler	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/stat	EXIT0		4278190080 20 crw-rw-rw- 1 (0) (0) 20 0 "Nov  9 19:59:39 2026" "Nov  9 19:59:41 2026" "Nov  9 19:59:
+usr/bin/stdbuf	EXIT0	0x2000226:#unimplemented,	
+usr/bin/stringdups	EXIT	0x2000226:#unimplemented,	[invalid usage]: no process id or name specified
+usr/bin/strings	EXIT0	0x2000226:#unimplemented,	
+usr/bin/strip	EXIT	0x2000226:#unimplemented,	Usage: /usr/local/bin/strip <option(s)> in-file(s)
+usr/bin/stz	EXIT0		OVERVIEW: Utility to process streamable archives.
+usr/bin/sum	EXIT0		0 0
+usr/bin/sw_vers	EXIT1	0x2000226:#unimplemented,	**** ERROR **** Unknown error loading system version plist: missing or malformed
+usr/bin/swift	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/swift-inspect	SIG6		dyld[64786]: Library not loaded: /usr/lib/swift/libswiftRemoteMirror.dylib
+usr/bin/swiftc	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/symbols	EXIT	0x2000226:#unimplemented,	You must specify at least one file, pid, or task.
+usr/bin/symbolscache	EXIT	0x2000226:#unimplemented,	symbolscache [global options] <subcommand> [subcmd options] [subcmd args]
+usr/bin/sysdiagnose	EXIT1	0x2000226:#unimplemented,	sysdiagnose must be run as root
+usr/bin/syslog	EXIT0	0x2000226:#unimplemented,	NOTE:  Most system logs have moved to a new logging system.  See log(1) for more information.
+usr/bin/syspolicy_check	EXIT0	0x2000226:#unimplemented,	Must provide a command, see help for more information
+usr/bin/system-override	EXIT64	0x2000226:#unimplemented,	usage: system-override <command>
+usr/bin/systemextensionsctl	EXIT64	0x2000226:#unimplemented,	systemextensionsctl: usage:
+usr/bin/tab2space	EXIT0	0x2000226:#unimplemented,	
+usr/bin/tabs	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/tail	EXIT0	0x2000226:#unimplemented,	
+usr/bin/tailspin	EXIT	0x2000226:#unimplemented,	usage:
+usr/bin/talk	EXIT1	0x2000226:#unimplemented,	usage: talk person [ttyname]
+usr/bin/taskinfo	EXIT77	0x2000226:#unimplemented,	taskinfo: must be run as root, running as uid:65534 euid:65534
+usr/bin/tbtdiagnose	SIG4	0x1000016:#unimplemented,0x100004c:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/bin/tccutil	EXIT64	0x2000226:#unimplemented,	tccutil: Usage: tccutil reset SERVICE [BUNDLE_ID]
+usr/bin/tee	EXIT0	0x2000226:#unimplemented,	
+usr/bin/textutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/tftp	EXIT0	0x2000226:#unimplemented,	
+usr/bin/thermal	EXIT64	0x2000226:#unimplemented,	Usage: thermal command
+usr/bin/tic	EXIT1	0x2000226:#unimplemented,	tic: File name needed.  Usage:
+usr/bin/tidy	EXIT1	0x2000226:#unimplemented,	line 1 column 1 - Warning: inserting missing 'title' element
+usr/bin/tiff2icns	EXIT1	0x2000226:#unimplemented,	Usage: /root/macbins/usr/bin/tiff2icns [-noLarge] infile [outfile]
+usr/bin/tiffutil	EXIT1	0x2000226:#unimplemented,	Usage: tiffutil -none           infile                  [-out outfile]
+usr/bin/time	EXIT0	0x2000226:#unimplemented,	
+usr/bin/timesyncanalyse	EXIT1	0x2000226:#unimplemented,	usage:
+usr/bin/tmdiagnose	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/tmutil	EXIT	0x2000226:#unimplemented,	Usage: tmutil addexclusion [-p|-v] item ...
+usr/bin/tnameserv	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/toe	EXIT	0x2000226:#unimplemented,	agile     	sri agiles
+usr/bin/top	EXIT1	0x2000226:#unimplemented,	libtop_init failed!
+usr/bin/tops	EXIT	0x2000226:#unimplemented,	tops [-help] [-dont] [-semiverbose] [-verbose] [-nocontext] [-nofileinfo]
+usr/bin/touch	EXIT1		usage: touch [-A [-][[hh]mm]SS] [-achm] [-r file] [-t [[CC]YY]MMDDhhmm[.SS]]
+usr/bin/tput	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/tr	EXIT1	0x2000226:#unimplemented,	usage: tr [-Ccsu] string1 string2
+usr/bin/trace	EXIT	0x2000226:#unimplemented,	trace <subcommand> [options] - record system behavior
+usr/bin/trash	EXIT0	0x2000226:#unimplemented,	
+usr/bin/trimforce	EXIT0	0x2000226:#unimplemented,	Usage:
+usr/bin/true	EXIT0		
+usr/bin/truncate	EXIT1		usage: truncate [-c] -s [+|-|%|/]size[K|k|M|m|G|g|T|t] file ...
+usr/bin/trustcachectl	EXIT64	0x2000226:#unimplemented,	please provide a subcommand
+usr/bin/tset	EXIT1	0x2000226:#unimplemented,	tset: standard error: Inappropriate ioctl for device
+usr/bin/tsort	EXIT0	0x2000226:#unimplemented,	
+usr/bin/tty	EXIT1	0x2000226:#unimplemented,	not a tty
+usr/bin/ul	EXIT	0x2000226:#unimplemented,	Name collision 'agile' between
+usr/bin/umtool	EXIT0	0x2000226:#unimplemented,	
+usr/bin/uname	EXIT0	0x2000226:#unimplemented,	Darwin
+usr/bin/uncompress	EXIT1		uncompress: /dev/stdin: Too many open files
+usr/bin/unexpand	EXIT0	0x2000226:#unimplemented,	
+usr/bin/unifdef	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/unifdefall	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/uniq	EXIT0	0x2000226:#unimplemented,	
+usr/bin/units	EXIT1	0x2000226:#unimplemented,	units: can't find units file '/usr/share/misc/units.lib'
+usr/bin/unpack200	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/bin/unvis	EXIT0	0x2000226:#unimplemented,	
+usr/bin/unzip	EXIT	0x2000226:#unimplemented,	UnZip 6.00 of 20 April 2009, by Info-ZIP, with modifications by Apple Inc.
+usr/bin/unzipsfx	EXIT2	0x2000226:#unimplemented,	UnZipSFX 6.00 of 20 April 2009, by Info-ZIP (http://www.info-zip.org).
+usr/bin/update_dyld_shared_cache	EXIT0		
+usr/bin/update_mcdp29xx	EXIT2		/root/macbins/usr/bin/update_mcdp29xx: 1: Syntax error: "(" unexpected
+usr/bin/uptime	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/usbcfwflasher	EXIT2		/root/macbins/usr/bin/usbcfwflasher: 1: Syntax error: "(" unexpected
+usr/bin/usbdiagnose	EXIT0	0x2000226:#unimplemented,	2026-11-09 20:00:04.784 usbdiagnose[66122:101963] USB Prober: error in -refresh at IOMasterPort()
+usr/bin/usdcat	EXIT106	0x2000226:#unimplemented,	inputFiles is required
+usr/bin/usdchecker	EXIT1	0x2000226:#unimplemented,	Error: Either an inputFile or the --dumpRules option must be specified.
+usr/bin/usdcrush	EXIT106	0x2000226:#unimplemented,	inputFile is required
+usr/bin/usdextract	EXIT106	0x2000226:#unimplemented,	inputFile is required
+usr/bin/usdrecord	EXIT106	0x2000226:#unimplemented,	usdFilePath is required
+usr/bin/usdtree	EXIT106	0x2000226:#unimplemented,	inputPath is required
+usr/bin/usdzip	EXIT1	0x2000226:#unimplemented,	No usdz file specified.
+usr/bin/users	EXIT0	0x2000226:#unimplemented,	
+usr/bin/uttype	EXIT	0x2000226:#unimplemented,	usage: uttype [flags] [options] [identifier(s)]
+usr/bin/uucp	EXIT1	0x2000226:#unimplemented,	Usage: /root/macbins/usr/bin/uucp [options] file1 [file2 ...] dest
+usr/bin/uudecode	EXIT1	0x2000226:#unimplemented,	uudecode: stdin: missing or bad "begin" line
+usr/bin/uuencode	EXIT1	0x2000226:#unimplemented,	usage: uuencode [-m] [-o outfile] [infile] remotefile
+usr/bin/uuidgen	EXIT0	0x2000226:#unimplemented,	85F927C6-5ABB-476A-BF63-E5F3BDC93347
+usr/bin/uulog	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/bin/uulog: fopen (/var/log/uucp/Log): Too many open files
+usr/bin/uuname	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/bin/uuname: /private/etc/uucp/sys: fopen: Too many open files
+usr/bin/uupick	EXIT1	0x2000226:#unimplemented,	uupick: Can't get login name
+usr/bin/uustat	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/bin/uustat: mkdir (/var/spool/uucp): Permission denied
+usr/bin/uux	EXIT64	0x2000226:#unimplemented,	Usage: /root/macbins/usr/bin/uux [options] [-] command
+usr/bin/viewdiagnostic	EXIT64	0x2000226:#unimplemented,	Error: Missing expected argument '<file-path>'
+usr/bin/vim	EXIT	0x2000226:#unimplemented,	Vim: Warning: Output is not to a terminal
+usr/bin/vis	EXIT0	0x2000226:#unimplemented,	
+usr/bin/vm_stat	EXIT	0x2000226:#unimplemented,	Mach Virtual Memory Statistics: (page size of 4096 bytes)
+usr/bin/vmmap	EXIT	0x2000226:#unimplemented,	[invalid usage]: no process specified
+usr/bin/vtool	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/w	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/wall	EXIT1	0x2000226:#unimplemented,	wall: can't open temporary file: Too many open files
+usr/bin/wc	EXIT0	0x2000226:#unimplemented,	       0       0       0
+usr/bin/wdutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/bin/what	EXIT1	0x2000226:#unimplemented,	
+usr/bin/whereis	EXIT64	0x2000226:#unimplemented,	usage: whereis [-abmqu] [-BM dir ... -f] program ...
+usr/bin/which	EXIT1	0x2000226:#unimplemented,	usage: which [-as] program ...
+usr/bin/who	EXIT0	0x2000226:#unimplemented,	
+usr/bin/whoami	EXIT0	0x2000226:#unimplemented,	65534
+usr/bin/whois	EXIT64	0x2000226:#unimplemented,	usage: whois [-aAbfgiIklmPQrRS] [-c country-code | -h hostname] [-p port] name ...
+usr/bin/write	EXIT1	0x2000226:#unimplemented,	usage: write user [tty]
+usr/bin/xar	EXIT	0x2000226:#unimplemented,	DEPRECATION WARNING:
+usr/bin/xargs	EXIT0	0x2000226:#unimplemented,	
+usr/bin/xattr	EXIT		Not enough arguments for option -
+usr/bin/xcdebug	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xcode-select	EXIT	0x2000226:#unimplemented,	xcode-select: error: no command option given
+usr/bin/xcodebuild	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xcrun	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xcscontrol	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xcsdiagnose	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xctrace	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xed	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xip	EXIT1	0x2000226:#unimplemented,	Usage: xip [options] --sign <identity> <input-file> [ <input-file> ... ] <output-xip-file>
+usr/bin/xml2man	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/xmlcatalog	EXIT	0x2000226:#unimplemented,	Usage : /root/macbins/usr/bin/xmlcatalog [options] catalogfile entities...
+usr/bin/xmllint	EXIT	0x2000226:#unimplemented,	Usage : /root/macbins/usr/bin/xmllint [options] XMLfiles ...
+usr/bin/xprotect	EXIT0	0x2000226:#unimplemented,	OVERVIEW: A utility for working with XProtect.
+usr/bin/xsltproc	EXIT	0x2000226:#unimplemented,	Usage: /root/macbins/usr/bin/xsltproc [options] stylesheet file [file ...]
+usr/bin/xxd	EXIT0	0x2000226:#unimplemented,	
+usr/bin/yacc	EXIT1	0x2000226:#unimplemented,	xcode-select: error: No developer tools were found and no install could be requested (possibly becau
+usr/bin/zcat	EXIT1		zcat: (stdin): unexpected end of file
+usr/bin/zegrep	EXIT2	0x2000226:#unimplemented,	usage: zegrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/zfgrep	EXIT2	0x2000226:#unimplemented,	usage: zfgrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/zgrep	EXIT2	0x2000226:#unimplemented,	usage: zgrep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+usr/bin/zip	EXITPK-†i]ˇˇˇˇˇˇˇˇ-PKPK-†i]∂0	0x2000226:#unimplemented,	  adding: - (deflated 0%)
+usr/bin/zipcloak	EXIT0	0x2000226:#unimplemented,	
+usr/bin/zipinfo	EXIT	0x2000226:#unimplemented,	ZipInfo 3.00 of 20 April 2009, by Greg Roelofs and the Info-ZIP group.
+usr/bin/zipnote	EXIT0	0x2000226:#unimplemented,	Copyright (c) 1990-2008 Info-ZIP - Type 'zipnote "-L"' for software license.
+usr/bin/zipsplit	EXIT	0x2000226:#unimplemented,	Copyright (c) 1990-2008 Info-ZIP - Type 'zipsplit "-L"' for software license.
+usr/bin/zprint	EXIT1	0x2000226:#unimplemented,	zprint: mach_memory_info: unknown error code
+usr/sbin/ab	EXIT		/root/macbins/usr/sbin/ab: wrong number of arguments
+usr/sbin/ac	EXIT0	0x2000226:#unimplemented,		total        0.00
+usr/sbin/accton	EXIT1	0x2000226:#unimplemented,	accton: Operation not permitted
+usr/sbin/amt	SIG127	0x2000226:#unimplemented,	Please run as audit administrator.
+usr/sbin/appleh13camerad	EXIT		/root/macbins/usr/sbin/appleh13camerad: 8: not found
+usr/sbin/appleh16camerad	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/appsleepd	SIG6	0x2000226:#unimplemented,	Abort trap
+usr/sbin/arp	EXIT1	0x2000226:#unimplemented,	usage: arp [-n] [-i interface] hostname
+usr/sbin/aslmanager	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/audit	SIG127	0x2000226:#unimplemented,	Usage: audit -e | -i | -n | -s | -t | -c
+usr/sbin/auditd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/auditreduce	EXIT0	0x2000226:#unimplemented,	
+usr/sbin/automount	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/avbdeviced	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/bless	EXIT1		Usage: bless [options]
+usr/sbin/BlueTool	EXIT	0x2000226:#unimplemented,	
+usr/sbin/bluetoothaudiod	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/bluetoothd	SIG4	0x2000226:#unimplemented,	com.apple.server.bluetooth: Bluetooth Super Server Robot Destroyer. Host software version MobileBlue
+usr/sbin/BootCacheControl	EXIT	0x2000226:#unimplemented,	missing command
+usr/sbin/BTLEServer	EXIT0	0x2000226:#unimplemented,	sandbox initialization failed: /usr/share/sandbox/BTLEServer.sb: Too many open files
+usr/sbin/BTLEServerAgent	EXIT0	0x2000226:#unimplemented,	
+usr/sbin/cfprefsd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/chat	EXIT2	0x2000226:#unimplemented,	
+usr/sbin/checkgid	EXIT0		
+usr/sbin/chown	EXIT1		usage: chown [-fhnvx] [-R [-H | -L | -P]] owner[:group] file ...
+usr/sbin/chroot	EXIT1	0x2000226:#unimplemented,	usage: chroot [-g group] [-G group,group,...] [-u user] newroot [command]
+usr/sbin/ckksctl	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/coreaudiod	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/createhomedir	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/createhomedir must be executed as root.
+usr/sbin/cron	EXIT1	0x2000226:#unimplemented,	cron: can't open or create /var/run/cron.pid: Permission denied
+usr/sbin/cupsaccept	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/cupsctl	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/cupsfilter	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/ddns-confgen	EXIT0		# To activate this key, place the following in named.conf, and
+usr/sbin/dev_mkdb	EXIT1	0x2000226:#unimplemented,	dev_mkdb: /var/run/dev.tmp: Permission denied
+usr/sbin/DevToolsSecurity	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/distnoted	SIG4	0x2000226:#unimplemented,	2026-11-09 20:00:45.183 distnoted[68272:100157] # distnote server unknown  absolute time: 255.097221
+usr/sbin/dnctl	EXIT64	0x2000226:#unimplemented,	usage: dnctl [options]
+usr/sbin/dot_clean	EXIT1	0x2000226:#unimplemented,	usage: dot_clean  [-fmnpsv] [--keep=[mostrecent|dotbar|native]] [directory ...]
+usr/sbin/dsconfigad	EXIT	0x2000226:#unimplemented,	Usage: dsconfigad -help
+usr/sbin/dsconfigldap	EXIT	0x2000226:#unimplemented,	dsconfigldap: Add or remove LDAP server configurations
+usr/sbin/dseditgroup	EXIT	0x2000226:#unimplemented,	
+usr/sbin/dsenableroot	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	username = root
+usr/sbin/dtrace	EXIT	0x2000226:#unimplemented,	Usage: dtrace [-aACeFHlqSvVwZ] [-arch i386|x86_64] [-b bufsz] [-c cmd] [-D name[=def]]
+usr/sbin/edquota	EXIT1	0x2000226:#unimplemented,	Usage: edquota [-u] [-p username] username ...
+usr/sbin/fcgistarter	EXIT1		usage: fcgistarter -c <command> -p <port> [-i <interface> -N <num>]
+usr/sbin/fdisk	EXIT	0x2000226:#unimplemented,	usage: fdisk [-ieu] [-f mbrboot] [-c cyl -h head -s sect] [-S size] [-r] [-a style] disk
+usr/sbin/filecoordinationd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/firmwarepasswd	EXIT	0x2000226:#unimplemented,	ERROR | main | This tool must be run as root.
+usr/sbin/gpt	EXIT1	0x2000226:#unimplemented,	usage: gpt [-frv] [-p nparts] command [options] device ...
+usr/sbin/graphicssession	EXIT2	0x2000165:#unimplemented,0x2000226:#unimplemented,	getaudit_addr: Function not implemented
+usr/sbin/gssd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/hdik	EXIT1	0x2000226:#unimplemented,	hdik: no image specified
+usr/sbin/htcacheclean	EXIT		htcacheclean -- program for cleaning the disk cache.
+usr/sbin/htdbm	EXIT		htdbm -- program for manipulating DBM password databases.
+usr/sbin/htdigest	EXIT1		Usage: htdigest [-c] passwordfile realm username
+usr/sbin/htpasswd	EXIT		Usage:
+usr/sbin/httpd	EXIT1		httpd: Could not open configuration file /private/etc/apache2/httpd.conf: No such file or directory
+usr/sbin/httxt2dbm	EXIT1		httxt2dbm -- Program to Create DBM Files for use by RewriteMap
+usr/sbin/installer	SIG127	0x2000226:#unimplemented,	Usage: installer [-help] [-dominfo] [-volinfo] [-pkginfo] [-allowUntrusted] [-dumplog]
+usr/sbin/ioalloccount	EXIT71	0x2000226:#unimplemented,	Error: Can't get registry root.
+usr/sbin/ioclasscount	EXIT71	0x2000226:#unimplemented,	Error: Can't get registry root.
+usr/sbin/ioreg	EXIT1	0x2000226:#unimplemented,	ioreg: error: can't obtain I/O Kit's root service.
+usr/sbin/iostat	SIG4	0x1000016:#unimplemented,0x100004c:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/ipconfig	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/usr/sbin/ipconfig <command> <args>
+usr/sbin/kadmin	EXIT1	0x2000226:#unimplemented,	kadmin: krb5_init_context failed: 24
+usr/sbin/kcditto	EXIT		/AppleInternal/Library/BuildRoots/4~CakdugDCHBrtCeUpRYLATtb3gIfuXOsYt-rtKh0/Library/Caches/com.apple
+usr/sbin/kdcsetup	SIG127	0x2000226:#unimplemented,	Must be root to run kdcsetup
+usr/sbin/KernelEventAgent	EXIT1	0x2000226:#unimplemented,	Must be root to run Kernel Event Agent.
+usr/sbin/kextcache	EXIT64	0x2000226:#unimplemented,	No work to do; check options and try again.
+usr/sbin/kextfind	EXIT70	0x2000226:#unimplemented,	No kernel extensions found.
+usr/sbin/kextlibs	EXIT64	0x2000226:#unimplemented,	No kext specified.usage: kextlibs [options] kext
+usr/sbin/kextstat	EXIT71	0x2000226:#unimplemented,	Error communicating with kernel - unknown error code.
+usr/sbin/krbservicesetup	SIG127	0x2000226:#unimplemented,	/root/macbins/usr/sbin/krbservicesetup: you must be root to run this tool
+usr/sbin/ktutil	EXIT1	0x2000226:#unimplemented,	ktutil: krb5_init_context failed: 24
+usr/sbin/languagesetup	EXIT0	0x2000226:#unimplemented,	WARNING: root access required to change system language
+usr/sbin/localemanager	SIG127	0x2000226:#unimplemented,	/root/macbins/usr/sbin/localemanager must be run as root
+usr/sbin/logresolve	EXIT0		
+usr/sbin/lpadmin	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/lpc	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/lpinfo	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/lpmove	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/lsof	EXIT	0x2000226:#unimplemented,	lsof: no pwd entry for UID 0
+usr/sbin/mDNSResponder	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/mDNSResponderHelper	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/mkextunpack	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/usr/sbin/mkextunpack [-v] [-a arch] [-d output_dir] mkextfile
+usr/sbin/mkfile	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/usr/sbin/mkfile [-nv] size[b|k|m|g] filename ...
+usr/sbin/mkpassdb	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/mkpassdb: must be run as root
+usr/sbin/mtree	EXIT1		mtree: invalid root in vwalk
+usr/sbin/ndp	EXIT0	0x2000226:#unimplemented,	
+usr/sbin/netbiosd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/netstat	EXIT	0x2000226:#unimplemented,	netstat: sysctl: net.inet.tcp.pcblist_n: Operation not permitted
+usr/sbin/networksetup	EXIT	0x2000226:#unimplemented,	
+usr/sbin/newsyslog	EXIT1	0x2000226:#unimplemented,	newsyslog: must have root privs
+usr/sbin/nfs4mapid	EXIT1	0x2000226:#unimplemented,	nfs4mapid: Usage: nfs4mapid {-g gid | -u uid} | [-G] { name | guid}
+usr/sbin/nlcontrol	EXIT0	0x2000226:#unimplemented,	Missing command argument.
+usr/sbin/notifyd	EXIT1	0x2000226:#unimplemented,	69543 bootstrap_check_in failed (5)
+usr/sbin/nvram	EXIT1	0x2000226:#unimplemented,	nvram: Error getting the IOMainPort: unknown error code
+usr/sbin/ocspd	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/otctl	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/PasswordService	EXIT1	0x2000226:#unimplemented,	Invalid user. The password service must be run by root (euid=65534, uid=65534).
+usr/sbin/pdisk	EXIT0	0x2000226:#unimplemented,	Top level command (? for help): RC=0
+usr/sbin/pkgutil	EXIT	0x2000226:#unimplemented,	Usage: pkgutil [OPTIONS] [COMMANDS] ...
+usr/sbin/postalias	EXIT1	0x2000226:#unimplemented,	postalias: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/postcat	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/postcat: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/postconf	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/postconf: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/postdrop	EXIT1	0x2000226:#unimplemented,	postdrop: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/postfix	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/postkick	EXIT1	0x2000226:#unimplemented,	postkick: fatal: usage: postkick [-c config_dir] [-v] class service request
+usr/sbin/postlock	EXIT75	0x2000226:#unimplemented,	/root/macbins/usr/sbin/postlock: fatal: usage: /root/macbins/usr/sbin/postlock [-c config_dir] [-l l
+usr/sbin/postlog	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/postmap	EXIT1	0x2000226:#unimplemented,	postmap: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/postmulti	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/postqueue	EXIT69	0x2000226:#unimplemented,	postqueue: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/postsuper	EXIT1	0x2000226:#unimplemented,	postsuper: fatal: use of this command is reserved for the superuser
+usr/sbin/pppd	EXIT2	0x2000226:#unimplemented,	/root/macbins/usr/sbin/pppd: Can't open options file /etc/ppp/options: Too many open files
+usr/sbin/praudit	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/purge	EXIT1	0x2000226:#unimplemented,	Unable to purge disk buffers: Operation not permitted
+usr/sbin/pwd_mkdb	EXIT1	0x2000226:#unimplemented,	usage: pwd_mkdb [-ciNp] [-d directory] [-S cachesize] [-u username] file
+usr/sbin/quotaoff	EXIT1	0x2000226:#unimplemented,	Usage:
+usr/sbin/quotaon	EXIT1	0x2000226:#unimplemented,	Usage:
+usr/sbin/racoon	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/rarpd	EXIT1	0x2000226:#unimplemented,	usage: rarpd -a [ -d -f ]
+usr/sbin/repairHomePermissions	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/repquota	EXIT1	0x2000226:#unimplemented,	Usage:
+usr/sbin/rotatelogs	EXIT		Incorrect number of arguments
+usr/sbin/rpc.lockd	EXIT1	0x2000226:#unimplemented,	Sorry. You are not superuser
+usr/sbin/rpc.statd	EXIT0	0x2000226:#unimplemented,	
+usr/sbin/rpcbind	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/rpcinfo	EXIT1	0x2000226:#unimplemented,	Can't contact rpcbind on localhost
+usr/sbin/rtadvd	EXIT1	0x2000226:#unimplemented,	usage: rtadvd [-dDfMRs] [-c conffile] [-F dumpfile] [-p pidfile] interfaces...
+usr/sbin/sa	EXIT1	0x2000226:#unimplemented,	sa: retrieving process accounting summary: Permission denied
+usr/sbin/screencapture	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/scselect	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/scutil	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/securityd	EXIT1	0x2000226:#unimplemented,	objc[70384]: Class SecCoreAnalytics is implemented in both /System/Library/Frameworks/Security.frame
+usr/sbin/sendmail	EXIT1	0x2000226:#unimplemented,	unknown: fatal: open /etc/postfix/main.cf: No such file or directory
+usr/sbin/setkey	EXIT1	0x2000226:#unimplemented,	usage: setkey [-v] file ...
+usr/sbin/setquota	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/sharing	EXIT	0x2000226:#unimplemented,	Usage:
+usr/sbin/skywalkctl	EXIT64	0x2000226:#unimplemented,	Usage: skywalkctl COMMAND { option | help }
+usr/sbin/slapconfig	EXIT	0x2000226:#unimplemented,	Usage:	/root/macbins/usr/sbin/slapconfig
+usr/sbin/smbd	EXIT71		
+usr/sbin/snmptrapd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/sntpd	EXIT71	0x2000226:#unimplemented,	sntpd: bind: Permission denied
+usr/sbin/softwareupdate	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/spctl	EXIT	0x2000226:#unimplemented,	System Policy Basic Usage:
+usr/sbin/spindump	EXIT77	0x2000226:#unimplemented,	spindump must be run as root when sampling the live system
+usr/sbin/spray	EXIT1	0x2000226:#unimplemented,	usage: spray [-c count] [-l length] [-d delay] host
+usr/sbin/sshd	EXIT1	0x2000226:#unimplemented,	/etc/ssh/sshd_config: Too many open files
+usr/sbin/sso_util	SIG127	0x2000226:#unimplemented,	/root/macbins/usr/sbin/sso_util: you must be root to run this tool
+usr/sbin/sysadminctl	EXIT	0x2000226:#unimplemented,	2026-11-09 20:01:35.164 sysadminctl[70720:100407] Usage: sysadminctl
+usr/sbin/sysctl	EXIT1	0x2000226:#unimplemented,	usage: sysctl [-bdeFhilNnoqtWx] [ -B <bufsize> ] [-f filename] name[=value] ...
+usr/sbin/syslogd	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/system_profiler	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/systemkeychain	EXIT2	0x2000226:#unimplemented,	Usage: systemkeychain -C [passphrase]  # (re)create system root keychain
+usr/sbin/systemsetup	EXIT0	0x2000226:#unimplemented,	You need administrator access to run this tool... exiting!
+usr/sbin/systemsoundserverd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/systemstats	EXIT0	0x2000226:#unimplemented,	
+usr/sbin/taskpolicy	EXIT64	0x2000226:#unimplemented,	Usage: taskpolicy [-x|-X] [-d <policy>] [-g <policy>] [-c <clamp>] [-b] [-t <tier>]
+usr/sbin/tcpdump	EXIT1	0x2000226:#unimplemented,	tcpdump: if_nameindex: No such file or directory
+usr/sbin/traceroute	EXIT1	0x2000226:#unimplemented,	sysctl(net.inet.ip.ttl): No such file or directory
+usr/sbin/traceroute6	EXIT5	0x2000226:#unimplemented,	socket(ICMPv6): Operation not permitted
+usr/sbin/uasysdiagnose	EXIT0	0x2000226:#unimplemented,	### /root/macbins/usr/sbin/uasysdiagnose must be run as root.
+usr/sbin/universalaccessd	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/unsetpassword	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/usernoted	EXIT1	0x2000226:#unimplemented,	
+usr/sbin/uuchk	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/uuchk:/private/etc/uucp/sys: fopen: Too many open files
+usr/sbin/uucico	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/uucico: mkdir (/var/spool/uucp): Permission denied
+usr/sbin/uuconv	EXIT1	0x2000226:#unimplemented,	Usage: /root/macbins/usr/sbin/uuconv -i input-type -o output-type [-p program]
+usr/sbin/uuxqt	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/sbin/uuxqt: mkdir (/var/spool/uucp): Permission denied
+usr/sbin/vifs	EXIT1	0x2000226:#unimplemented,	vifs: need to run as root
+usr/sbin/vipw	EXIT1	0x2000226:#unimplemented,	vipw: /etc/master.passwd: Permission denied
+usr/sbin/vpnd	EXIT3	0x2000226:#unimplemented,	must be root to run /root/macbins/usr/sbin/vpnd, since it is not setuid-root
+usr/sbin/vsdbutil	EXIT1	0x2000226:#unimplemented,	Usage: /root/macbins/usr/sbin/vsdbutil [-a path] | [-c path] [-d path] [-i] [-x path]
+usr/sbin/wfsctl	EXIT0	0x2000226:#unimplemented,	WebDAV File Sharing control utility.
+usr/sbin/WirelessRadioManagerd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/sbin/xartutil	EXIT13	0x2000226:#unimplemented,	xartutil: must be run as root
+usr/sbin/xscertadmin	EXIT	0x2000226:#unimplemented,	xscertadmin - process Certificate Revocation Lists in an OD environment
+usr/sbin/zdump	EXIT0	0x2000226:#unimplemented,	
+usr/sbin/zic	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/adprivacyd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/AdvancedCommandsMigrator	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/AirPlayXPCHelper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/airportd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/alwaysonexclavesd	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/amfid	SIG11	0x2000226:#unimplemented,	Segmentation fault
+usr/libexec/amsdstat	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/aned	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/aneuserd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/aonsensed	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/apfsd	EXIT1		
+usr/libexec/appleaccountd	SIG4	0x2000226:#unimplemented,	appleaccountd/Daemon.swift:38: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/appleh13camerad	EXIT		/root/macbins/usr/libexec/appleh13camerad: 8: not found
+usr/libexec/appleh16camerad	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/appleidsetupd	SIG4	0x2000226:#unimplemented,	AppleIDSetupDaemon/Sandboxing.swift:32: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/applekeystored	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/AppleQEMUGuestAgent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/applessdstatistics	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/AppleVirtualPlatformHIDBridge	EXIT2		/root/macbins/usr/libexec/AppleVirtualPlatformHIDBridge: 1: Syntax error: end of file unexpected (ex
+usr/libexec/arkitd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/asktod	SIG4	0x2000226:#unimplemented,	AskToDaemon/Daemon+Sandbox-macOS.swift:33: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/ASPCarryLog	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/assessmentagent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/assetsubscriptiond	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/atcrtcomm	EXIT2		/root/macbins/usr/libexec/atcrtcomm: 1: Syntax error: word unexpected (expecting ")")
+usr/libexec/atrun	EXIT1	0x2000226:#unimplemented,	atrun: setegid failed: Operation not permitted
+usr/libexec/attach_automation_image	EXIT64	0x2000226:#unimplemented,	usage: attach_automation_image [options ...] automation_image_url
+usr/libexec/attentionawarenessd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/audinstaller	EXIT0	0x2000226:#unimplemented,	2026-11-09 20:01:54.023 audinstaller[71957:100118] AuInstaller: Error on display find = 268435459
+usr/libexec/audioanalyticsd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/audioclocksyncd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/audiomxd	SIG127	0x2000226:#unimplemented,	
+usr/libexec/authopen	EXIT64	0x2000226:#unimplemented,	authopen: no filename specified
+usr/libexec/autofsd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/automation_trampoline	EXIT64	0x2000226:#unimplemented,	usage: automation_trampoline [options ...] [automation_bundle_url]
+usr/libexec/automountd	EXIT2	0x2000226:#unimplemented,	
+usr/libexec/avconferenced	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/backgroundassets.user	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/betaenrollmentagent	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/betaenrollmentd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/biomesyncd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/biometrickitd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/bluetoothuserd	SIG4	0x2000226:#unimplemented,	bluetoothuserd/Daemon.swift:139: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/bootinstalld	EXIT71	0x2000226:#unimplemented,	
+usr/libexec/bootpd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/bubbled	SIG4	0x2000226:#unimplemented,	2026-11-09 20:02:00.132 bubbled[72323:100407] NSTemDir is /var/tmp/
+usr/libexec/cameracaptured	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/captiveagent	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/cc_fips_test	EXIT	0x2000226:#unimplemented,	About to call the FIPS_POST function in the corecrypto.dylib
+usr/libexec/centaurid	EXIT2		/root/macbins/usr/libexec/centaurid: 2: Syntax error: word unexpected (expecting ")")
+usr/libexec/chkpasswd	EXIT1	0x2000226:#unimplemented,	you don't have a login name
+usr/libexec/ciphermld	SIG4	0x2000226:#unimplemented,	ciphermld/DaemonSandbox.swift:128: Fatal error: Failed to get passwd entry for uid 65534
+usr/libexec/colorsync.displayservices	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/colorsyncd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/companiond	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/configd	EXIT77	0x2000226:#unimplemented,	/root/macbins/usr/libexec/configd: permission denied.
+usr/libexec/containermanagerd	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/containermanagerd_system	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/ContainerMigrationService	EXIT69	0x2000226:#unimplemented,	
+usr/libexec/ContinuityCaptureAgent	EXIT	0x2000226:#unimplemented,	
+usr/libexec/corebrightnessd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/corebrightnessdiag	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/corecaptured	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/coredatad	SIG6	0x2000226:#unimplemented,	CoreData: error: Failed to fetch kern.osversion: -1
+usr/libexec/coreduetd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/coreidvd	SIG4	0x2000226:#unimplemented,	Swift/ErrorType.swift:254: Fatal error: Error raised at top level: Error Domain = DIPError Code = -3
+usr/libexec/corercd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/corerepaird	EXIT2		/root/macbins/usr/libexec/corerepaird: 1: Syntax error: "(" unexpected
+usr/libexec/corestoraged	EXIT1	0x2000226:#unimplemented,	ERROR: this must be run as super user.
+usr/libexec/corestoragehelperd	SIG6	0x2000226:#unimplemented,	Abort trap
+usr/libexec/countryd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/create_automation_image_overlay	EXIT64	0x2000226:#unimplemented,	usage: create_automation_image_overlay source_content target_dir [rules ...]
+usr/libexec/cryptexd	SIG6	0x2000226:#unimplemented,	objc[72890]: Class OS_cryptex_base is implemented in both /usr/lib/libcryptex_core.dylib (0x7ffb5c38
+usr/libexec/CSCSupportd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/dasd	EXIT1	0x20001b8:#unimplemented,0x2000226:#unimplemented,	
+usr/libexec/DataDetectorsLocalSources	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/DataDetectorsSourceAccess	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/datastored	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/devicerecoverytool	EXIT64	0x2000226:#unimplemented,	Error: Missing expected argument '--recovery-reason <recovery-reason>'
+usr/libexec/dhcp6d	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/diagnosticd	SIG4	0x1000058:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/diagnosticextensionsd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/diagnosticspushd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/dirhelper	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/dirs_cleaner	EXIT64	0x2000226:#unimplemented,	usage: dirs_cleaner [--init] directory ...
+usr/libexec/diskarbitrationd	EXIT77	0x2000226:#unimplemented,	diskarbitrationd: permission denied.
+usr/libexec/diskimagesiod	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/diskmanagementstartup	SIG4	0x2000226:#unimplemented,	Reporting from diskmanagementstartup
+usr/libexec/displaypolicyd	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/libexec/displaypolicyd: Version: V8.1.10
+usr/libexec/dmd	SIG10	0x2000226:#unimplemented,	Bus error
+usr/libexec/dp2hdmiupdater	EXIT13	0x2000226:#unimplemented,	
+usr/libexec/dprivacyd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/dspluginhelperd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/dtfetchsymbolsd	SIG6		dyld[73342]: Library not loaded: /Library/Apple/System/Library/PrivateFrameworks/Mercury.framework/V
+usr/libexec/duetexpertd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/DumpPanic	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/DumpPanicRecoveryOS	EXIT2		/root/macbins/usr/libexec/DumpPanicRecoveryOS: 
+usr/libexec/efiupdater	EXIT	0x2000226:#unimplemented,	2026-11-09 20:02:17.393 efiupdater[73427:100310] efiupdater 34~18 (Official), built 2026-10-12T01:38
+usr/libexec/eligibilityd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/endpointsecurityd	EXIT35	0x2000226:#unimplemented,	
+usr/libexec/enhancedloggingd	SIG6		dyld[73490]: Library not loaded: /System/Library/PrivateFrameworks/DiagnosticsKit.framework/Versions
+usr/libexec/eoshostd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/fairplaydeviceidentityd	EXIT1	0x2000226:#unimplemented,	Launching fairplaydeviceidentityd
+usr/libexec/FDERecoveryAgent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/feedbackd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/filevaultd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/findmybeaconingd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/findmydevice-user-agent	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/findmydeviced	SIG4	0x2000226:#unimplemented,	objc[73658]: Class LocalizedUnregisterErrorKey is implemented in both /System/Library/PrivateFramewo
+usr/libexec/findmylocateagent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/firmwaresyncd	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/FirmwareUpdateLauncher	SIG123	0x2000226:#unimplemented,	FirmwareUpdateLauncher 34~14944 (Official), built 2026-10-12T01:39:13-0700
+usr/libexec/frauddefensed	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/fskit_agent	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/fskit_helper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/fskitd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/ftp-proxy	EXIT64	0x2000226:#unimplemented,	
+usr/libexec/gamecontrolleragentd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/gamecontrollerd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/gamed	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/GamePolicyAgent	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/gamepolicyd	SIG4	0x2000226:#unimplemented,	gamepolicyd/Daemon.swift:56: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/gamesaved	SIG4	0x2000226:#unimplemented,	gamesaved/main.swift:66: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/getPPDVersion	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/getty	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/gputoolsserviced	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/griddatad	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/handwritingd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/hidd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/historicalaudiod	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/icloudmailagent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/icloudwebd	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/ifcstart	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/inboxupdaterd	EXIT	0x2000226:#unimplemented,	objc[74194]: Class MIBUDeviceStatus is implemented in both /System/Library/PrivateFrameworks/MobileI
+usr/libexec/init_exclavekit	EXIT2		/root/macbins/usr/libexec/init_exclavekit: 
+usr/libexec/init_featureflags	SIG4	0x2000226:#unimplemented,	init_featureflags: shm_open failed: 22
+usr/libexec/inputanalyticsd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/installer-core	EXIT1	0x2000226:#unimplemented,	usage: /root/macbins/usr/libexec/installer-core <tool-name> <package-path> [<destination>]
+usr/libexec/intelligentroutingd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/InternetSharing	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/IOAccelMemoryInfoCollector	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/IOMFB_bics_daemon	EXIT2		/root/macbins/usr/libexec/IOMFB_bics_daemon: 1: Syntax error: word unexpected (expecting ")")
+usr/libexec/ioupsd	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/ippusbd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/java_home	EXIT1	0x2000226:#unimplemented,	The operation couldn\U2019t be completed. Unable to locate a Java Runtime.
+usr/libexec/jetsam_priority	EXIT1	0x2000226:#unimplemented,	Fatal: jetsam_priority must be run as root.
+usr/libexec/kcgend	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/kcproxy	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/kdumpd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/kernelmanager_helper	SIG4	0x2000226:#unimplemented,	kernelmanager_helper/main.swift:20: Fatal error: Failed to enter sandbox: Failed to initialize cache
+usr/libexec/kernelmanagerd	SIG4	0x2000226:#unimplemented,	objc[74552]: Class SimpleKernelExtension is implemented in both /System/Library/Frameworks/KernelMan
+usr/libexec/keybagd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/keyboardservicesd	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	objc[74594]: Class _KSUtilities is implemented in both /System/Library/PrivateFrameworks/KeyboardSer
+usr/libexec/keychainsharingmessagingd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/KeychainStasher	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/knowledge-agent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/kuncd	SIG11	0x100004c:#unimplemented,0x2000226:#unimplemented,	Segmentation fault
+usr/libexec/languageassetd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/lightsoutmanagementd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/linkd	EXIT	0x2000226:#unimplemented,	objc[74741]: Class _TtC17AppIntents_SQLite12TableBuilder is implemented in both /System/Library/Priv
+usr/libexec/locate.bigram	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/locate.code	EXIT1	0x2000226:#unimplemented,	usage: locate.code common_bigrams < list > squozen_list
+usr/libexec/locationaccessstored	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/locationd	EXIT	0x2000226:#unimplemented,	objc[74825]: Class CMLogItemInternal is implemented in both /System/Library/Frameworks/CoreMotion.fr
+usr/libexec/logd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/logd_helper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/logd_reporter	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/loginitemregisterd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/logkextloadsd	EXIT0		
+usr/libexec/lsd	SIG4		Illegal instruction
+usr/libexec/makewhatis	EXIT1	0x2000226:#unimplemented,	makewhatis: /usr/share/man/whatis.tmp: Permission denied
+usr/libexec/managedeventsd	SIG4	0x2000226:#unimplemented,	managedeventsd/DMCSandboxUtilities.swift:24: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/mc_notifier	EXIT2	0x2000226:#unimplemented,	
+usr/libexec/mcxalr	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mdmclient	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mediacontinuityd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/metrickitd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/micactivityd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/microstackshot	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/milod	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/misagent	EXIT	0x2000226:#unimplemented,	objc[75193]: Class MobileIdentityService is implemented in both /usr/lib/libmis.dylib (0x7ff95c832d4
+usr/libexec/mlhostd	SIG4	0x100002b:#unimplemented,0x20001ee:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mlruntimed	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/mmaintenanced	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/mobile_obliterator	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mobile_storage_proxy	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mobileactivationd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mobileassetd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/MobileAssetEarlyBootTask	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/MobileGestaltHelper	SIG6	0x2000226:#unimplemented,	Abort trap
+usr/libexec/mobilerepaird	EXIT2		/root/macbins/usr/libexec/mobilerepaird: 1: Syntax error: ")" unexpected
+usr/libexec/MobileStorageMounter	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/modelmanagerd	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/mount_url	EXIT1	0x2000226:#unimplemented,	Usage: mount_url [-n] [-rw] [-o options] url node
+usr/libexec/MSUEarlyBootTask	SIG4	0x2000226:#unimplemented,	=========================MSUEarlyBootTask: Running on reboot==========================
+usr/libexec/msutil	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/MTLAssetUpgraderD	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/multiversed	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/NANDTaskScheduler	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/natpmpd	SIG127	0x2000226:#unimplemented,	Usage: natpmpd [-d] [-k mssclamp] [-l logfile][-x/y privIfName] pubIfName
+usr/libexec/naturallanguaged	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/neagent	EXIT	0x2000226:#unimplemented,	objc[75635]: Class NEBloomFilter is implemented in both /usr/lib/libnetworkextension.dylib (0x7ff85d
+usr/libexec/nearbyd	EXIT	0x2000226:#unimplemented,	objc[75656]: Class PRRangingClientExportedObject is implemented in both /System/Library/PrivateFrame
+usr/libexec/nehelper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/nesessionmanager	SIG4	0x2000226:#unimplemented,	objc[75698]: Class NEAgentHotspotExtension is implemented in both /System/Library/Frameworks/Network
+usr/libexec/netbootdisk	EXIT1	0x2000226:#unimplemented,	/root/macbins/usr/libexec/netbootdisk: must be run as root
+usr/libexec/networkserviceproxy	EXIT	0x2000226:#unimplemented,	objc[75740]: Class NSPPrivateAccessTokenChallenge is implemented in both /System/Library/PrivateFram
+usr/libexec/nexusd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/nfcd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/nlcd	EXIT104	0x2000226:#unimplemented,	
+usr/libexec/notification_proxy	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/NRDUpdated	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/nsurlsessiond	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/ntalkd	EXIT124	0x2000226:#unimplemented,	
+usr/libexec/NVMeAgent	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/od_user_homes	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/odproxyd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/online-auth-agent	EXIT	0x2000226:#unimplemented,	objc[75982]: Class SQLDB is implemented in both /usr/lib/libmis.dylib (0x7ff95c832f70) and /root/mac
+usr/libexec/opendirectoryd	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/osaapplet	EXIT64	0x2000226:#unimplemented,	
+usr/libexec/ospredictiond	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/otherbsd	EXIT78	0x2000226:#unimplemented,	otherbsd cannot be run directly.
+usr/libexec/path_helper	EXIT0	0x2000226:#unimplemented,	PATH="/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/root/bin"; export PATH;
+usr/libexec/pboard	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/pcapd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/pcsstatus	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/peakpowermanagerd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/perfpowermetricd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/PerfPowerServices	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/PerfPowerServicesExtended	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/pfd	EXIT2	0x2000226:#unimplemented,	
+usr/libexec/pkd	SIG6		dyld[76276]: Library not loaded: /System/Library/PrivateFrameworks/PlugInKitDaemon.framework/Version
+usr/libexec/pkreporter	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/PlistBuddy	EXIT1	0x2000226:#unimplemented,	Usage: PlistBuddy [-cxlh] <file.plist>
+usr/libexec/powerdatad	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/powerexperienced	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/powerlogHelperd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/PowerUIAgent	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/prng_seedctl	EXIT15	0x2000226:#unimplemented,	kern.prng.user_reseed_count: (-1) (1) Operation not permitted
+usr/libexec/proactived	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/proactiveeventtrackerd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/productutil	EXIT1	0x2000226:#unimplemented,	productutil: error: input product archive must be specified with --package.
+usr/libexec/promotedcontentd	SIG4	0x2000226:#unimplemented,	objc[76518]: Class APPolicyInstrumentation is implemented in both /System/Library/PrivateFrameworks/
+usr/libexec/psfupdater	SIG11		Segmentation fault
+usr/libexec/ptpcamerad	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/rapportd	EXIT	0x2000226:#unimplemented,	objc[76581]: Class RPNFCTransaction is implemented in both /System/Library/PrivateFrameworks/Rapport
+usr/libexec/relatived	EXIT1	0x2000226:#unimplemented,	objc[76602]: Class RMConnectionEndpoint is implemented in both /System/Library/Frameworks/CoreMotion
+usr/libexec/remindd	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/remotecompositorclientd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/remotectl	EXIT	0x2000226:#unimplemented,	usage: remotectl list
+usr/libexec/remoted	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/remotesoftwareupdated	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/replayd	EXIT	0x2000226:#unimplemented,	objc[76728]: Class RPReportingAgent is implemented in both /System/Library/Frameworks/ScreenCaptureK
+usr/libexec/ReportMemoryException	SIG127	0x2000226:#unimplemented,	Error: This service may only be launched by launchd.
+usr/libexec/retimerd	EXIT2		/root/macbins/usr/libexec/retimerd: 
+usr/libexec/rootless-init	EXIT0		
+usr/libexec/routined	EXIT124	0x2000226:#unimplemented,	routined was not launchd by launchd.
+usr/libexec/rpc.rquotad	EXIT2	0x2000226:#unimplemented,	
+usr/libexec/rpcsvchost	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/rtcreportingd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/runningboardd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/sandboxd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/scsid	EXIT0	0x1000028:#unimplemented,0x2000226:#unimplemented,	
+usr/libexec/sdfwupdater	SIG127	0x2000226:#unimplemented,	
+usr/libexec/searchpartyd	SIG4	0x2000226:#unimplemented,	objc[76993]: Class SPDelegatedShareImportResult is implemented in both /System/Library/PrivateFramew
+usr/libexec/searchpartyuseragent	SIG4	0x2000226:#unimplemented,	objc[77014]: Class SPDelegatedShareImportContext is implemented in both /System/Library/PrivateFrame
+usr/libexec/secd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/secinitd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/security-sysdiagnose	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/securityd_system	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/securityuploadd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/seld	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/sensingpredictd	SIG4	0x2000226:#unimplemented,	sensingpredictd/SandboxUtils.swift:30: Fatal error: Unable to read _CS_DARWIN_USER_CACHE_DIR!
+usr/libexec/seputil	EXIT2		/root/macbins/usr/libexec/seputil: cannot open : No such file or directory
+usr/libexec/seserviced	EXIT1	0x2000226:#unimplemented,	objc[77204]: Class PTClassicKey is implemented in both /System/Library/PrivateFrameworks/SEService.f
+usr/libexec/sftp-server	EXIT1	0x2000226:#unimplemented,	No user found for uid 65534
+usr/libexec/sharingd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/SidecarDisplayAgent	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/SidecarRelay	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/signpost_reporter	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/siriknowledged	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/slapconfig-keygen	SIG11	0x2000226:#unimplemented,	Segmentation fault
+usr/libexec/slapd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/smb-migrate-preferences	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/smb-sync-preferences	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/smcDiagnose	EXIT	0x2000226:#unimplemented,	ERROR: Failed to open SMC data port.
+usr/libexec/smcupdater	EXIT3	0x2000226:#unimplemented,	Error getting boardid.
+usr/libexec/smd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/snmpd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/spindump_agent	EXIT1	0x2000226:#unimplemented,	couldn't find spindump port
+usr/libexec/sportsd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/spotlightknowledged.graph	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/spotlightknowledged.importer	SIG4	0x100002b:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/spotlightknowledged.updater	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/srp-mdns-proxy	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/ssdupdater	SIG127	0x2000226:#unimplemented,	
+usr/libexec/ssh-apple-pkcs11	SIG127	0x2000226:#unimplemented,	No user exists for uid 65534
+usr/libexec/ssh-keysign	SIG127	0x2000226:#unimplemented,	getpwuid failed
+usr/libexec/ssh-pkcs11-helper	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/ssh-sk-helper	SIG127	0x2000226:#unimplemented,	
+usr/libexec/sshd-auth	SIG127		sshd-auth should not be executed directly
+usr/libexec/sshd-keygen-wrapper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/sshd-session	SIG127		sshd-session should not be executed directly
+usr/libexec/startupdiskhelper	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/StorageDEHelper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/storagekitd	EXIT	0x2000226:#unimplemented,	objc[77866]: Class SKStateTransitionEntry is implemented in both /System/Library/PrivateFrameworks/S
+usr/libexec/studentd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/swcd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/swiftuitraced	SIG6		dyld[77929]: Library not loaded: /System/Library/PrivateFrameworks/SwiftUITracingSupport.framework/V
+usr/libexec/swtransparency-sysdiagnose	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/swtransparencyd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/symptomsd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/symptomsd-diag	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/symptomsd-distributed	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/sysdiagnose_helper	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/sysdiagnosed	EXIT1	0x2000226:#unimplemented,	Error: sysdiagnosed should only be invoked by launchd
+usr/libexec/sysmond	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/syspolicyd	EXIT	0x2000226:#unimplemented,	objc[78118]: Class SPSamplingTasking is implemented in both /System/Library/PrivateFrameworks/System
+usr/libexec/sysstatuscheck	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/systemstats_boot	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/tailspind	SIG4	0x2000226:#unimplemented,	objc[78181]: Class TSPSaveMeasurements is implemented in both /usr/lib/libtailspin.dylib (0x7ff95c8d
+usr/libexec/taskgated	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/taskgated-helper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/teslad	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/testmanagerd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/textcomposerd	EXIT5	0x2000226:#unimplemented,	
+usr/libexec/textcontextd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/textunderstandingd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/tftpd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/thermald	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/thermalmonitord	SIG4	0x1000016:#unimplemented,0x2000226:#unimplemented,	2026-11-09 20:03:54.493 thermalmonitord[78391:100159] sysctlbyname(hw.model) failed: Operation not p
+usr/libexec/timed	SIG4	0x2000226:#unimplemented,	objc[78412]: Class TMTimeZone is implemented in both /System/Library/PrivateFrameworks/CoreTime.fram
+usr/libexec/tipsd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/toolkitd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/TouchBarServer	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/tracd	EXIT1	0x2000226:#unimplemented,	2026-11-09 20:03:56.263 tracd[78496:102025] Trusted Accessory Daemon (V1, rev-7)
+usr/libexec/transparency-sysdiagnose	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/transparencyd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/transparencyStaticKey	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/triald	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/triald_system	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/trustd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/trustdFileHelper	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/tzd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/tzinit	EXIT2	0x2000226:#unimplemented,	tzinit: Cannot parse version string .1.0, results.size() = 0: Too many open files
+usr/libexec/tzlinkd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/tznotify	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/uarpassetmanagerd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/uarpd	EXIT	0x2000226:#unimplemented,	objc[78780]: Class UARPMetaDataPersonalizationNonFTABPayload is implemented in both /usr/lib/updater
+usr/libexec/uarphidd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/uarppersonalizationd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/ucupdate	EXIT1	0x2000226:#unimplemented,	usage:
+usr/libexec/undoServerAppDNSPrefs	SIG127	0x2000226:#unimplemented,	preference file name was not passed in on the command line
+usr/libexec/usbctelemetryd	EXIT0	0x2000226:#unimplemented,	
+usr/libexec/usbcupdater	EXIT13	0x2000226:#unimplemented,	2026-11-09 20:04:03.083 usbcupdater[78906:100158] Error reading plist: No files to support boardID: 
+usr/libexec/usbnotificationagent	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/usbpowerd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/UserEventAgent	EXIT1	0x2000226:#unimplemented,	This program is not meant to be run directly.
+usr/libexec/usermanagerd	SIG4	0x2000226:#unimplemented,	objc[78990]: Class UMLibNotifyProvider is implemented in both /System/Library/PrivateFrameworks/User
+usr/libexec/usermanagerhelper	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/vbiosupdater	SIG11		Segmentation fault
+usr/libexec/videosubscriptionsd	EXIT1	0x2000226:#unimplemented,	objc[79053]: Class VSPersistentUserAccount is implemented in both /System/Library/Frameworks/VideoSu
+usr/libexec/wallpaperexportd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/warmd	EXIT64	0x2000226:#unimplemented,	warmd: ERROR: must be run as root.
+usr/libexec/warmd_agent	SIG6	0x2000226:#unimplemented,	Abort trap
+usr/libexec/watchdogd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/wifianalyticsd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/wifiFirmwareLoader	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/wifip2pd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/wifivelocityd	SIG4	0x100002b:#unimplemented,0x20001ee:#unimplemented,0x2000226:#unimplemented,	objc[79221]: Class W5ActivityManager is implemented in both /System/Library/PrivateFrameworks/WiFiVe
+usr/libexec/wspd	SIG127	0x2000226:#unimplemented,	
+usr/libexec/x11-select	EXIT64	0x2000226:#unimplemented,	x11-select <path>
+usr/libexec/xartstorageremoted	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/xpcproxy	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/xpcroleaccountd	EXIT64	0x2000226:#unimplemented,	
+usr/libexec/xprotectd	SIG4	0x2000226:#unimplemented,	Illegal instruction
+usr/libexec/xscertd	EXIT1	0x2000226:#unimplemented,	
+usr/libexec/xscertd-helper	SIG4	0x2000226:#unimplemented,	Illegal instruction
