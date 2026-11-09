@@ -419,7 +419,7 @@ int cmain(void)
 
 	/* Mach traps */
 	{ u64 task = dmach(28, 0, 0, 0, 0, 0, 0), host = dmach(29, 0, 0, 0, 0, 0, 0), rp = dmach(26, 0, 0, 0, 0, 0, 0), th = dmach(27, 0, 0, 0, 0, 0, 0);
-	  check("task_self_trap, host_self_trap, mach_reply_port, thread_self_trap give names", task == 0x103 && host == 0x203 && rp != 0 && th != 0 && rp != dmach(26, 0, 0, 0, 0, 0, 0), rp);
+	  check("task_self_trap, host_self_trap, mach_reply_port, thread_self_trap give names", task == 0x203 && host == 0x1d03 && rp != 0 && th != 0 && rp != dmach(26, 0, 0, 0, 0, 0, 0), rp);
 	  { u64 addr = 0; i64 kr = dmach(10, (i64)task, (i64)&addr, 65536, 1, 0, 0);
 	    check("mach_vm_allocate (anywhere)", kr == 0 && addr != 0, kr);
 	    if (kr == 0) { *(volatile char *)addr = 5; check("  the memory is usable", *(volatile char *)addr == 5, 0);
@@ -432,7 +432,7 @@ int cmain(void)
 	  { unsigned pn = 0; i64 kr = dmach(16, (i64)task, 1, (i64)&pn, 0, 0, 0);
 	    check("mach_port_allocate (receive right)", kr == 0 && pn != 0, kr);
 	    kr = dmach(21, (i64)task, pn, pn, 20, 0, 0); check("mach_port_insert_right (MAKE_SEND)", kr == 0, kr);
-	    { unsigned rp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); unsigned msg[10] = { 19, 40, pn, rp, 0, 77, 0xcafe, 0xbabe, 0x1234, 0x5678 }; unsigned rcv[16]; int k;
+	    { unsigned rp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); unsigned msg[10] = { 19 | (21 << 8), 40, pn, rp, 0, 77, 0xcafe, 0xbabe, 0x1234, 0x5678 }; unsigned rcv[16]; int k;
 	      for (k = 0; k < 16; k++) rcv[k] = 0;
 	      kr = dmach7(31, (i64)msg, 1, 40, 0, 0, 0, 0); check("mach_msg send (header, id 77, 16 bytes of data)", kr == 0, kr);
 	      kr = dmach7(31, (i64)rcv, 2, 0, 64, pn, 0, 0); check("mach_msg receive: the same message", kr == 0 && rcv[1] == 40 && rcv[5] == 77 && rcv[6] == 0xcafe && rcv[9] == 0x5678, kr);
@@ -441,7 +441,33 @@ int cmain(void)
 	      msg[2] = 0x5555; kr = dmach7(31, (i64)msg, 1, 40, 0, 0, 0, 0); check("mach_msg send to a name that is no port is MACH_SEND_INVALID_DEST", kr == 0x10000003, kr);
 	      msg[2] = pn; dmach7(31, (i64)msg, 1, 40, 0, 0, 0, 0);
 	      kr = dmach7(31, (i64)rcv, 2, 0, 16, pn, 0, 0); check("mach_msg receive with a buffer that is too small is MACH_RCV_TOO_LARGE", kr == 0x10004004, kr); }
-	    kr = dmach(19, (i64)task, pn, 1, -1, 0, 0); check("mach_port_mod_refs (receive, -1) destroys the port", kr == 0, kr); } }
+	    kr = dmach(19, (i64)task, pn, 1, -1, 0, 0); check("mach_port_mod_refs (receive, -1) destroys the port", kr == 0, kr);
+	  /* between processes: the special port 4 (bootstrap) is set by a message to the task port, the child gets it at fork and sends through it */
+	  { unsigned P = 0, rp2, req[13], rcv2[16]; i64 kr2; int k;
+	    dmach(16, (i64)task, 1, (i64)&P, 0, 0, 0); dmach(21, (i64)task, P, P, 20, 0, 0); rp2 = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0);
+	    for (k = 0; k < 13; k++) req[k] = 0; for (k = 0; k < 16; k++) rcv2[k] = 0;
+	    req[0] = 0x80000000u | 19 | (21 << 8); req[1] = 52; req[2] = (unsigned)task; req[3] = rp2; req[5] = 3410; req[6] = 1; req[7] = P; req[9] = 20 << 16; req[12] = 4;
+	    kr2 = dmach7(31, (i64)req, 3, 52, 64, rp2, 2000, 0); check("task_set_special_port (id 3410) with a port descriptor: the reply says success", kr2 == 0 && ((rcv2[0] = 0), 1), kr2);
+	    /* the reply is in req (the same buffer was used for both: send then receive) */
+	    check("  reply id 3510, return code 0", req[5] == 3510 && req[8] == 0, req[5]);
+	    { i64 ch = S(SYS_fork, 0, 0, 0, 0, 0, 0);
+	      if (ch == 0) { unsigned crp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0), q[10]; for (k = 0; k < 10; k++) q[k] = 0;
+		      q[0] = 19 | (21 << 8); q[1] = 36; q[2] = 0x203; q[3] = crp; q[5] = 3409; q[8] = 4;
+		      if (dmach7(31, (i64)q, 3, 36, 40, crp, 3000, 0) == 0 && q[5] == 3509 && q[7] != 0) { unsigned msg2[7] = { 19, 28, q[7], 0, 0, 99, 0xdead }; dmach7(31, (i64)msg2, 1, 28, 0, 0, 0, 0); S(SYS_exit, 0, 0, 0, 0, 0, 0); }
+		      S(SYS_exit, 1, 0, 0, 0, 0, 0); }
+	      kr2 = dmach7(31, (i64)rcv2, 2 | 0x100, 0, 64, P, 4000, 0);
+	      check("a message from the child, through the bootstrap port it inherited, arrives (id 99, data 0xdead)", kr2 == 0 && rcv2[5] == 99 && rcv2[6] == 0xdead, kr2);
+	      { int st = -1; S(SYS_wait4, ch, &st, 0, 0, 0, 0); check("  the child ended well (it found the special port)", st == 0, st); } }
+	    /* a right in a message: the send right to Q goes to P in a complex message and comes out as a name with the disposition PORT_SEND */
+	    { unsigned Q = 0, cm[10] = { 0x80000000u | 19, 40, P, 0, 0, 55, 1, 0, 0, 20 << 16 }, rv[16]; for (k = 0; k < 16; k++) rv[k] = 0;
+	      dmach(16, (i64)task, 1, (i64)&Q, 0, 0, 0); cm[7] = Q;
+	      kr2 = dmach7(31, (i64)cm, 1, 40, 0, 0, 0, 0); check("mach_msg with a port descriptor (MAKE_SEND of Q) is sent", kr2 == 0, kr2);
+	      kr2 = dmach7(31, (i64)rv, 2, 0, 64, P, 0, 0); check("  received: the descriptor holds the name of Q with the disposition 17 (PORT_SEND)", kr2 == 0 && rv[7] == Q && ((rv[9] >> 16) & 0xff) == 17, rv[9]);
+	      { unsigned m3[7] = { 19, 28, Q, 0, 0, 56, 0x77 }, r3[16]; for (k = 0; k < 16; k++) r3[k] = 0; kr2 = dmach7(31, (i64)m3, 1, 28, 0, 0, 0, 0); kr2 |= dmach7(31, (i64)r3, 2, 0, 64, Q, 0, 0); check("  and the right works: a message to Q arrives", kr2 == 0 && r3[5] == 56, kr2); } }
+	    /* dead ports: the send to a port whose receive right is gone fails */
+	    { unsigned D2 = 0, dm[7] = { 19, 28, 0, 0, 0, 1, 2 }; dmach(16, (i64)task, 1, (i64)&D2, 0, 0, 0); dmach(21, (i64)task, D2, D2, 20, 0, 0); dm[2] = D2; dmach(19, (i64)task, D2, 1, -1, 0, 0);
+	      kr2 = dmach7(31, (i64)dm, 1, 28, 0, 0, 0, 0); check("a send to a port that was destroyed is MACH_SEND_INVALID_DEST", kr2 == 0x10000003, kr2); } }
+	  } }
 
 	/* fgetattrlist; sysctl hw.tbfrequency */
 	{ struct { unsigned short n, res; unsigned cmn, vol, dir, file, fork; } fal = { 5, 0, 0x8, 0, 0, 0x200, 0 }; static char fb[128]; int fdf = (int)S(SYS_open, "/tmp/dsc/a", 0, 0, 0, 0, 0);

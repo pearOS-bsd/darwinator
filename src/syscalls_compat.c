@@ -505,12 +505,6 @@ darwin_eperm(struct thread *td __unused, struct darwin_args *uap __unused)
 }
 
 static int
-darwin_einval(struct thread *td __unused, struct darwin_args *uap __unused)
-{
-	return (EINVAL);
-}
-
-static int
 darwin_ptrace(struct thread *td, struct darwin_args *uap)	/* PT_DENY_ATTACH (31) is accepted: nobody may attach anyway; the rest is not supported */
 {
 	if ((int)uap->a[0] == 31 /* PT_DENY_ATTACH */ || (int)uap->a[0] == 0 /* PT_TRACE_ME */) {
