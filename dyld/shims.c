@@ -376,10 +376,14 @@ struct dftsent {
 	long fts_number; void *fts_pointer; char *fts_accpath, *fts_path;
 	int fts_errno, fts_symfd; unsigned short fts_pathlen, fts_namelen; uint64_t fts_ino;
 	int32_t fts_dev; uint16_t fts_nlink; short fts_level; unsigned short fts_info, fts_flags, fts_instr;
-	struct darwin_stat64 *fts_statp; FTSENT *orig; FTS *owner; struct dftsent *all, *hnext; struct darwin_stat64 st; size_t cap;
-	char fts_name[1];
+	struct darwin_stat64 *fts_statp;
+	char fts_name[1];				/* at 104, right after fts_statp, as on Darwin */
 };
 _Static_assert(offsetof(struct dftsent, fts_statp) == 96, "FTSENT of Darwin");
+_Static_assert(offsetof(struct dftsent, fts_name) == 104, "FTSENT of Darwin");
+/* what is kept for a copy lies in front of it (the program sees only the Darwin part) */
+struct dftspriv { FTSENT *orig; FTS *owner; struct dftsent *all, *hnext; size_t cap; struct darwin_stat64 st; };
+#define	DPRIV(d)	((struct dftspriv *)(d) - 1)
 static struct dftsent *dfts_all, *dfts_hash[4096];
 static int (*dfts_compar)(const struct dftsent **, const struct dftsent **);
 static struct dftsent *
@@ -388,20 +392,22 @@ dfts_conv(FTS *h, FTSENT *e, int deep)
 	/* one copy per FreeBSD entry (they live from the first visit of a directory to its last): the program compares entries by address (the parent of a file is the entry of the directory it saw before) */
 	struct dftsent *d, **b; size_t n;
 	if (e == NULL) return (NULL);
-	n = sizeof(*d) + e->fts_namelen + 1;
+	n = sizeof(struct dftspriv) + sizeof(struct dftsent) + e->fts_namelen + 1;
 	b = &dfts_hash[((uintptr_t)e >> 4) & 4095];
-	for (d = *b; d != NULL; d = d->hnext) if (d->orig == e && d->owner == h) break;
-	if (d != NULL && d->cap < n) { d = NULL; }	/* the address was used again for a longer name: a new copy (the old one stays until fts_close) */
+	for (d = *b; d != NULL; d = DPRIV(d)->hnext) if (DPRIV(d)->orig == e && DPRIV(d)->owner == h) break;
+	if (d != NULL && DPRIV(d)->cap < n) d = NULL;	/* the address was used again for a longer name: a new copy (the old one stays until fts_close) */
 	if (d == NULL) {
-		if ((d = calloc(1, n)) == NULL) return (NULL);
-		d->cap = n; d->orig = e; d->owner = h; d->all = dfts_all; dfts_all = d; d->hnext = *b; *b = d;
+		struct dftspriv *pv = calloc(1, n);
+		if (pv == NULL) return (NULL);
+		d = (struct dftsent *)(pv + 1);
+		pv->cap = n; pv->orig = e; pv->owner = h; pv->all = dfts_all; dfts_all = d; pv->hnext = *b; *b = d;
 		d->fts_number = e->fts_number; d->fts_pointer = e->fts_pointer;	/* the program's own (fts_number, fts_pointer) stay in the copy from then on */
 	}
 	d->fts_accpath = e->fts_accpath; d->fts_path = e->fts_path;
 	d->fts_errno = e->fts_errno; d->fts_symfd = e->fts_symfd; d->fts_pathlen = e->fts_pathlen; d->fts_namelen = e->fts_namelen;
 	d->fts_ino = e->fts_ino; d->fts_dev = (int32_t)e->fts_dev; d->fts_nlink = (uint16_t)e->fts_nlink; d->fts_level = e->fts_level;
 	d->fts_info = e->fts_info; d->fts_flags = e->fts_flags; d->fts_instr = e->fts_instr;
-	if (e->fts_statp != NULL) { st_out(e->fts_statp, &d->st); d->fts_statp = &d->st; } else d->fts_statp = NULL;
+	if (e->fts_statp != NULL) { st_out(e->fts_statp, &DPRIV(d)->st); d->fts_statp = &DPRIV(d)->st; } else d->fts_statp = NULL;
 	memcpy(d->fts_name, e->fts_name, e->fts_namelen); d->fts_name[e->fts_namelen] = '\0';
 	d->fts_parent = (deep && e->fts_parent != NULL && e->fts_parent->fts_level >= 0) ? dfts_conv(h, e->fts_parent, 0) : NULL;
 	d->fts_link = NULL;
@@ -423,13 +429,13 @@ dw_fts_open(char *const *argv, int options, int (*compar)(const struct dftsent *
 }
 static struct dftsent *dw_fts_read(FTS *h) { return (dfts_conv(h, fts_read(h), 1)); }
 static struct dftsent *dw_fts_children(FTS *h, int instr) { return (dfts_conv(h, fts_children(h, instr), 1)); }
-static int dw_fts_set(FTS *h, struct dftsent *d, int instr) { return (fts_set(h, d != NULL ? d->orig : NULL, instr)); }
+static int dw_fts_set(FTS *h, struct dftsent *d, int instr) { return (fts_set(h, d != NULL ? DPRIV(d)->orig : NULL, instr)); }
 static int
 dw_fts_close(FTS *h)
 {
 	struct dftsent **pp = &dfts_all, *d; int i;
-	for (i = 0; i < 4096; i++) { struct dftsent **hp = &dfts_hash[i]; while (*hp != NULL) { if ((*hp)->owner == h) *hp = (*hp)->hnext; else hp = &(*hp)->hnext; } }
-	while ((d = *pp) != NULL) { if (d->owner == h) { *pp = d->all; free(d); } else pp = &d->all; }
+	for (i = 0; i < 4096; i++) { struct dftsent **hp = &dfts_hash[i]; while (*hp != NULL) { if (DPRIV(*hp)->owner == h) *hp = DPRIV(*hp)->hnext; else hp = &DPRIV(*hp)->hnext; } }
+	while ((d = *pp) != NULL) { if (DPRIV(d)->owner == h) { *pp = DPRIV(d)->all; free(DPRIV(d)); } else pp = &DPRIV(d)->all; }
 	return (fts_close(h));
 }
 

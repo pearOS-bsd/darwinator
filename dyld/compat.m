@@ -1078,6 +1078,43 @@ UTTypeCopyPreferredTagWithClass(CFStringRef uti, CFStringRef tagClass)
 	return (u != nil && [u hasPrefix:@"dyn."] && [u length] > 4) ? (CFTypeRef)[[u substringFromIndex:4] retain] : NULL;
 }
 
+
+/* +[NSString stringWithUTF8String:""] is the empty string on the Mac; here it gave nil (a file without extension became a nil extension and "Tried to add nil to set" in GrandPerspective). */
+static IMP o_swu8;
+static id
+w_swu8(id self, SEL _cmd, const char *c)
+{
+	id r = ((id (*)(id, SEL, const char *))o_swu8)(self, _cmd, c);
+	return (r == nil && c != NULL && *c == '\0') ? @"" : r;
+}
+__attribute__((constructor)) static void
+emptystring_init(void)
+{
+	Class k = NSClassFromString(@"NSString"); Method m;
+	if (k == Nil || getenv("MACHRUN_NOEMPTYSTRFIX")) return;
+	(void)[k class];
+	if ((m = class_getClassMethod(k, @selector(stringWithUTF8String:))) != NULL) o_swu8 = method_setImplementation(m, (IMP)w_swu8);
+}
+
+
+/* -[NSString pathExtension] is never nil on the Mac (@"" without an extension). */
+static IMP o_pathExt;
+static id
+w_pathExt(id self, SEL _cmd)
+{
+	id r = ((id (*)(id, SEL))o_pathExt)(self, _cmd);
+	if (r == nil && getenv("MACHRUN_DEBUG_UT")) fprintf(stderr, "machrun: pathExtension was nil\n");
+	return r == nil ? @"" : r;
+}
+__attribute__((constructor)) static void
+pathext_init(void)
+{
+	Class k = NSClassFromString(@"NSString"); Method m;
+	if (k == Nil || getenv("MACHRUN_NOPATHEXTFIX")) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(pathExtension))) != NULL) o_pathExt = method_setImplementation(m, (IMP)w_pathExt);
+}
+
 /* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
 static const char *(*class_image_path)(Class);
 static IMP o_bundleForClass;
