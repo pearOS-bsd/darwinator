@@ -20,3 +20,12 @@ the page size is 16 KB, `kern.version`, the Mach port names (`task_self` 0x203, 
 (ours are 4-aligned: the program only uses `d_reclen`), `siginfo_t` is 104 bytes on the Mac (80 here: the fields up to `si_addr` are the same).
 
 `dtruss` cannot start applications with SIP on ("Operation not permitted"), so no trace of the applications' system calls was made.
+
+## The probe, second run (process structures) and the trace of Keka
+
+The offsets of `kinfo_proc` (`extern_proc` 296 bytes: `p_flag` 32, `p_stat` 36, `p_pid` 40, `p_comm` 243, `p_pgrp` 264; `eproc` 352 bytes: `e_pcred` 16, `e_ucred` 120, `e_ppid` 264, `e_login` 320),
+of `proc_bsdinfo` (136) and `proc_taskinfo` (96) were read from `reference-macos27-arm64.txt` and are used by `src/syscalls_proc.c`.
+
+`dtruss` of Keka (SIP off; 14043 calls, 53 distinct) showed what a real application asks of the kernel: `kdebug_trace64` and `kdebug_trace_string` (11000 of 14000: tracing, here accepted and ignored), `bsdthread_ctl`,
+`workq_kernreturn` (answers 0), `gettid` (ESRCH on the Mac: fixed, it was EINVAL here), `kevent_id` and `kevent_qos` (the workloops and the queues of libdispatch: implemented), `ulock_wait2`, `psynch_mutexwait`
+and `psynch_mutexdrop`, `getattrlist`, `fstatfs64`, `getdirentries64`, `crossarch_trap` (ENOTSUP, as on the Mac), `csrctl` (EPERM), `__mac_syscall` (0), `fsgetpath` (found a path on the Mac: ENOTSUP here), `proc_info`.

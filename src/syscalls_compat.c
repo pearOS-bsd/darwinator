@@ -493,6 +493,18 @@ darwin_enotsup(struct thread *td __unused, struct darwin_args *uap __unused)
 }
 
 static int
+darwin_esrch(struct thread *td __unused, struct darwin_args *uap __unused)
+{
+	return (ESRCH);
+}
+
+static int
+darwin_eperm(struct thread *td __unused, struct darwin_args *uap __unused)
+{
+	return (EPERM);
+}
+
+static int
 darwin_einval(struct thread *td __unused, struct darwin_args *uap __unused)
 {
 	return (EINVAL);
@@ -645,7 +657,10 @@ static const struct {
 	E(478, 3, darwin_ok,		"bsdthread_ctl"),
 	E(482, 0, darwin_ok,		"thread_selfusage"),
 	E(186, 3, darwin_enotsup,	"thread_selfcounts"),
-	E(286, 2, darwin_einval,	"gettid"),
+	E(286, 2, darwin_esrch,		"gettid"),
+	E(38,  3, darwin_enotsup,	"crossarch_trap"),
+	E(483, 3, darwin_eperm,		"csrctl"),
+	E(381, 3, darwin_ok,		"__mac_syscall"),
 	/* what APFS and HFS+ have and this system has not: ENOTSUP, the answer that programs check for */
 	E(205, 2, darwin_enotsup,	"undelete"),
 	E(221, 5, darwin_enotsup,	"setattrlist"),

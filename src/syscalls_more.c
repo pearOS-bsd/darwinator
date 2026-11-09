@@ -603,16 +603,20 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 static int
 darwin_sysctl(struct thread *td, struct darwin_args *uap)
 {
-	int mib[2] = { -1, -1 }, error;
+	int mib[4] = { -1, -1, -1, -1 }, error;
 	u_int namelen = (u_int)uap->a[1], i;
 
 	if (namelen < 2 || namelen > 4)
 		return (ENOENT);
-	if (uap->a[4] != 0 && uap->a[5] != 0)
-		return (EPERM);			/* read-only */
-	error = copyin((void *)uap->a[0], mib, sizeof(mib));
+	error = copyin((void *)uap->a[0], mib, namelen * sizeof(int));
 	if (error != 0)
 		return (error);
+	if (mib[0] == 1 && mib[1] == 14)		/* CTL_KERN, KERN_PROC */
+		return (darwin_sysctl_proc(td, mib, namelen, (void *)uap->a[2], (void *)uap->a[3], uap->a[4] != 0 && uap->a[5] != 0));
+	if (mib[0] == 1 && mib[1] == 49 && namelen == 3)	/* KERN_PROCARGS2 */
+		return (darwin_sysctl_procargs2(td, mib[2], (void *)uap->a[2], (void *)uap->a[3]));
+	if (uap->a[4] != 0 && uap->a[5] != 0)
+		return (EPERM);			/* read-only */
 	if (mib[0] == 0 && mib[1] == 3)
 		return (ENOENT);		/* name to number: programs use sysctlbyname */
 	for (i = 0; i < nitems(darwin_sysctls); i++)
@@ -763,6 +767,7 @@ darwin_more_syscalls_init(void)
 	darwin_posix_syscalls_init();		/* syscalls_posix.c */
 	darwin_sync_syscalls_init();		/* syscalls_sync.c */
 	darwin_compat_syscalls_init();		/* syscalls_compat.c */
+	darwin_proc_syscalls_init();		/* syscalls_proc.c */
 }
 
 /* open_nocancel (398) is the open of syscalls.c: filled by darwin_syscalls_init */

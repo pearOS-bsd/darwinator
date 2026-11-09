@@ -146,8 +146,14 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 
 	for (i = 0; i < count; i++) {
 		memset(&d, 0, sizeof(d));
-		error = copyin(a->in, &d, a->size);
-		if (error != 0)
+		if (a->size == 72) {			/* kevent_qos_s: ident 0, filter 8, flags 10, qos 12, udata 16, fflags 24, xflags 28, data 32, ext[4] 40 */
+			char raw[72];
+
+			if ((error = copyin(a->in, raw, 72)) != 0)
+				return (error);
+			memcpy(&d.ident, raw, 8); memcpy(&d.filter, raw + 8, 2); memcpy(&d.flags, raw + 10, 2); memcpy(&d.udata, raw + 16, 8);
+			memcpy(&d.fflags, raw + 24, 4); memcpy(&d.data, raw + 32, 8); memcpy(d.ext, raw + 40, 16);
+		} else if ((error = copyin(a->in, &d, a->size)) != 0)
 			return (error);
 		a->in += a->size;
 		memset(&kevp[i], 0, sizeof(kevp[i]));
@@ -180,7 +186,15 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 		d.udata = (uint64_t)kevp[i].udata;
 		d.ext[0] = kevp[i].ext[0];
 		d.ext[1] = kevp[i].ext[1];
-		error = copyout(&d, a->out, a->size);
+		if (a->size == 72) {
+			char raw[72];
+
+			memset(raw, 0, sizeof(raw));
+			memcpy(raw, &d.ident, 8); memcpy(raw + 8, &d.filter, 2); memcpy(raw + 10, &d.flags, 2); memcpy(raw + 16, &d.udata, 8);
+			memcpy(raw + 24, &d.fflags, 4); memcpy(raw + 32, &d.data, 8); memcpy(raw + 40, d.ext, 16);
+			error = copyout(raw, a->out, 72);
+		} else
+			error = copyout(&d, a->out, a->size);
 		if (error != 0)
 			return (error);
 		a->out += a->size;
@@ -220,6 +234,61 @@ darwin_kevent64(struct thread *td, struct darwin_args *uap)
 	return (darwin_kevent_common(td, (int)uap->a[0], (char *)uap->a[1], (int)uap->a[2], (char *)uap->a[3],
 	    (int)uap->a[4], (const void *)uap->a[6], 48));
 }
+
+
+/* kevent_qos(fd, changelist, nchanges, eventlist, nevents, data_out, data_available, flags) and kevent_id(id, ... same): the events are 72 bytes; fd -1 and the ids of workloops are
+ * kqueues of the process that are made when first used (a descriptor that the program does not know of).  There is no timeout: KEVENT_FLAG_IMMEDIATE (1) asks not to wait. */
+static struct { struct proc *p; pid_t pid; int64_t id; int fd; } kq_tab[64];
+static struct mtx kq_mtx;
+MTX_SYSINIT(darwin_kq, &kq_mtx, "darwin kq", MTX_DEF);
+
+static int
+kq_for(struct thread *td, int64_t id, int *fdp)
+{
+	struct proc *p = td->td_proc;
+	int i, free_i = -1, error;
+	struct kqueue_args ka;
+
+	mtx_lock(&kq_mtx);
+	for (i = 0; i < (int)nitems(kq_tab); i++) {
+		if (kq_tab[i].p == p && kq_tab[i].pid == p->p_pid && kq_tab[i].id == id) {
+			*fdp = kq_tab[i].fd;
+			mtx_unlock(&kq_mtx);
+			return (0);
+		}
+		if (kq_tab[i].p == NULL && free_i < 0)
+			free_i = i;
+	}
+	mtx_unlock(&kq_mtx);
+	if (free_i < 0)
+		return (EMFILE);
+	if ((error = sys_kqueue(td, &ka)) != 0)
+		return (error);
+	mtx_lock(&kq_mtx);
+	kq_tab[free_i].p = p; kq_tab[free_i].pid = p->p_pid; kq_tab[free_i].id = id; kq_tab[free_i].fd = td->td_retval[0];
+	*fdp = td->td_retval[0];
+	mtx_unlock(&kq_mtx);
+	return (0);
+}
+
+static int
+darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
+{
+	int fd = byid ? 0 : (int)uap->a[0], error;
+	uint32_t flags = (uint32_t)uap->a[7];
+	struct timespec zero = { 0, 0 };
+	struct dkev_arg a = { .in = (char *)uap->a[1], .out = (char *)uap->a[3], .size = 72 };
+	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
+
+	if (byid || fd == -1) {
+		if ((error = kq_for(td, byid ? (int64_t)uap->a[0] : -1, &fd)) != 0)
+			return (error);
+	}
+	return (kern_kevent(td, fd, (int)uap->a[2], (int)uap->a[4], &ops, (flags & 1) ? &zero : NULL));
+}
+
+static int darwin_kevent_qos(struct thread *td, struct darwin_args *uap) { return (darwin_kevent_qos_common(td, uap, false)); }
+static int darwin_kevent_id(struct thread *td, struct darwin_args *uap) { return (darwin_kevent_qos_common(td, uap, true)); }
 
 /* ---- signals ---- */
 
@@ -624,6 +693,8 @@ static const struct {
 	E(362, 0, sys_kqueue,		AUE_KQUEUE,		"kqueue"),
 	E(363, 6, darwin_kevent,	AUE_NULL,		"kevent"),
 	E(369, 7, darwin_kevent64,	AUE_NULL,		"kevent64"),
+	E(374, 8, darwin_kevent_qos,	AUE_NULL,		"kevent_qos"),
+	E(375, 8, darwin_kevent_id,	AUE_NULL,		"kevent_id"),
 	E(46,  3, darwin_sigaction,	AUE_SIGACTION,		"sigaction"),
 	E(53,  2, sys_sigaltstack,	AUE_SIGALTSTACK,	"sigaltstack"),
 	E(52,  1, darwin_sigpending,	AUE_SIGPENDING,		"sigpending"),
