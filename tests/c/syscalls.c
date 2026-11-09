@@ -252,7 +252,9 @@ int cmain(void)
 	{ static struct dstatfs sf; r = S(SYS_statfs64, "/", &sf, 0, 0, 0, 0);
 	  check("statfs64 /", r == 0 && sf.bsize > 0 && sf.blocks > 0 && sf.fstype[0] && sf.on[0] == '/', r);
 	  fd = (int)S(SYS_open, "/", 0, 0, 0, 0, 0); r = S(SYS_fstatfs64, fd, &sf, 0, 0, 0, 0);
-	  check("fstatfs64", r == 0 && sf.blocks > 0, r); S(SYS_close, fd, 0, 0, 0, 0, 0); }
+	  check("fstatfs64", r == 0 && sf.blocks > 0, r);
+	  r = S(157, "/", &sf, 0, 0, 0, 0); check("statfs (157)", r == 0 && sf.blocks > 0 && sf.on[0] == '/', r);
+	  r = S(158, fd, &sf, 0, 0, 0, 0); check("fstatfs (158)", r == 0 && sf.blocks > 0, r); S(SYS_close, fd, 0, 0, 0, 0, 0); }
 
 	/* signals' mask, limits, ids */
 	{ unsigned set = 1U << 29, old = 0, cur = 0; r = S(SYS_sigprocmask, 1, &set, &old, 0, 0, 0);

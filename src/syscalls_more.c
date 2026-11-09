@@ -702,6 +702,8 @@ static const struct {
 	E(344, 4, darwin_getdirentries64, AUE_GETDIRENTRIES,	"getdirentries64"),
 	E(345, 2, darwin_statfs64,	AUE_STATFS,		"statfs64"),
 	E(346, 2, darwin_fstatfs64,	AUE_FSTATFS,		"fstatfs64"),
+	E(157, 2, darwin_statfs64,	AUE_STATFS,		"statfs"),	/* the same layout as statfs64 */
+	E(158, 2, darwin_fstatfs64,	AUE_FSTATFS,		"fstatfs"),
 	/* memory, signals, waiting */
 	E(65,  3, darwin_msync,		AUE_MSYNC,		"msync"),
 	E(75,  3, sys_madvise,		AUE_MADVISE,		"madvise"),
