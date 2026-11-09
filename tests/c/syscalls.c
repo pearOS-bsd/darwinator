@@ -573,6 +573,28 @@ int cmain(void)
 	    for (k = 0; k < 64; k++) rb[k] = 0;
 	    kr5 = dmach7(31, (i64)rb, 2 | 0x100, 0, 256, N, 500, 0);
 	    check("  the no-more-senders notification (id 70) arrives when the last send right goes", kr5 == 0 && rb[5] == 70, kr5 * 1000 + rb[5]); }
+	  /* the port routines of the task port as messages: mach_port_allocate (3204), get_refs (3207), destroy (3205), get_srights (3222) */
+	  { unsigned q[64], N2 = 0; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr5;
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 36; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3204; q[8] = 1;
+	    kr5 = dmach7(31, (i64)q, 3, 36, 256, rpm, 2000, 0); N2 = q[9];
+	    check("mach_port_allocate (id 3204) as a message gives a name", kr5 == 0 && q[5] == 3304 && q[8] == 0 && N2 != 0, q[8]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 40; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3207; q[8] = N2; q[9] = 1;
+	    kr5 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0);
+	    check("mach_port_get_refs (id 3207, RECEIVE) is 1", kr5 == 0 && q[8] == 0 && q[9] == 1, q[9]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 36; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3222; q[8] = N2;
+	    kr5 = dmach7(31, (i64)q, 3, 36, 256, rpm, 2000, 0);
+	    check("mach_port_get_srights (id 3222) is 0", kr5 == 0 && q[8] == 0 && q[9] == 0, q[9]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 36; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3205; q[8] = N2;
+	    kr5 = dmach7(31, (i64)q, 3, 36, 256, rpm, 2000, 0);
+	    check("mach_port_destroy (id 3205)", kr5 == 0 && q[8] == 0, q[8]);
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 40; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3207; q[8] = N2; q[9] = 1;
+	    kr5 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0);
+	    check("  the name is gone afterwards (KERN_INVALID_NAME 15)", kr5 == 0 && q[8] == 15, q[8]); }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
