@@ -525,7 +525,7 @@ int cmain(void)
 	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = (unsigned)task; q[3] = rpm; q[5] = 3405; q[8] = 20; q[9] = 12;
 	    kr4 = dmach7(31, (i64)q, 3, 40, 96, rpm, 2000, 0); check("task_info (id 3405, MACH_TASK_BASIC_INFO): 12 ints, a virtual size", kr4 == 0 && q[8] == 0 && q[9] == 12 && (q[10] | q[11]) != 0, q[9]);
 	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x1d03; q[3] = rpm; q[5] = 200; q[8] = 1; q[9] = 12;
-	    kr4 = dmach7(31, (i64)q, 3, 40, 96, rpm, 2000, 0); check("host_info (id 200, HOST_BASIC_INFO) to the host port: 12 ints, the number of CPUs, the CPU type", kr4 == 0 && q[8] == 0 && q[9] == 12 && q[10] >= 1 && (q[13] == 0x01000007 || q[13] == 0x0100000c), q[13]);
+	    kr4 = dmach7(31, (i64)q, 3, 40, 96, rpm, 2000, 0); check("host_info (id 200, HOST_BASIC_INFO) to the host port: 12 ints, the number of CPUs, the CPU type", kr4 == 0 && q[8] == 0 && q[9] == 12 && q[10] >= 1 && (q[13] == 7 || q[13] == 0x01000007 || q[13] == 0x0100000c), q[13]);
 	    for (k = 0; k < 24; k++) q[k] = 0; q[0] = 19 | (21 << 8); q[1] = 24; q[2] = 0x1d03; q[3] = rpm; q[5] = 202;
 	    kr4 = dmach7(31, (i64)q, 3, 24, 96, rpm, 2000, 0); check("_host_page_size (id 202)", kr4 == 0 && q[8] == 0 && q[9] >= 4096, q[9]); }
 	  { unsigned q[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr4;

@@ -20,6 +20,7 @@
 #include <sys/namei.h>
 #include <sys/fcntl.h>
 #include <sys/proc.h>
+#include <sys/signalvar.h>
 #include <sys/resourcevar.h>
 #include <sys/sysent.h>
 #include <sys/vnode.h>
@@ -502,6 +503,11 @@ macho_imgact(struct image_params *imgp)
 	imgp->proc->p_osrel = osreldate;
 	imgp->proc->p_fctl0 = 0;
 	imgp->proc->p_elf_flags = 0;
+	if (darwin_stop) {
+		PROC_LOCK(imgp->proc);
+		kern_psignal(imgp->proc, SIGSTOP);
+		PROC_UNLOCK(imgp->proc);
+	}
 out:
 	if (dvp != NULL) {
 		VOP_UNLOCK(dvp);

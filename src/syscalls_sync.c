@@ -249,22 +249,53 @@ kr_of(struct thread *td, int error)
 	return (0);
 }
 
+#define	VM_FLAGS_OVERWRITE	0x4000
+
+/* anonymous memory: at the address (fixed; with VM_FLAGS_OVERWRITE over what is there), or anywhere, aligned to mask + 1 (a power of two) when a mask is given */
 static int
-mach_anon(struct thread *td, uint64_t *addrp, size_t size, int flags, int prot, int usereg_addr)
+mach_anon(struct thread *td, uint64_t *addrp, size_t size, int flags, int prot, uint64_t mask)
 {
 	struct mmap_args ma;
-	uint64_t addr = 0;
+	uint64_t addr = 0, align = mask + 1, a2;
 	int error;
 
-	(void)usereg_addr;
 	if ((error = copyin((void *)addrp, &addr, sizeof(addr))) != 0)
 		return (error);
-	ma.addr = (flags & VM_FLAGS_ANYWHERE) ? NULL : (void *)addr;
-	ma.len = size;
 	ma.prot = prot;
-	ma.flags = MAP_ANON | MAP_PRIVATE | ((flags & VM_FLAGS_ANYWHERE) ? 0 : MAP_FIXED);
 	ma.fd = -1;
 	ma.pos = 0;
+	if (!(flags & VM_FLAGS_ANYWHERE)) {
+		ma.addr = (void *)addr;
+		ma.len = size;
+		ma.flags = MAP_ANON | MAP_PRIVATE | MAP_FIXED | ((flags & VM_FLAGS_OVERWRITE) ? 0 : MAP_EXCL);
+		if ((error = sys_mmap(td, &ma)) != 0)
+			return (error);
+		return (0);
+	}
+	if (mask != 0 && (align & (align - 1)) == 0 && align > PAGE_SIZE) {
+		ma.addr = NULL;
+		ma.len = size + align;
+		ma.flags = MAP_ANON | MAP_PRIVATE;
+		if ((error = sys_mmap(td, &ma)) != 0)
+			return (error);
+		addr = (uint64_t)td->td_retval[0];
+		a2 = roundup2(addr, align);
+		if (a2 > addr) {					/* the part before the aligned start, and the part after the end */
+			struct munmap_args mu = { .addr = (void *)addr, .len = a2 - addr };
+
+			(void)sys_munmap(td, &mu);
+		}
+		if (addr + size + align > a2 + size) {
+			struct munmap_args mu = { .addr = (void *)(a2 + size), .len = addr + size + align - (a2 + size) };
+
+			(void)sys_munmap(td, &mu);
+		}
+		addr = a2;
+		return (copyout(&addr, (void *)addrp, sizeof(addr)));
+	}
+	ma.addr = NULL;
+	ma.len = size;
+	ma.flags = MAP_ANON | MAP_PRIVATE;
 	if ((error = sys_mmap(td, &ma)) != 0)
 		return (error);
 	addr = (uint64_t)td->td_retval[0];
@@ -280,7 +311,7 @@ darwin_mach_vm_allocate(struct thread *td, struct darwin_args *uap)	/* (target, 
 static int
 darwin_mach_vm_map(struct thread *td, struct darwin_args *uap)		/* (target, *addr, size, mask, flags, cur_protection): anonymous memory only */
 {
-	return (kr_of(td, mach_anon(td, (uint64_t *)uap->a[1], (size_t)uap->a[2], (int)uap->a[4], (int)uap->a[5] & 7, 0)));
+	return (kr_of(td, mach_anon(td, (uint64_t *)uap->a[1], (size_t)uap->a[2], (int)uap->a[4], (int)uap->a[5] & 7, uap->a[3])));
 }
 
 static int
