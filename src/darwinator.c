@@ -60,6 +60,7 @@ darwin_sysvec_init(void)
 	native_set_syscall_retval = native->sv_set_syscall_retval;
 	darwin_sysvec.sv_set_syscall_retval = darwin_set_syscall_retval;
 	darwin_sysvec.sv_flags = (native->sv_flags & ~(SV_ABI_MASK | SV_SIGSYS)) | SV_ABI_UNDEF;
+	darwin_sigframe_init(&darwin_sysvec);
 	darwin_sysvec.sv_coredump = NULL;	/* a core file written with the ELF layout would be wrong */
 }
 

@@ -47,6 +47,12 @@ darwin_fetch_syscall_args(struct thread *td)
 }
 
 void
+darwin_sigframe_init(struct sysentvec *sv __unused)
+{
+	/* the handler gets the ucontext of FreeBSD on arm64 */
+}
+
+void
 darwin_machdep_syscalls_init(void)
 {
 	/* TPIDRRO_EL0 (the TSD base) is set through a Mach trap on arm64: not implemented yet */

@@ -477,11 +477,11 @@ struct darwin_attrlist {
 	DA_FILE_DATALENGTH | DA_FILE_DATAALLOCSIZE)
 
 static int
-darwin_getattrlist(struct thread *td, struct darwin_args *uap)
+attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, const char *path)
 {
 	struct darwin_attrlist al;
-	struct stat sb;
-	char path[MAXPATHLEN], *out, *p;
+	struct stat sb = *sbp;
+	char *out, *p;
 	const char *name;
 	size_t bufsize = (size_t)uap->a[3], len, namelen, copy;
 	uint32_t cmn, file, objtype;
@@ -496,12 +496,6 @@ darwin_getattrlist(struct thread *td, struct darwin_args *uap)
 	file = al.fileattr;
 	if ((cmn & ~DA_CMN_SUPPORTED) || al.volattr || al.dirattr || al.forkattr || (file & ~DA_FILE_SUPPORTED))
 		return (EINVAL);
-	error = copyinstr((void *)uap->a[0], path, sizeof(path), NULL);
-	if (error != 0)
-		return (error);
-	error = kern_statat(td, ((uint32_t)uap->a[4] & 1) ? AT_SYMLINK_NOFOLLOW : 0, AT_FDCWD, path, UIO_SYSSPACE, &sb);
-	if (error != 0)
-		return (error);
 	if (S_ISDIR(sb.st_mode) && file != 0)
 		return (EINVAL);			/* file attributes of a directory */
 	name = strrchr(path, '/');
@@ -567,6 +561,53 @@ darwin_getattrlist(struct thread *td, struct darwin_args *uap)
 	return (error);
 }
 
+
+static int
+darwin_getattrlist(struct thread *td, struct darwin_args *uap)
+{
+	char path[MAXPATHLEN];
+	struct stat sb;
+	int error = copyinstr((void *)uap->a[0], path, sizeof(path), NULL);
+
+	if (error != 0)
+		return (error);
+	error = kern_statat(td, ((uint32_t)uap->a[4] & 1) ? AT_SYMLINK_NOFOLLOW : 0, AT_FDCWD, path, UIO_SYSSPACE, &sb);
+	return (error != 0 ? error : attr_fill(td, uap, &sb, path));
+}
+
+/* fgetattrlist(fd, alist, buffer, size, options): the name comes from the path of the vnode when the kernel knows one */
+static int
+darwin_fgetattrlist(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_args a = *uap;
+	struct stat sb;
+	int error = kern_fstat(td, (int)uap->a[0], &sb);
+
+	a.a[0] = 0; a.a[1] = uap->a[1]; a.a[2] = uap->a[2]; a.a[3] = uap->a[3]; a.a[4] = uap->a[4];
+	return (error != 0 ? error : attr_fill(td, &a, &sb, "?"));
+}
+/* sendto to an AF_INET6 address: the family byte of the program's sockaddr is 30; it is FreeBSD's 28 for the duration of the call (and put back) */
+static int
+darwin_sendto6(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_args a = *uap;
+	uint8_t fam = 0, fix = AF_INET6;
+	char *addr = (char *)uap->a[4];
+	bool swapped = false;
+	int error;
+
+	a.a[3] = darwin_msgflags_pub((int)a.a[3]);
+	if (addr != NULL && uap->a[5] >= 2 && copyin(addr + 1, &fam, 1) == 0 && fam == DARWIN_AF_INET6 && copyout(&fix, addr + 1, 1) == 0)
+		swapped = true;
+	error = sys_sendto(td, (struct sendto_args *)&a);
+	if (swapped) {
+		uint8_t back = DARWIN_AF_INET6;
+
+		(void)copyout(&back, addr + 1, 1);
+	}
+	return (error);
+}
+
 /* ---- the entries ---- */
 
 static const struct {
@@ -577,6 +618,7 @@ static const struct {
 } darwin_event[] = {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
 	E(220, 5, darwin_getattrlist,	AUE_GETATTRLIST,	"getattrlist"),
+	E(228, 5, darwin_fgetattrlist,	AUE_GETATTRLIST,	"fgetattrlist"),
 	E(14,  3, darwin_mknod,		AUE_MKNOD,		"mknod"),
 	E(347, 3, darwin_getfsstat64,	AUE_GETFSSTAT,		"getfsstat64"),
 	E(362, 0, sys_kqueue,		AUE_KQUEUE,		"kqueue"),
@@ -596,6 +638,8 @@ static const struct {
 	E(404, 3, darwin_accept,	AUE_ACCEPT,		"accept_nocancel"),
 	E(32,  3, darwin_getsockname,	AUE_GETSOCKNAME,	"getsockname"),
 	E(31,  3, darwin_getpeername,	AUE_GETPEERNAME,	"getpeername"),
+	E(133, 6, darwin_sendto6,	AUE_SENDTO,		"sendto"),
+	E(413, 6, darwin_sendto6,	AUE_SENDTO,		"sendto_nocancel"),
 	E(29,  6, darwin_recvfrom,	AUE_RECVFROM,		"recvfrom"),
 	E(403, 6, darwin_recvfrom,	AUE_RECVFROM,		"recvfrom_nocancel"),
 #undef E
