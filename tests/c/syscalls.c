@@ -609,6 +609,13 @@ int cmain(void)
 	    q[0] = 19 | (21 << 8); q[1] = 40; q[2] = 0x103; q[3] = rpm; q[5] = 3612; q[8] = 3; q[9] = 10;
 	    kr5 = dmach7(31, (i64)q, 3, 40, 256, rpm, 2000, 0);
 	    check("thread_info (THREAD_BASIC_INFO): 10 ints", kr5 == 0 && q[8] == 0 && q[9] == 10, q[9]); }
+	  /* mach_vm_region (id 4816): the region at an address of this program (the layout of the reply is read from the .defs, not checked on a Mac) */
+	  { unsigned q[64]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; i64 kr5; u64 here = (u64)&k;
+	    for (k = 0; k < 64; k++) q[k] = 0;
+	    q[0] = 19 | (21 << 8); q[1] = 48; q[2] = (unsigned)task; q[3] = rpm; q[5] = 4816; q[8] = (unsigned)here; q[9] = (unsigned)(here >> 32); q[10] = 9; q[11] = 9;
+	    kr5 = dmach7(31, (i64)q, 3, 48, 256, rpm, 2000, 0);
+	    { u64 st = ((u64)q[13] << 32) | q[12], sz = ((u64)q[15] << 32) | q[14];
+	      check("mach_vm_region (id 4816): a region that contains the stack, readable and writable", kr5 == 0 && q[5] == 4916 && q[16] == 9 && st <= here && here < st + sz && (q[17] & 3) == 3, q[17]); } }
 	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
 	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
 	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
