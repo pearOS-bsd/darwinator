@@ -1001,6 +1001,8 @@ w_bundleForClass(id self, SEL _cmd, Class k)
 			NSString *c = [parts objectAtIndex:i];
 			if ([c hasSuffix:@".bundle"] || [c hasSuffix:@".framework"] || [c hasSuffix:@".app"]) {
 				NSString *dir = [NSString pathWithComponents:[parts subarrayWithRange:NSMakeRange(0, i + 1)]];
+				if ([c hasSuffix:@".app"] && [c isEqualToString:[[[NSBundle mainBundle] bundlePath] lastPathComponent]])
+					return [NSBundle mainBundle];	/* the program's own classes: the wrapped bundle (with the English.lproj that merges Base.lproj), not the Mac layout it was wrapped from */
 				id b = [NSBundle bundleWithPath:dir];
 				if (b != nil) return b;
 				break;
