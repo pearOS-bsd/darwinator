@@ -25,6 +25,14 @@ struct darwin_args {
 #define	DARWIN_MACHDEP_BASE	1024
 #define	DARWIN_MACH_BASE	1088
 extern int darwin_debug;
+extern int darwin_dyld;			/* kern.darwinator.dyld: run a dynamic Mach-O with the dyld that the file names */
+
+/* what the stack of a program that starts in dyld has: the mach_header of the program, then argc, argv, envp, and the "apple" strings (offsets in the string area) */
+struct darwin_auxargs {
+	uint64_t	mh;
+	int		n;
+	uint32_t	off[8];
+};
 
 /* The Darwin system call number space: the top byte of the number selects a class. */
 #define	DARWIN_CLASS_MACH	1	/* Mach traps */
@@ -36,6 +44,9 @@ int	darwin_oflags(int);				/* Darwin open flags -> FreeBSD's */
 int	darwin_errno(int);				/* FreeBSD errno -> Darwin errno */
 void	darwin_sigframe_init(struct sysentvec *);	/* per architecture: the signal frame in Darwin's layout (amd64) */
 void	darwin_machdep_syscalls_init(void);		/* per architecture */
+void	darwin_commpage_init(void);			/* per architecture: the "comm page" that Darwin maps in every process (amd64) */
+int	darwin_commpage_map(struct vmspace *);	/* maps it into a new process */
+void	darwin_stack_init(struct sysentvec *);	/* where the stack of a Darwin process is */
 dev_t	darwin_to_dev(int32_t);				/* Darwin dev_t (major << 24 | minor) <-> FreeBSD's */
 int32_t	darwin_from_dev(dev_t);
 struct statfs;

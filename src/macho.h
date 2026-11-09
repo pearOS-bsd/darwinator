@@ -12,6 +12,7 @@
 #define	CPU_TYPE_ARM64		(12U | CPU_ARCH_ABI64)
 
 #define	MH_EXECUTE		2
+#define	MH_DYLINKER		7
 
 #define	LC_REQ_DYLD		0x80000000U
 #define	LC_SEGMENT_64		0x19

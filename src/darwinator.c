@@ -23,10 +23,63 @@ MALLOC_DEFINE(M_DARWIN, "darwinator", "Mach-O loader and Darwin system call laye
 
 int darwin_debug;
 SYSCTL_NODE(_kern, OID_AUTO, darwinator, CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Darwin (Mach-O) support");
-SYSCTL_INT(_kern_darwinator, OID_AUTO, debug, CTLFLAG_RWTUN, &darwin_debug, 0, "log why a Mach-O file is refused");
+SYSCTL_INT(_kern_darwinator, OID_AUTO, debug, CTLFLAG_RWTUN, &darwin_debug, 0, "1: log why a Mach-O file is refused and the system calls that are not implemented; 2: log every system call");
+int darwin_dyld;
+SYSCTL_INT(_kern_darwinator, OID_AUTO, dyld, CTLFLAG_RWTUN, &darwin_dyld, 0, "run a dynamic Mach-O program with the dyld that its load commands name (/usr/lib/dyld of a Mac)");
 
 struct sysentvec darwin_sysvec;
 static void (*native_set_syscall_retval)(struct thread *, int);
+static int (*native_fixup)(uintptr_t *, struct image_params *);
+static void (*native_setregs)(struct thread *, struct image_params *, uintptr_t);
+
+/* the stack of a program that starts in dyld: [mach_header of the program] [argc] [argv ... 0] [envp ... 0] [apple ... 0] */
+static int
+darwin_fixup(uintptr_t *stack_base, struct image_params *imgp)
+{
+	int error = native_fixup(stack_base, imgp);		/* pushes argc */
+
+	if (error == 0 && imgp->auxargs != NULL) {
+		struct darwin_auxargs *aa = imgp->auxargs;
+		uint64_t *base = (uint64_t *)*stack_base;
+
+		base--;
+		if (suword(base, (long)aa->mh) != 0)
+			return (EFAULT);
+		*stack_base = (uintptr_t)base;
+	}
+	return (error);
+}
+
+/* the "apple" vector, after the environment: pointers into the string area of the stack */
+static int
+darwin_copyout_auxargs(struct image_params *imgp, uintptr_t base)
+{
+	struct darwin_auxargs *aa = imgp->auxargs;
+	long first;
+	int i;
+
+	if (aa == NULL)
+		return (0);
+	first = fuword(imgp->argv);				/* the user address of argv[0]: the start of the string area */
+	if (first == -1)
+		return (EFAULT);
+	for (i = 0; i < aa->n; i++)
+		if (suword((void *)(base + i * sizeof(long)), first + aa->off[i]) != 0)
+			return (EFAULT);
+	if (suword((void *)(base + aa->n * sizeof(long)), 0) != 0)
+		return (EFAULT);
+	return (0);
+}
+
+static void
+darwin_setregs(struct thread *td, struct image_params *imgp, uintptr_t stack)
+{
+	native_setregs(td, imgp, stack);
+#if defined(__amd64__)
+	if (imgp->auxargs != NULL)
+		td->td_frame->tf_rsp = stack;			/* dyld expects the stack pointer on the mach_header, as it is */
+#endif
+}
 
 /* the results of a call are FreeBSD's; the errno numbers are translated to Darwin's before they reach the registers */
 static void
@@ -60,7 +113,14 @@ darwin_sysvec_init(void)
 	native_set_syscall_retval = native->sv_set_syscall_retval;
 	darwin_sysvec.sv_set_syscall_retval = darwin_set_syscall_retval;
 	darwin_sysvec.sv_flags = (native->sv_flags & ~(SV_ABI_MASK | SV_SIGSYS)) | SV_ABI_UNDEF;
+	native_fixup = native->sv_fixup;
+	darwin_sysvec.sv_fixup = darwin_fixup;
+	darwin_sysvec.sv_copyout_auxargs = darwin_copyout_auxargs;
+	native_setregs = native->sv_setregs;
+	darwin_sysvec.sv_setregs = darwin_setregs;
 	darwin_sigframe_init(&darwin_sysvec);
+	darwin_stack_init(&darwin_sysvec);
+	darwin_commpage_init();
 	darwin_sysvec.sv_coredump = NULL;	/* a core file written with the ELF layout would be wrong */
 }
 
