@@ -1,0 +1,17 @@
+# Compatibility: Mac applications on pearOS
+
+What was run on the image, as the original files of the applications' own sites (not ours: `macapp-install NAME` fetches them). One command checks the list in the image:
+`sh tests/all.sh` (it installs what is missing and prints a table).
+
+| Application | Version | Built with | Result | Notes |
+|---|---|---|---|---|
+| [Keka](KEKA.md) | 1.6.8 | Objective-C | Extracts (command line tools and the window) | The task window ("Keka (ZIP)") draws an empty grey box (auto layout) |
+| [AppCleaner](APPCLEANER.md) | 3.7 | Objective-C, Xcode 16 nibs | Finds the files of an application and moves them to the Trash; the window lists them with names and sizes | rows have no icons or check boxes |
+| [XLD](XLD.md) | 2025-03-02 | Objective-C, Mach-O plug-ins | WAV to FLAC and back, byte for byte (command line mode) | the window is not tried; AAC, ALAC and MP3 need AudioToolbox |
+| [The Unarchiver](UNARCHIVER.md) | 3.11.1 | Objective-C, no Swift | Preferences window; extracts zip, tar.gz, tar.bz2, tar.xz and 7z | crashes for an archive path of 27 to 33 characters (cause not found), see the document |
+| FFmpeg dylibs of [IINA](IINA.md) | | C | Decode (6 checks, on the host) | IINA itself: Swift, not possible yet |
+| System Settings, other Apple applications | | Swift, SwiftUI, private frameworks | Not possible | no Swift runtime, frameworks are in the shared cache of a real Mac, licence |
+
+The Finder starts a Mac `.app` on a double click (`macapp`); the test: `tools/qmp-click.py` and the screenshot in the README.
+
+What an application needs from this system is in the notes of each one; the list of what the kernel module implements is in the README (about 170 Darwin system calls, 119 checks, amd64 and arm64).

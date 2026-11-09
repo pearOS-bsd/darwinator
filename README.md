@@ -41,6 +41,8 @@ dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
 
+The list of what runs and how well is in `docs/COMPATIBILITY.md`; `sh tests/all.sh` checks it in the image (one command).
+
 A double click on `AppCleaner.app` on the desktop of the image starts it through the Finder (`macapp`):
 
 ![AppCleaner started by a double click in the Finder of pearOS](docs/screenshot-finder-doubleclick.png)
