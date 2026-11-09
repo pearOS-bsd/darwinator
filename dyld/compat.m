@@ -969,6 +969,25 @@ dragged_types_init(void)
 	if ((m = class_getInstanceMethod(k, @selector(registerForDraggedTypes:))) != NULL) o_registerForDraggedTypes = method_setImplementation(m, (IMP)w_registerForDraggedTypes);
 }
 
+
+/* Conversions between views that are not in one window yet (what a table's header does while its nib is decoded): GNUstep asserts (NSView.m:1846 "convertPoint:toView:") and the whole nib is lost.
+ * Apple's answer for views without a window is a conversion through the superviews; here the point or the rectangle comes back as it was when the assertion fires. */
+static IMP o_cptv, o_cpfv, o_crtv, o_crfv;
+static NSPoint w_cptv(id self, SEL _cmd, NSPoint p, id v) { @try { return ((NSPoint (*)(id, SEL, NSPoint, id))o_cptv)(self, _cmd, p, v); } @catch (id e) { return p; } }
+static NSPoint w_cpfv(id self, SEL _cmd, NSPoint p, id v) { @try { return ((NSPoint (*)(id, SEL, NSPoint, id))o_cpfv)(self, _cmd, p, v); } @catch (id e) { return p; } }
+static NSRect w_crtv(id self, SEL _cmd, NSRect r, id v) { @try { return ((NSRect (*)(id, SEL, NSRect, id))o_crtv)(self, _cmd, r, v); } @catch (id e) { return r; } }
+static NSRect w_crfv(id self, SEL _cmd, NSRect r, id v) { @try { return ((NSRect (*)(id, SEL, NSRect, id))o_crfv)(self, _cmd, r, v); } @catch (id e) { return r; } }
+__attribute__((constructor)) static void
+convert_guard_init(void)
+{
+	Class k = NSClassFromString(@"NSView"); Method m;
+	if (k == Nil || getenv("MACHRUN_NOCONVERTFIX")) return;
+	if ((m = class_getInstanceMethod(k, @selector(convertPoint:toView:))) != NULL) o_cptv = method_setImplementation(m, (IMP)w_cptv);
+	if ((m = class_getInstanceMethod(k, @selector(convertPoint:fromView:))) != NULL) o_cpfv = method_setImplementation(m, (IMP)w_cpfv);
+	if ((m = class_getInstanceMethod(k, @selector(convertRect:toView:))) != NULL) o_crtv = method_setImplementation(m, (IMP)w_crtv);
+	if ((m = class_getInstanceMethod(k, @selector(convertRect:fromView:))) != NULL) o_crfv = method_setImplementation(m, (IMP)w_crfv);
+}
+
 /* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
 static const char *(*class_image_path)(Class);
 static IMP o_bundleForClass;
