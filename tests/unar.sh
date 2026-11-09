@@ -4,12 +4,12 @@
 # application extracted it next to the archive with the same bytes.  Run in the desktop session of pearOS:   sh tests/unar.sh "/Applications/The Unarchiver.app"
 # (The archives are made on a host with GNU tar, zip and 7z: tar of the image (bsdtar) makes archives that crash the application.)
 APP="${1:-/Applications/The Unarchiver.app}"; HERE="$(cd "$(dirname "$0")" && pwd)"; DATA="${DATA:-$HERE/data/unar}"
-# (with NSZombieEnabled=YES: without it the application crashes for an archive path of 27 to 33 characters, see docs/UNARCHIVER.md; the path of the default WORK is in that range on purpose)
+# (with MACHRUN_IMMORTAL_STRINGS=1: without it the application crashes for an archive path of 27 to 33 characters, see docs/UNARCHIVER.md; the path of the default WORK is in that range on purpose)
 WORK="${WORK:-/var/tmp/unartest}"; MACHRUN="${MACHRUN:-/usr/local/bin/machrun}"; pass=0; fail=0
 ok() { echo "ok   $1"; pass=$((pass + 1)); }; bad() { echo "FAIL $1"; fail=$((fail + 1)); }
 rm -rf "$WORK"; mkdir -p "$WORK/cache"; cp -R "$DATA"/. "$WORK/"
 sh /usr/local/libexec/wrapapp.sh "$APP" "$WORK/cache" "$MACHRUN" > /dev/null || { echo "FAIL the application could not be wrapped"; exit 1; }
-export WS_SOCKET=/var/run/WindowServer.sock MALLOC_CONF=junk:false,zero:true NSZombieEnabled=YES   # (not XDG_SESSION_TYPE=wsd etc., which the AppCleaner test sets)
+export WS_SOCKET=/var/run/WindowServer.sock MALLOC_CONF=junk:false,zero:true MACHRUN_IMMORTAL_STRINGS=1   # (not XDG_SESSION_TYPE=wsd etc., which the AppCleaner test sets)
 [ -n "$MACHRUN_COMPAT" ] && export MACHRUN_COMPAT
 ulimit -c 0
 for a in t1.zip t2.tar.gz t3.tar.bz2 t4.tar.xz t5.7z; do

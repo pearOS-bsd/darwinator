@@ -5,7 +5,7 @@
 APP="$1"; [ -d "$APP" ] || { echo "usage: macapp APP.app [FILE]" >&2; exit 64; }; shift
 APP="$(cd "$APP" && pwd)"
 # per-application settings that its run needs: The Unarchiver reads memory that it never wrote (an outlet that is not connected: a receiver of garbage), which is zero on a Mac; memory zeroed by the allocator instead of the junk of machrun's default for Mac programs
-case "$(basename "$APP")" in "The Unarchiver.app") : "${MALLOC_CONF:=junk:false,zero:true}"; export MALLOC_CONF; NSZombieEnabled=YES; export NSZombieEnabled ;; esac
+case "$(basename "$APP")" in "The Unarchiver.app") : "${MALLOC_CONF:=junk:false,zero:true}"; export MALLOC_CONF; MACHRUN_IMMORTAL_STRINGS=1; export MACHRUN_IMMORTAL_STRINGS ;; esac
 CACHE="${XDG_CACHE_HOME:-$HOME/Library/Caches}/machrun"; mkdir -p "$CACHE" || exit 1
 LAUNCHER="$(sh /usr/local/libexec/wrapapp.sh "$APP" "$CACHE" /usr/local/bin/machrun)" || exit 1
 if [ -n "$1" ] && [ -e "$1" ]; then MACHRUN_OPENFILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; export MACHRUN_OPENFILE; shift
