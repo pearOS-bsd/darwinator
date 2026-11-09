@@ -9,3 +9,5 @@ x86
 @
 vnode_if*.h
 opt_*.h
+tools/macprobe/macprobe-out/
+tools/macprobe/macprobe-out.tar.gz
