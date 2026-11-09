@@ -225,9 +225,10 @@ darwin_workq_open(struct thread *td, struct darwin_args *uap __unused)
 }
 
 static int
-darwin_workq_kernreturn(struct thread *td __unused, struct darwin_args *uap __unused)
+darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap __unused)
 {
-	return (EINVAL);
+	td->td_retval[0] = 0;	/* what a Mac answers a thread that returns to the pool: 0 */
+	return (0);
 }
 
 /* ---- Mach traps: the return value is a kern_return_t in the result register, not an errno ---- */

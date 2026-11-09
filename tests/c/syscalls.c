@@ -135,7 +135,7 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_waitid = 173, SYS_pselect = 394, SYS_getlogin_ = 49, SYS_gethostuuid = 142, SYS_stat32 = 188, SYS_fstat32 = 189, SYS_lstat32 = 190, SYS_getdirentries32 = 196, SYS_pathconf = 191, SYS_utimes = 138, SYS_fdatasync = 187,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_kevent_qos = 374, SYS_kevent_id = 375, SYS_gettid_ = 286, SYS_proc_info = 336, SYS_getpid_ = 20, SYS_waitid = 173, SYS_pselect = 394, SYS_getlogin_ = 49, SYS_gethostuuid = 142, SYS_stat32 = 188, SYS_fstat32 = 189, SYS_lstat32 = 190, SYS_getdirentries32 = 196, SYS_pathconf = 191, SYS_utimes = 138, SYS_fdatasync = 187,
 	SYS_stat64_extended = 341, SYS_open_extended = 277, SYS_mkdir_extended = 292, SYS_shm_open = 266, SYS_shm_unlink = 267, SYS_shmget = 265, SYS_shmat = 262, SYS_shmdt = 264, SYS_shmctl = 263, SYS_semget = 255, SYS_semop = 256, SYS_semctl = 254,
 	SYS_guarded_open = 441, SYS_guarded_close = 442, SYS_clonefileat = 462, SYS_exchangedata = 223, SYS_getattrlistbulk = 461, SYS_ptrace = 26, SYS_kdebug_trace = 180, SYS_sigwait = 330, SYS_sendfile_ = 337, SYS_fgetattrlist = 228, SYS_psynch_mutexwait = 301, SYS_psynch_mutexdrop = 302, SYS_psynch_cvbroad = 303, SYS_psynch_cvsignal = 304, SYS_psynch_cvwait = 305, SYS_workq_open = 367, SYS_workq_kernreturn = 368, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
 	SYS_pthread_kill = 328, SYS_thread_selfid = 372, SYS_openat = 463, SYS_renameat = 465, SYS_faccessat = 466, SYS_fchmodat = 467, SYS_fstatat64 = 470, SYS_linkat = 471,
@@ -415,7 +415,7 @@ int cmain(void)
 	  for (i = 0; i < 400 && psy_state < 2; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
 	  check("  psynch_mutexdrop wakes it", psy_state == 2, psy_state); }
 	check("workq_open", S(SYS_workq_open, 0, 0, 0, 0, 0, 0) == 0, 0);
-	check("workq_kernreturn is EINVAL (no workqueue)", S(SYS_workq_kernreturn, 0, 0, 0, 0, 0, 0) == -22, 0);
+	check("workq_kernreturn returns 0 (a thread back to the pool: what a Mac answers)", S(SYS_workq_kernreturn, 0, 0, 0, 0, 0, 0) == 0, 0);
 
 	/* Mach traps */
 	{ u64 task = dmach(28, 0, 0, 0, 0, 0, 0), host = dmach(29, 0, 0, 0, 0, 0, 0), rp = dmach(26, 0, 0, 0, 0, 0, 0), th = dmach(27, 0, 0, 0, 0, 0, 0);
@@ -487,6 +487,24 @@ int cmain(void)
 	  for (k = 0; k < 16; k++) set[k] = 0; set[0] = 1UL << p0; r = S(SYS_pselect, p0 + 1, set, 0, 0, &ts0, 0); check("pselect on an empty pipe times out (0)", r == 0, r);
 	  S(SYS_write, p1, "x", 1, 0, 0, 0); for (k = 0; k < 16; k++) set[k] = 0; set[0] = 1UL << p0; { unsigned msk = 0; r = S(SYS_pselect, p0 + 1, set, 0, 0, &ts0, &msk); }
 	  check("pselect on a readable pipe (with a signal mask)", r == 1, r); S(SYS_close, p0, 0, 0, 0, 0, 0); S(SYS_close, p1, 0, 0, 0, 0, 0); }
+
+	/* process information in Darwin's layouts: sysctl KERN_PROC, KERN_PROCARGS2, proc_info */
+	{ static char kp[648 * 2]; int mib[4] = { 1, 14, 1, 0 }; u64 len = sizeof(kp); i64 me = S(SYS_getpid, 0, 0, 0, 0, 0, 0); mib[3] = (int)me;
+	  r = S(SYS_sysctl, mib, 4, kp, &len, 0, 0);
+	  check("sysctl KERN_PROC_PID: one kinfo_proc of 648 bytes with this pid, ppid, status SRUN", r == 0 && len == 648 && *(int *)(kp + 40) == (int)me && *(int *)(kp + 296 + 264) > 0 && kp[36] == 2, r);
+	  check("  p_flag has P_LP64; p_comm is at 243; e_ucred.cr_uid is at 420", (*(int *)(kp + 32) & 4) && kp[243] != 0 && *(unsigned *)(kp + 420) == *(unsigned *)(kp + 296 + 16 + 80) , *(int *)(kp + 32)); }
+	{ int mib[3] = { 1, 14, 0 }; u64 len = 0; r = S(SYS_sysctl, mib, 3, 0, &len, 0, 0); check("sysctl KERN_PROC_ALL (size query) gives room for at least this process", r == 0 && len >= 648, len); }
+	{ static char pa[2048]; int mib[3] = { 1, 49, 0 }; u64 len = sizeof(pa); mib[2] = (int)S(SYS_getpid, 0, 0, 0, 0, 0, 0); r = S(SYS_sysctl, mib, 3, pa, &len, 0, 0);
+	  check("sysctl KERN_PROCARGS2: argc and the path of the executable", r == 0 && *(int *)pa >= 1 && pa[4] == '/', r); }
+	{ static char bi[136]; r = S(SYS_proc_info, 2, S(SYS_getpid, 0, 0, 0, 0, 0, 0), 3, 0, bi, 136); check("proc_info PIDINFO TBSDINFO (136 bytes: pid, ppid, comm)", r == 136 && *(int *)(bi + 12) == (int)S(SYS_getpid, 0, 0, 0, 0, 0, 0) && bi[48] != 0, r);
+	  static char pp[1024]; r = S(SYS_proc_info, 2, S(SYS_getpid, 0, 0, 0, 0, 0, 0), 11, 0, pp, 1024); check("proc_info PIDPATHINFO", r > 0 && pp[0] == '/', r);
+	  static int pids[2048]; r = S(SYS_proc_info, 1, 1, 0, 0, pids, sizeof(pids)); check("proc_info LISTPIDS (ALL_PIDS) gives pids", r >= 4 && pids[0] > 0, r); }
+
+	/* kevent_qos (events of 72 bytes) on the kqueue of the process (fd -1) and on a workloop id (kevent_id) */
+	{ struct { u64 ident; short filter; unsigned short flags; int qos; u64 udata; unsigned fflags, xflags; i64 data; u64 ext[4]; } q = { 7, -10, 0x21, 0, 0xfeed, 0, 0, 0, { 0, 0, 0, 0 } }, ev;
+	  r = dsys8(374, -1, (i64)&q, 1, 0, 0, 0, 0, 1); check("kevent_qos (fd -1): EVFILT_USER added", r == 0, r);
+	  q.flags = 0; q.fflags = 0x01000000; r = dsys8(374, -1, (i64)&q, 1, (i64)&ev, 1, 0, 0, 1); check("  triggered: the event comes back (72 bytes: ident, filter -10, udata)", r == 1 && ev.ident == 7 && ev.filter == -10 && ev.udata == 0xfeed, r);
+	  q.flags = 0x21; q.ident = 8; r = dsys8(375, 0x7b5911, (i64)&q, 1, 0, 0, 0, 0, 1); check("kevent_id (a workloop id): EVFILT_USER added", r == 0, r); }
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
