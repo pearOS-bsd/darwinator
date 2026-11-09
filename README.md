@@ -101,6 +101,6 @@ clang -nostdlib -Wl,-e,_start -o hello hello.s       # code that calls write/exi
 
 ## Documents
 
-`docs/REALDYLD.md` (the real dyld and libSystem on the module), `docs/COMPATIBILITY.md` (Mac applications through `machrun`), `docs/MACCLI.md` (1265 command line tools of macOS 26.7: 604 start through `machrun`), `docs/IOS.md` (iOS 16 tools on arm64),
+`docs/REALDYLD.md` (the real dyld and libSystem on the module), `docs/TOOLCHAIN.md` (Mach-O programs and libraries built on FreeBSD), `docs/COMPATIBILITY.md` (Mac applications through `machrun`), `docs/MACCLI.md` (1265 command line tools of macOS 26.7: 604 start through `machrun`), `docs/IOS.md` (iOS 16 tools on arm64),
 `docs/MACPROBE.md` (what a real Mac says: structure layouts, the MIG ids, an Intel Mac), the pages of the applications (`KEKA.md`, `APPCLEANER.md`, `UNARCHIVER.md`, `XLD.md`, `IINA.md`).  Tools: `tools/macprobe/` (programs that are run on a Mac: probe 1 to 5), `tools/maccli/` (the sweeps),
 `tools/migids.py` (MIG message ids from a `.defs`), `tools/vm-test.sh` (the module and its tests in a local FreeBSD VM), `tools/macapp*` (wrap and install Mac applications).
