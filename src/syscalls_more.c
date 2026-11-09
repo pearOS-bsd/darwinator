@@ -762,6 +762,7 @@ darwin_more_syscalls_init(void)
 	darwin_event_syscalls_init();		/* syscalls_event.c: replaces some of the above */
 	darwin_posix_syscalls_init();		/* syscalls_posix.c */
 	darwin_sync_syscalls_init();		/* syscalls_sync.c */
+	darwin_compat_syscalls_init();		/* syscalls_compat.c */
 }
 
 /* open_nocancel (398) is the open of syscalls.c: filled by darwin_syscalls_init */
