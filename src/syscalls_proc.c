@@ -319,6 +319,18 @@ darwin_proc_info(struct thread *td, struct darwin_args *uap)
 		td->td_retval[0] = 64;
 		return (error);
 	}
+	case 17: {					/* PROC_PIDUNIQIDENTIFIERINFO (proc_uniqidentifierinfo, 56 bytes): p_uuid[16], p_uniqueid, p_puniqueid, p_reserve2, p_reserve3, p_reserve4 */
+		uint64_t uid64 = (uint64_t)p->p_pid + ((uint64_t)time_second << 20), puid64 = p->p_pptr != NULL ? (uint64_t)p->p_pptr->p_pid : 0;
+
+		PROC_UNLOCK(p);
+		memset(buf, 0, 56);
+		memcpy(buf, &uid64, 8);				/* the uuid of the executable: a number that is the same for a process */
+		memcpy(buf + 16, &uid64, 8); memcpy(buf + 24, &puid64, 8);
+		if (bufsize < 56) return (ENOMEM);
+		error = copyout(buf, ubuf, 56);
+		td->td_retval[0] = 56;
+		return (error);
+	}
 	case 4:						/* PROC_PIDTASKINFO */
 		fill_taskinfo(p, buf); PROC_UNLOCK(p);
 		if (bufsize < 96) return (ENOMEM);
