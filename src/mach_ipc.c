@@ -10,8 +10,8 @@
  *   - fork: the child gets the special ports (bootstrap among them) and the registered ports of the parent; exit: the receive rights die (the senders see a dead port).
  *
  * What a launchd does (a registry of service names behind the bootstrap port) is a program of user space that holds the receive right of the bootstrap port
- * and hands it to its children; it needs nothing more than this.  Not here: port sets, notifications (dead name, no more senders), port attributes,
- * guards, semaphores, the thread and host MIG routines (task_info, thread_create, host_info ...), voucher ports.
+ * and hands it to its children; it needs nothing more than this.  Not here: notifications (dead name, no more senders), port attributes,
+ * guards, the thread and host MIG routines (task_info, thread_create, host_info ...), voucher ports.
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -73,13 +73,16 @@
 #define	MACH_RCV_TOO_LARGE	0x10004004
 #define	MACH_MSG_MAXSIZE	(1 << 20)
 
+#define	KERN_TERMINATED		7
+#define	KERN_OPERATION_TIMED_OUT 49
+#define	MACH_PORT_RIGHT_PORT_SET 3
 #define	NAME_TASK_SELF		0x203u
 #define	NAME_HOST_SELF		0x1d03u
 #define	NAME_THREAD_SELF	0x103u
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM };
 
 struct kmsg;
 struct kport {
@@ -90,6 +93,8 @@ struct kport {
 	pid_t		kpid;
 	int		qn, waiters;
 	TAILQ_HEAD(, kmsg) q;
+	struct kport	*set;			/* the port set that this port is a member of (a port is in one set at most) */
+	int		count;			/* KP_SEM: the value */
 };
 
 struct kcarry { struct kport *port; int disp; uint32_t nameoff; };	/* a right in a message; nameoff: where its name goes in the data */
@@ -275,6 +280,8 @@ port_die(struct kport *p)
 	struct kmsg *m;
 
 	p->dead = true;
+	p->set = NULL;
+	wakeup(p);
 	while ((m = TAILQ_FIRST(&p->q)) != NULL) {
 		TAILQ_REMOVE(&p->q, m, link);
 		kmsg_free(m);
@@ -302,11 +309,11 @@ darwin_port_allocate(struct thread *td, struct darwin_args *uap)	/* (target, rig
 	int kr = KERN_SUCCESS;
 
 	sx_xlock(&km_sx);
-	if ((t = kt_task(td->td_proc)) == NULL || ((int)uap->a[1] != MACH_PORT_RIGHT_RECEIVE)) {
+	if ((t = kt_task(td->td_proc)) == NULL || ((int)uap->a[1] != MACH_PORT_RIGHT_RECEIVE && (int)uap->a[1] != MACH_PORT_RIGHT_PORT_SET)) {
 		sx_xunlock(&km_sx);
 		return (kr_ret(td, (int)uap->a[1] == MACH_PORT_RIGHT_RECEIVE ? KERN_NO_SPACE : KERN_INVALID_VALUE));
 	}
-	p = kp_new(KP_PORT);
+	p = kp_new((int)uap->a[1] == MACH_PORT_RIGHT_PORT_SET ? KP_SET : KP_PORT);
 	e = ent_add(t, p, MM_MOVE_RECEIVE);
 	p->refs--;
 	if (e == NULL) { kp_unref(p); kr = KERN_NO_SPACE; }
@@ -405,6 +412,131 @@ darwin_mach_reply_port(struct thread *td, struct darwin_args *uap __unused)
 static int darwin_self_task(struct thread *td, struct darwin_args *uap __unused) { td->td_retval[0] = NAME_TASK_SELF; (void)kt_task(td->td_proc); return (0); }
 static int darwin_self_host(struct thread *td, struct darwin_args *uap __unused) { td->td_retval[0] = NAME_HOST_SELF; (void)kt_task(td->td_proc); return (0); }
 static int darwin_self_thread(struct thread *td, struct darwin_args *uap __unused) { td->td_retval[0] = NAME_THREAD_SELF; return (0); }
+
+
+static int
+darwin_port_move_member(struct thread *td, struct darwin_args *uap)	/* (target, member, after): the member goes into the set "after" (0: out of its set) */
+{
+	struct ktask *t;
+	struct kent *m, *a = NULL;
+	int kr = KERN_INVALID_NAME;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (m = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
+		kr = KERN_INVALID_RIGHT;
+		if (m->recv && m->port->kind == KP_PORT) {
+			if ((uint32_t)uap->a[2] == 0) { m->port->set = NULL; kr = KERN_SUCCESS; }
+			else if ((a = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && a->recv && a->port->kind == KP_SET) { m->port->set = a->port; wakeup(a->port); kr = KERN_SUCCESS; }
+		}
+	}
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+/* ---- Mach semaphores: a port whose kind is a semaphore; created with the MIG routine of the task port, used with the traps ---- */
+
+static struct kport *
+sem_of(struct thread *td, uint32_t name, int *kr)
+{
+	struct ktask *t = kt_task(td->td_proc);
+	struct kent *e = t != NULL ? ent_by_name(t, name) : NULL;
+
+	if (e == NULL || e->port->kind != KP_SEM) { *kr = KERN_INVALID_NAME; return (NULL); }
+	if (e->port->dead) { *kr = KERN_TERMINATED; return (NULL); }
+	return (e->port);
+}
+
+static int
+sem_wait_locked(struct kport *s, int timo)
+{
+	int error = 0;
+
+	s->waiters++;
+	while (s->count <= 0 && error == 0 && !s->dead)
+		error = sx_sleep(s, &km_sx, PCATCH, "machsem", timo);
+	s->waiters--;
+	if (s->dead) return (KERN_TERMINATED);
+	if (error == EWOULDBLOCK) return (KERN_OPERATION_TIMED_OUT);
+	if (error != 0) return (14);			/* KERN_ABORTED */
+	s->count--;
+	return (KERN_SUCCESS);
+}
+
+static int
+darwin_sem_signal(struct thread *td, struct darwin_args *uap)
+{
+	struct kport *s;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&km_sx);
+	if ((s = sem_of(td, (uint32_t)uap->a[0], &kr)) != NULL) { s->count++; wakeup_one(s); }
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int
+darwin_sem_signal_all(struct thread *td, struct darwin_args *uap)
+{
+	struct kport *s;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&km_sx);
+	if ((s = sem_of(td, (uint32_t)uap->a[0], &kr)) != NULL) { s->count += s->waiters; wakeup(s); }
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int
+darwin_sem_wait(struct thread *td, struct darwin_args *uap)
+{
+	struct kport *s;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&km_sx);
+	if ((s = sem_of(td, (uint32_t)uap->a[0], &kr)) != NULL)
+		kr = sem_wait_locked(s, 0);
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int
+sem_wait_signal(struct thread *td, uint32_t wname, uint32_t sname, int timo)
+{
+	struct kport *w, *g;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&km_sx);
+	if ((g = sem_of(td, sname, &kr)) != NULL) { g->count++; wakeup_one(g); }
+	if (kr == KERN_SUCCESS && (w = sem_of(td, wname, &kr)) != NULL)
+		kr = sem_wait_locked(w, timo);
+	sx_xunlock(&km_sx);
+	return (kr);
+}
+
+static int darwin_sem_wait_signal(struct thread *td, struct darwin_args *uap) { return (kr_ret(td, sem_wait_signal(td, (uint32_t)uap->a[0], (uint32_t)uap->a[1], 0))); }
+
+static int
+semtimo(uint32_t sec, int32_t nsec)
+{
+	int64_t t = (int64_t)sec * hz + nsec / (1000000000 / hz);
+
+	return (t < 1 ? 1 : t > INT_MAX ? INT_MAX : (int)t);
+}
+
+static int
+darwin_sem_timedwait(struct thread *td, struct darwin_args *uap)		/* (sem, sec, nsec) */
+{
+	struct kport *s;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&km_sx);
+	if ((s = sem_of(td, (uint32_t)uap->a[0], &kr)) != NULL)
+		kr = sem_wait_locked(s, semtimo((uint32_t)uap->a[1], (int32_t)uap->a[2]));
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int darwin_sem_timedwait_signal(struct thread *td, struct darwin_args *uap) { return (kr_ret(td, sem_wait_signal(td, (uint32_t)uap->a[0], (uint32_t)uap->a[1], semtimo((uint32_t)uap->a[2], (int32_t)uap->a[3])))); }
 
 /* ---- messages ---- */
 
@@ -568,6 +700,8 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 	TAILQ_INSERT_TAIL(&dp->q, m, link);
 	dp->qn++;
 	wakeup(dp);
+	if (dp->set != NULL)
+		wakeup(dp->set);
 	kp_unref(dp);						/* the queue does not hold the port: the receive right does */
 	sx_xunlock(&km_sx);
 	return (KERN_SUCCESS);
@@ -598,7 +732,8 @@ recv_msg(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, uin
 {
 	struct ktask *t;
 	struct kent *e;
-	struct kport *rp;
+	struct kport *rp, *srcp = NULL;
+	uint32_t setname = rname;
 	struct kmsg *m;
 	int timo = (option & MACH_RCV_TIMEOUT) ? MAX(1, (int)((int64_t)timeout_ms * hz / 1000)) : 0, error = 0, i;
 	uint8_t *d;
@@ -611,9 +746,22 @@ recv_msg(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, uin
 	}
 	rp = e->port; rp->refs++;
 	rp->waiters++;
-	while ((m = TAILQ_FIRST(&rp->q)) == NULL && error == 0 && !rp->dead) {
+	for (;;) {
+		struct kport *src = rp;
+
+		if (rp->kind == KP_SET) {			/* a set: the first member that has a message */
+			int k;
+
+			src = NULL;
+			for (k = 0; k < KE_N; k++)
+				if (t->e[k].used && t->e[k].port->set == rp && !TAILQ_EMPTY(&t->e[k].port->q)) { src = t->e[k].port; rname = t->e[k].name; break; }
+		}
+		if (src != NULL && (m = TAILQ_FIRST(&src->q)) != NULL) { srcp = src; break; }
+		m = NULL;
+		if (error != 0 || rp->dead)
+			break;
 		error = sx_sleep(rp, &km_sx, PCATCH, "machmsg", timo);
-		if ((e = ent_by_name(t, rname)) == NULL || !e->recv || e->port != rp)
+		if ((e = ent_by_name(t, setname)) == NULL || !e->recv || e->port != rp)
 			error = EINVAL;
 	}
 	rp->waiters--;
@@ -627,8 +775,8 @@ recv_msg(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, uin
 		sx_xunlock(&km_sx);
 		return (MACH_RCV_TOO_LARGE);
 	}
-	TAILQ_REMOVE(&rp->q, m, link);
-	rp->qn--;
+	TAILQ_REMOVE(&srcp->q, m, link);
+	srcp->qn--;
 	d = m->data;
 	/* the header as the receiver sees it: the reply right as the remote port, the destination as the local port */
 	bits = rd32(d, 0);
@@ -793,6 +941,23 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			mig_reply(t, m, id, 0, NULL, NULL, 0, arr, n);
 		}
 		break;
+	case 3418:				/* semaphore_create(task, policy, value): the reply carries a send right to a new semaphore */
+		{
+			struct kport *sp = kp_new(KP_SEM);
+
+			sp->count = m->size >= 40 ? (int)rd32(d, 36) : 0;
+			mig_reply(t, m, id, 0, sp, NULL, 0, NULL, 0);
+			kp_unref(sp);
+		}
+		break;
+	case 3419:				/* semaphore_destroy(task, semaphore): the semaphore comes as a port descriptor */
+		if (m->ncarry == 1 && m->carry[0].port != NULL && m->carry[0].port->kind == KP_SEM) {
+			m->carry[0].port->dead = true;
+			wakeup(m->carry[0].port);
+			mig_reply(t, m, id, 0, NULL, NULL, 0, NULL, 0);
+		} else
+			mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
+		break;
 	default:
 		mig_reply(t, m, id, 0x10000 - 303, NULL, NULL, 0, NULL, 0);	/* MIG_BAD_ID */
 		break;
@@ -870,7 +1035,14 @@ static const struct {
 	E(16, 3, darwin_port_allocate,		"_kernelrpc_mach_port_allocate_trap"),
 	E(18, 2, darwin_port_deallocate,	"_kernelrpc_mach_port_deallocate_trap"),
 	E(19, 4, darwin_port_mod_refs,		"_kernelrpc_mach_port_mod_refs_trap"),
+	E(20, 3, darwin_port_move_member,	"_kernelrpc_mach_port_move_member_trap"),
 	E(21, 4, darwin_port_insert_right,	"_kernelrpc_mach_port_insert_right_trap"),
+	E(33, 1, darwin_sem_signal,		"semaphore_signal_trap"),
+	E(34, 1, darwin_sem_signal_all,		"semaphore_signal_all_trap"),
+	E(36, 1, darwin_sem_wait,		"semaphore_wait_trap"),
+	E(37, 2, darwin_sem_wait_signal,	"semaphore_wait_signal_trap"),
+	E(38, 3, darwin_sem_timedwait,		"semaphore_timedwait_trap"),
+	E(39, 4, darwin_sem_timedwait_signal,	"semaphore_timedwait_signal_trap"),
 	E(26, 0, darwin_mach_reply_port,	"mach_reply_port"),
 	E(27, 0, darwin_self_thread,		"thread_self_trap"),
 	E(28, 0, darwin_self_task,		"task_self_trap"),

@@ -464,6 +464,23 @@ int cmain(void)
 	      kr2 = dmach7(31, (i64)cm, 1, 40, 0, 0, 0, 0); check("mach_msg with a port descriptor (MAKE_SEND of Q) is sent", kr2 == 0, kr2);
 	      kr2 = dmach7(31, (i64)rv, 2, 0, 64, P, 0, 0); check("  received: the descriptor holds the name of Q with the disposition 17 (PORT_SEND)", kr2 == 0 && rv[7] == Q && ((rv[9] >> 16) & 0xff) == 17, rv[9]);
 	      { unsigned m3[7] = { 19, 28, Q, 0, 0, 56, 0x77 }, r3[16]; for (k = 0; k < 16; k++) r3[k] = 0; kr2 = dmach7(31, (i64)m3, 1, 28, 0, 0, 0, 0); kr2 |= dmach7(31, (i64)r3, 2, 0, 64, Q, 0, 0); check("  and the right works: a message to Q arrives", kr2 == 0 && r3[5] == 56, kr2); } }
+	  /* a port set: two ports are members; a receive on the set gives the message of the one that has one (the local port of the header is that port) */
+	  { unsigned S2 = 0, A = 0, B = 0, ma[7] = { 19, 28, 0, 0, 0, 11, 0x11 }, rb[16]; int k; for (k = 0; k < 16; k++) rb[k] = 0;
+	    dmach(16, (i64)task, 3, (i64)&S2, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&A, 0, 0, 0); dmach(16, (i64)task, 1, (i64)&B, 0, 0, 0);
+	    dmach(21, (i64)task, A, A, 20, 0, 0); dmach(21, (i64)task, B, B, 20, 0, 0);
+	    check("mach_port_allocate (port set) and move_member for two ports", S2 != 0 && dmach(20, (i64)task, A, S2, 0, 0, 0) == 0 && dmach(20, (i64)task, B, S2, 0, 0, 0) == 0, S2);
+	    ma[2] = B; dmach7(31, (i64)ma, 1, 28, 0, 0, 0, 0);
+	    { i64 kr3 = dmach7(31, (i64)rb, 2 | 0x100, 0, 64, S2, 2000, 0); check("  mach_msg receive on the set: the message sent to B (id 11), local port B", kr3 == 0 && rb[5] == 11 && rb[3] == B && rb[6] == 0x11, kr3); }
+	    { i64 kr3 = dmach7(31, (i64)rb, 2 | 0x100, 0, 64, S2, 20, 0); check("  an empty set times out", kr3 == 0x10004003, kr3); }
+	    dmach(20, (i64)task, A, 0, 0, 0, 0); ma[2] = A; dmach7(31, (i64)ma, 1, 28, 0, 0, 0, 0);
+	    { i64 kr3 = dmach7(31, (i64)rb, 2 | 0x100, 0, 64, S2, 20, 0); check("  a port that left the set is not in it any more", kr3 == 0x10004003, kr3); } }
+	  /* a Mach semaphore: made with the MIG routine semaphore_create of the task port, then the traps */
+	  { unsigned rq[16], rps = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0); int k; for (k = 0; k < 16; k++) rq[k] = 0;
+	    rq[0] = 19 | (21 << 8); rq[1] = 40; rq[2] = (unsigned)task; rq[3] = rps; rq[5] = 3418; rq[8] = 0; rq[9] = 1;
+	    { i64 kr3 = dmach7(31, (i64)rq, 3, 40, 64, rps, 2000, 0); unsigned sem = rq[7]; check("semaphore_create (id 3418): a send right to a new semaphore (value 1)", kr3 == 0 && rq[5] == 3518 && sem != 0, kr3);
+	      check("  semaphore_wait_trap takes the value", dmach(36, sem, 0, 0, 0, 0, 0) == 0, 0);
+	      check("  semaphore_timedwait_trap on 0 times out (KERN_OPERATION_TIMED_OUT 49)", dmach(38, sem, 0, 20000000, 0, 0, 0) == 49, 0);
+	      check("  semaphore_signal_trap then semaphore_wait_trap", dmach(33, sem, 0, 0, 0, 0, 0) == 0 && dmach(36, sem, 0, 0, 0, 0, 0) == 0, 0); } }
 	    /* dead ports: the send to a port whose receive right is gone fails */
 	    { unsigned D2 = 0, dm[7] = { 19, 28, 0, 0, 0, 1, 2 }; dmach(16, (i64)task, 1, (i64)&D2, 0, 0, 0); dmach(21, (i64)task, D2, D2, 20, 0, 0); dm[2] = D2; dmach(19, (i64)task, D2, 1, -1, 0, 0);
 	      kr2 = dmach7(31, (i64)dm, 1, 28, 0, 0, 0, 0); check("a send to a port that was destroyed is MACH_SEND_INVALID_DEST", kr2 == 0x10000003, kr2); } }
