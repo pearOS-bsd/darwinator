@@ -1,0 +1,4 @@
+	PID/THRD  SYSCALL(args) 		 = return
+dtrace: 2278 dynamic variable drops with non-empty dirty list
+
+
