@@ -284,6 +284,56 @@ darwin_statfs_out(const struct statfs *s, void *ubuf)
 	return (error);
 }
 
+/* statfs/fstatfs (157, 158): the old struct statfs of the real Mac (tools/macprobe/probe3): short otype, oflags; 8 byte bsize iosize blocks bfree bavail files ffree at 8..63;
+ * fsid 64, owner 72, type (short) 78, flags (8 bytes) 80, fstypename[15] 104, mntonname[90] 119, mntfromname[90] 209; 304 bytes are written */
+static int
+darwin_statfs_old_out(const struct statfs *s, void *ubuf)
+{
+	char b[304];
+	uint64_t v;
+	uint32_t w;
+	uint16_t h;
+
+	memset(b, 0, sizeof(b));
+#define	P64(off, val)	do { v = (uint64_t)(val); memcpy(b + (off), &v, 8); } while (0)
+	P64(8, s->f_bsize); P64(16, s->f_iosize); P64(24, s->f_blocks); P64(32, s->f_bfree);
+	P64(40, s->f_bavail); P64(48, s->f_files); P64(56, s->f_ffree);
+	P64(80, s->f_flags & 0xffffffff);
+#undef P64
+	w = s->f_fsid.val[0]; memcpy(b + 64, &w, 4);
+	w = s->f_fsid.val[1]; memcpy(b + 68, &w, 4);
+	w = s->f_owner; memcpy(b + 72, &w, 4);
+	h = (uint16_t)s->f_type; memcpy(b + 78, &h, 2);
+	strlcpy(b + 104, s->f_fstypename, 15);
+	strlcpy(b + 119, s->f_mntonname, 90);
+	strlcpy(b + 209, s->f_mntfromname, 90);
+	return (copyout(b, ubuf, sizeof(b)));
+}
+
+static int
+darwin_statfs_old(struct thread *td, struct darwin_args *uap)
+{
+	struct statfs *s = malloc(sizeof(*s), M_DARWIN, M_WAITOK | M_ZERO);
+	int error = kern_statfs(td, (const char *)uap->a[0], UIO_USERSPACE, s);
+
+	if (error == 0)
+		error = darwin_statfs_old_out(s, (void *)uap->a[1]);
+	free(s, M_DARWIN);
+	return (error);
+}
+
+static int
+darwin_fstatfs_old(struct thread *td, struct darwin_args *uap)
+{
+	struct statfs *s = malloc(sizeof(*s), M_DARWIN, M_WAITOK | M_ZERO);
+	int error = kern_fstatfs(td, (int)uap->a[0], s);
+
+	if (error == 0)
+		error = darwin_statfs_old_out(s, (void *)uap->a[1]);
+	free(s, M_DARWIN);
+	return (error);
+}
+
 static int
 darwin_statfs64(struct thread *td, struct darwin_args *uap)
 {
@@ -702,8 +752,8 @@ static const struct {
 	E(344, 4, darwin_getdirentries64, AUE_GETDIRENTRIES,	"getdirentries64"),
 	E(345, 2, darwin_statfs64,	AUE_STATFS,		"statfs64"),
 	E(346, 2, darwin_fstatfs64,	AUE_FSTATFS,		"fstatfs64"),
-	E(157, 2, darwin_statfs64,	AUE_STATFS,		"statfs"),	/* the same layout as statfs64 */
-	E(158, 2, darwin_fstatfs64,	AUE_FSTATFS,		"fstatfs"),
+	E(157, 2, darwin_statfs_old,	AUE_STATFS,		"statfs"),
+	E(158, 2, darwin_fstatfs_old,	AUE_FSTATFS,		"fstatfs"),
 	/* memory, signals, waiting */
 	E(65,  3, darwin_msync,		AUE_MSYNC,		"msync"),
 	E(75,  3, sys_madvise,		AUE_MADVISE,		"madvise"),

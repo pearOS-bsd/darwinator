@@ -253,8 +253,10 @@ int cmain(void)
 	  check("statfs64 /", r == 0 && sf.bsize > 0 && sf.blocks > 0 && sf.fstype[0] && sf.on[0] == '/', r);
 	  fd = (int)S(SYS_open, "/", 0, 0, 0, 0, 0); r = S(SYS_fstatfs64, fd, &sf, 0, 0, 0, 0);
 	  check("fstatfs64", r == 0 && sf.blocks > 0, r);
-	  r = S(157, "/", &sf, 0, 0, 0, 0); check("statfs (157)", r == 0 && sf.blocks > 0 && sf.on[0] == '/', r);
-	  r = S(158, fd, &sf, 0, 0, 0, 0); check("fstatfs (158)", r == 0 && sf.blocks > 0, r); S(SYS_close, fd, 0, 0, 0, 0, 0); }
+	  { static char ob[512]; unsigned long bs = 0, bl = 0; r = S(157, "/", ob, 0, 0, 0, 0); memcpy(&bs, ob + 8, 8); memcpy(&bl, ob + 24, 8);
+	  check("statfs (157, old layout)", r == 0 && bs > 0 && bl > 0 && ob[119] == '/' && ob[104] != 0, r);
+	  r = S(158, fd, ob, 0, 0, 0, 0); memcpy(&bl, ob + 24, 8); check("fstatfs (158)", r == 0 && bl > 0, r); }
+	  S(SYS_close, fd, 0, 0, 0, 0, 0); }
 
 	/* named semaphores, access_extended */
 	{ r = S(268, "/darwinator-sem", 0x200, 0600, 2, 0, 0);
