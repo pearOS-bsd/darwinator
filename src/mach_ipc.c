@@ -10,7 +10,7 @@
  *   - fork: the child gets the special ports (bootstrap among them) and the registered ports of the parent; exit: the receive rights die (the senders see a dead port).
  *
  * What a launchd does (a registry of service names behind the bootstrap port) is a program of user space that holds the receive right of the bootstrap port
- * and hands it to its children; it needs nothing more than this.  Not here: notifications (dead name, no more senders), port attributes,
+ * and hands it to its children; it needs nothing more than this.  Not here: notifications other than dead name (no more senders, port destroyed), port attributes,
  * guards, the thread and host MIG routines (task_info, thread_create, host_info ...), voucher ports.
  */
 #include <sys/param.h>
@@ -101,6 +101,8 @@ struct kport {
 	TAILQ_HEAD(, kmsg) q;
 	struct kport	*set;			/* the port set that this port is a member of (a port is in one set at most) */
 	int		count;			/* KP_SEM: the value */
+	struct kport	*dn_port;		/* a dead-name notification is sent here when this port dies (mach_port_request_notification) */
+	uint32_t	dn_name;		/* the name that the requester has for this port */
 };
 
 struct kcarry { struct kport *port; int disp; uint32_t nameoff; };	/* a right in a message; nameoff: where its name goes in the data */
@@ -155,6 +157,7 @@ kp_unref(struct kport *p)
 
 	if (p == NULL || --p->refs > 0)
 		return;
+	if (p->dn_port != NULL) { struct kport *n = p->dn_port; p->dn_port = NULL; kp_unref(n); }
 	while ((m = TAILQ_FIRST(&p->q)) != NULL) {
 		TAILQ_REMOVE(&p->q, m, link);
 		kmsg_free(m);
@@ -279,6 +282,8 @@ kt_task(struct proc *p)
 	return (t);
 }
 
+static void notify_dead_name(struct kport *to, uint32_t name);
+
 /* the receive right of the entry is gone: the port is dead for everybody */
 static void
 port_die(struct kport *p)
@@ -287,6 +292,13 @@ port_die(struct kport *p)
 
 	p->dead = true;
 	p->set = NULL;
+	if (p->dn_port != NULL) {
+		struct kport *np = p->dn_port;
+
+		p->dn_port = NULL;
+		notify_dead_name(np, p->dn_name);
+		kp_unref(np);
+	}
 	wakeup(p);
 	while ((m = TAILQ_FIRST(&p->q)) != NULL) {
 		TAILQ_REMOVE(&p->q, m, link);
@@ -905,6 +917,27 @@ mig_reply(struct ktask *t, struct kmsg *req, int id, int kr, struct kport *give,
 }
 
 
+/* MACH_NOTIFY_DEAD_NAME (72): header, NDR, the name (mach_dead_name_notification_t) */
+static void
+notify_dead_name(struct kport *to, uint32_t name)
+{
+	struct kmsg *r;
+	uint8_t *d;
+
+	if (to->dead)
+		return;
+	r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->data = d = malloc(36, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->size = 36;
+	wr32(d, 0, MM_MOVE_SEND_ONCE);
+	wr32(d, 4, 36);
+	wr32(d, 20, 72);
+	wr32(d, 32, name);
+	TAILQ_INSERT_TAIL(&to->q, r, link);
+	to->qn++;
+	wakeup(to);
+}
+
 /* a reply with the return code and inline data after it (the layout of MIG for simple routines: header 24, NDR 8, RetCode 4, data) */
 static void
 mig_reply_data(struct kmsg *req, int id, int kr, const void *data, size_t datalen)
@@ -1114,6 +1147,36 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 		if (t->special[which] != NULL) kp_unref(t->special[which]);
 		t->special[which] = m->carry[0].port; m->carry[0].port = NULL; m->ncarry = 0;	/* the right moves into the slot */
 		mig_reply(t, m, id, 0, NULL, NULL, 0, NULL, 0);
+		break;
+	case 3213:				/* mach_port_request_notification(task, name, variant, sync, notify): only the dead-name variant (72) is acted on; the reply has no previous port */
+		{
+			struct kent *e = m->size >= 60 ? ent_by_name(t, rd32(m->data, 48)) : NULL;
+			uint32_t variant = m->size >= 60 ? rd32(m->data, 52) : 0;
+
+			if (e == NULL) { mig_reply(t, m, id, KERN_INVALID_NAME, NULL, NULL, 0, NULL, 0); break; }
+			if (variant == 72 && m->ncarry == 1) {
+				struct kport *tp = e->port;
+
+				if (tp->dead && !e->recv)
+					notify_dead_name(m->carry[0].port, e->name);
+				else if (tp->dn_port == NULL) {
+					tp->dn_port = m->carry[0].port; m->carry[0].port->refs++;
+					tp->dn_name = e->name;
+				}
+			}
+			if (m->reply.port != NULL && !m->reply.port->dead) {		/* a complex reply with a null port descriptor */
+				struct kmsg *r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+				uint8_t *rd = r->data = malloc(40, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+
+				r->size = 40;
+				wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+				wr32(rd, 4, 40); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+				rd[28 + 10] = MM_MOVE_SEND_ONCE; rd[28 + 11] = 0;
+				TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+				m->reply.port->qn++;
+				wakeup(m->reply.port);
+			}
+		}
 		break;
 	case 3403:				/* mach_ports_register(task, ports[], count): up to 3 ports that the children get */
 		if (m->nool != 1 || m->ool[0].type != 2 || m->ool[0].count > 3) { mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0); break; }
