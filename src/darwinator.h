@@ -50,6 +50,8 @@ void	darwin_mach_init(void);
 void	darwin_mach_fini(void);
 void	darwin_spawn_syscalls_init(void);		/* syscalls_spawn.c */
 void	darwin_sem_syscalls_init(void);		/* syscalls_sem.c */
+int	darwin_semwait_signal(struct thread *, struct darwin_args *);	/* mach_ipc.c */
+void	darwin_misc_syscalls_init(void);		/* syscalls_misc.c */
 void	darwin_proc_syscalls_init(void);		/* syscalls_proc.c */
 int	darwin_sysctl_proc(struct thread *, int *, u_int, void *, void *, bool);
 int	darwin_sysctl_procargs2(struct thread *, int, void *, void *);

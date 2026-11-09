@@ -280,6 +280,22 @@ int cmain(void)
 	  r = S(284, ent, 64, res, 0, 0, 0);
 	  check("access_extended with _READ_OK", r == 0 && res[0] == 0 && res[1] == 2, res[0]); }
 
+	/* POSIX AIO: done in the call, the result is kept until aio_return */
+	{ static char abuf[64], rbuf[64]; static unsigned char cb[80], cb2[80]; long afd; int k;
+	  afd = S(SYS_open, "/tmp/darwinator-aio", 0x602 /* O_RDWR|O_CREAT|O_TRUNC */, 0644, 0, 0, 0);
+	  for (k = 0; k < 11; k++) abuf[k] = "aio payload"[k];
+	  { int fdv = (int)afd; long off = 0, nb = 11; void *bp = abuf; memset(cb, 0, sizeof cb); memcpy(cb, &fdv, 4); memcpy(cb + 8, &off, 8); memcpy(cb + 16, &bp, 8); memcpy(cb + 24, &nb, 8); }
+	  r = S(319, cb, 0, 0, 0, 0, 0); check("aio_write", r == 0, r);
+	  check("aio_error is 0 after it", S(317, cb, 0, 0, 0, 0, 0) == 0, 0);
+	  check("aio_return gives 11", S(314, cb, 0, 0, 0, 0, 0) == 11, 0);
+	  check("aio_return twice is EINVAL", S(314, cb, 0, 0, 0, 0, 0) == -22, 0);
+	  { int fdv = (int)afd; long off = 4, nb = 7; void *bp = rbuf; memset(cb2, 0, sizeof cb2); memcpy(cb2, &fdv, 4); memcpy(cb2 + 8, &off, 8); memcpy(cb2 + 16, &bp, 8); memcpy(cb2 + 24, &nb, 8); }
+	  r = S(318, cb2, 0, 0, 0, 0, 0); check("aio_read", r == 0 && S(314, cb2, 0, 0, 0, 0, 0) == 7 && rbuf[0] == 'p' && rbuf[6] == 'd', r);
+	  { void *list[2]; int op = 2; list[0] = cb; list[1] = 0; memcpy(cb + 72, &op, 4); r = S(320, 2, list, 2, 0, 0, 0); check("lio_listio (LIO_WAIT, one write)", r == 0 && S(314, cb, 0, 0, 0, 0, 0) == 11, r); }
+	  check("aio_cancel is AIO_ALLDONE (2)", S(316, afd, 0, 0, 0, 0, 0) == 2, 0);
+	  S(SYS_close, afd, 0, 0, 0, 0, 0); S(10, "/tmp/darwinator-aio", 0, 0, 0, 0, 0); }
+	check("setprivexec ok, mount EPERM, reboot EPERM", S(152, 0, 0, 0, 0, 0, 0) == 0 && S(167, 0, 0, 0, 0, 0, 0) == -1 && S(55, 0, 0, 0, 0, 0, 0) == -1, 0);
+
 	/* signals' mask, limits, ids */
 	{ unsigned set = 1U << 29, old = 0, cur = 0; r = S(SYS_sigprocmask, 1, &set, &old, 0, 0, 0);
 	  check("sigprocmask (SIG_BLOCK SIGUSR1)", r == 0 && !(old & set), r);
@@ -564,7 +580,10 @@ int cmain(void)
 	    { i64 kr3 = dmach7(31, (i64)rq, 3, 40, 64, rps, 2000, 0); unsigned sem = rq[7]; check("semaphore_create (id 3418): a send right to a new semaphore (value 1)", kr3 == 0 && rq[5] == 3518 && sem != 0, kr3);
 	      check("  semaphore_wait_trap takes the value", dmach(36, sem, 0, 0, 0, 0, 0) == 0, 0);
 	      check("  semaphore_timedwait_trap on 0 times out (KERN_OPERATION_TIMED_OUT 49)", dmach(38, sem, 0, 20000000, 0, 0, 0) == 49, 0);
-	      check("  semaphore_signal_trap then semaphore_wait_trap", dmach(33, sem, 0, 0, 0, 0, 0) == 0 && dmach(36, sem, 0, 0, 0, 0, 0) == 0, 0); } }
+	      check("  semaphore_signal_trap then semaphore_wait_trap", dmach(33, sem, 0, 0, 0, 0, 0) == 0 && dmach(36, sem, 0, 0, 0, 0, 0) == 0, 0);
+	      check("  __semwait_signal (334) on 0 with a 20 ms timeout is ETIMEDOUT (60)", S(334, sem, 0, 1, 1, 0, 20000000) == -60, 0);
+	      dmach(33, sem, 0, 0, 0, 0, 0);
+	      check("  __semwait_signal (334) on 1 returns 0", S(334, sem, 0, 1, 1, 0, 20000000) == 0, 0); } }
 	    /* dead ports: the send to a port whose receive right is gone fails */
 	    { unsigned D2 = 0, dm[7] = { 19, 28, 0, 0, 0, 1, 2 }; dmach(16, (i64)task, 1, (i64)&D2, 0, 0, 0); dmach(21, (i64)task, D2, D2, 20, 0, 0); dm[2] = D2; dmach(19, (i64)task, D2, 1, -1, 0, 0);
 	      kr2 = dmach7(31, (i64)dm, 1, 28, 0, 0, 0, 0); check("a send to a port that was destroyed is MACH_SEND_INVALID_DEST", kr2 == 0x10000003, kr2); } }
