@@ -764,7 +764,8 @@ trace_lookup(id obj, SEL sel)
 {
 	static long count; static pthread_t mainthr; static int init, bg;
 	if (!init) { mainthr = pthread_self(); init = 1; bg = getenv("MACHRUN_TRACEBG") != NULL; }
-	if (obj != NULL && trace_on && count < 20000 && (!bg || !pthread_equal(pthread_self(), mainthr))) {
+	static long maxc; if (!maxc) maxc = getenv("MACHRUN_TRACEMAX") ? atol(getenv("MACHRUN_TRACEMAX")) : 20000;
+	if (obj != NULL && trace_on && count < maxc && (!bg || !pthread_equal(pthread_self(), mainthr))) {
 		const char *(*cn)(Class) = dlsym(RTLD_DEFAULT, "class_getName");
 		Class k = rt_object_getClass(obj);
 		const char *n = cn && k ? cn(k) : "?";
@@ -772,6 +773,7 @@ trace_lookup(id obj, SEL sel)
 		{ static const char *g; static int gi; if (!gi) { g = getenv("MACHRUN_TRACEGREP"); gi = 1; } if (g && !strstr(sn, g) && !strstr(n ? n : "", g)) return (traced_lookup(obj, sel)); }
 		count++;
 		if (strncmp(sn, "performSelector:", 16) == 0 || strncmp(sn, "performSelectorOnMainThread", 27) == 0) fprintf(stderr, "msg %s%s %s  [%s]\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn, machrun_arg2 ? rt_selName((SEL)machrun_arg2) : "?");
+		else if (getenv("MACHRUN_TRACEADDR")) fprintf(stderr, "msg %s%s %s @%p\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn, (void *)obj);
 		else fprintf(stderr, "msg %s%s %s\n", (void *)k == obj ? "+" : "-", n ? n : "(null)", sn);
 	}
 	return (traced_lookup(obj, sel));
