@@ -10,7 +10,7 @@
  *   - fork: the child gets the special ports (bootstrap among them) and the registered ports of the parent; exit: the receive rights die (the senders see a dead port).
  *
  * What a launchd does (a registry of service names behind the bootstrap port) is a program of user space that holds the receive right of the bootstrap port
- * and hands it to its children; it needs nothing more than this.  Not here: notifications other than dead name (no more senders, port destroyed), port attributes,
+ * and hands it to its children; it needs nothing more than this.  Not here: the port-destroyed and send-once notifications, port attributes,
  * guards, the thread and host MIG routines (task_info, thread_create, host_info ...), voucher ports.
  */
 #include <sys/param.h>
@@ -102,6 +102,7 @@ struct kport {
 	struct kport	*set;			/* the port set that this port is a member of (a port is in one set at most) */
 	int		count;			/* KP_SEM: the value */
 	struct kport	*dn_port;		/* a dead-name notification is sent here when this port dies (mach_port_request_notification) */
+	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
 };
 
@@ -158,6 +159,7 @@ kp_unref(struct kport *p)
 	if (p == NULL || --p->refs > 0)
 		return;
 	if (p->dn_port != NULL) { struct kport *n = p->dn_port; p->dn_port = NULL; kp_unref(n); }
+	if (p->ns_port != NULL) { struct kport *n = p->ns_port; p->ns_port = NULL; kp_unref(n); }
 	while ((m = TAILQ_FIRST(&p->q)) != NULL) {
 		TAILQ_REMOVE(&p->q, m, link);
 		kmsg_free(m);
@@ -283,6 +285,7 @@ kt_task(struct proc *p)
 }
 
 static void notify_dead_name(struct kport *to, uint32_t name);
+static void ns_check(void);
 
 /* the receive right of the entry is gone: the port is dead for everybody */
 static void
@@ -375,6 +378,7 @@ darwin_port_deallocate(struct thread *td, struct darwin_args *uap)	/* (target, n
 		else if (e->sonce > 0) { e->sonce--; kr = KERN_SUCCESS; }
 		else if (e->recv) kr = KERN_INVALID_RIGHT;
 		ent_drop_if_empty(e);
+		ns_check();
 	}
 	sx_xunlock(&km_sx);
 	return (kr_ret(td, kr));
@@ -396,6 +400,7 @@ darwin_port_mod_refs(struct thread *td, struct darwin_args *uap)	/* (target, nam
 			kr = KERN_SUCCESS;
 		} else if (right == MACH_PORT_RIGHT_SEND && delta < 0 && e->send >= -delta) {
 			e->send += delta; kr = KERN_SUCCESS;
+			ns_check();
 		} else if (right == MACH_PORT_RIGHT_SEND && delta > 0 && e->send > 0) {
 			e->send += delta; kr = KERN_SUCCESS;
 		} else if (right == MACH_PORT_RIGHT_SEND_ONCE && delta < 0 && e->sonce >= -delta) {
@@ -919,7 +924,7 @@ mig_reply(struct ktask *t, struct kmsg *req, int id, int kr, struct kport *give,
 
 /* MACH_NOTIFY_DEAD_NAME (72): header, NDR, the name (mach_dead_name_notification_t) */
 static void
-notify_dead_name(struct kport *to, uint32_t name)
+notify_id(struct kport *to, int nid, uint32_t arg)
 {
 	struct kmsg *r;
 	uint8_t *d;
@@ -931,11 +936,61 @@ notify_dead_name(struct kport *to, uint32_t name)
 	r->size = 36;
 	wr32(d, 0, MM_MOVE_SEND_ONCE);
 	wr32(d, 4, 36);
-	wr32(d, 20, 72);
-	wr32(d, 32, name);
+	wr32(d, 20, nid);
+	wr32(d, 32, arg);
 	TAILQ_INSERT_TAIL(&to->q, r, link);
 	to->qn++;
 	wakeup(to);
+}
+
+static void
+notify_dead_name(struct kport *to, uint32_t name)
+{
+	notify_id(to, 72, name);
+}
+
+/* the ports that have a no-more-senders request (each holds a reference); checked whenever a send right goes away */
+#define	NS_N	32
+static struct kport *ns_list[NS_N];
+
+static int
+ns_sends(struct kport *p)
+{
+	int i, j, n = 0;
+
+	for (i = 0; i < KT_N; i++) {
+		if (kt_tab[i] == NULL || !kt_tab[i]->used)
+			continue;
+		for (j = 0; j < KE_N; j++)
+			if (kt_tab[i]->e[j].used && kt_tab[i]->e[j].port == p)
+				n += kt_tab[i]->e[j].send;
+	}
+	return (n);
+}
+
+static void
+ns_check(void)
+{
+	int i;
+
+	for (i = 0; i < NS_N; i++) {
+		struct kport *p = ns_list[i];
+
+		if (p == NULL)
+			continue;
+		if (p->dead || p->ns_port == NULL) {
+			ns_list[i] = NULL;
+			kp_unref(p);
+		} else if (ns_sends(p) == 0) {
+			struct kport *np = p->ns_port;
+
+			p->ns_port = NULL;
+			notify_id(np, 70, 0);			/* MACH_NOTIFY_NO_SENDERS: the make-send count follows the NDR */
+			kp_unref(np);
+			ns_list[i] = NULL;
+			kp_unref(p);
+		}
+	}
 }
 
 /* a reply with the return code and inline data after it (the layout of MIG for simple routines: header 24, NDR 8, RetCode 4, data) */
@@ -1163,6 +1218,17 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			uint32_t variant = m->size >= 60 ? rd32(m->data, 52) : 0;
 
 			if (e == NULL) { mig_reply(t, m, id, KERN_INVALID_NAME, NULL, NULL, 0, NULL, 0); break; }
+			if (variant == 70 && m->ncarry == 1 && e->port->ns_port == NULL && !e->port->dead) {
+				int k;
+
+				for (k = 0; k < NS_N; k++)
+					if (ns_list[k] == NULL) {
+						ns_list[k] = e->port; e->port->refs++;
+						e->port->ns_port = m->carry[0].port; m->carry[0].port->refs++;
+						break;
+					}
+				ns_check();			/* no sender yet: it is sent now */
+			}
 			if (variant == 72 && m->ncarry == 1) {
 				struct kport *tp = e->port;
 
@@ -1296,6 +1362,7 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 		for (i = 0; i < 8; i++) { kp_unref(t->special[i]); t->special[i] = NULL; }
 		for (i = 0; i < 3; i++) { kp_unref(t->reg[i]); t->reg[i] = NULL; }
 		t->used = false;
+		ns_check();
 	}
 	sx_xunlock(&km_sx);
 }
