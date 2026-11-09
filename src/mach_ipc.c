@@ -561,6 +561,42 @@ darwin_sem_timedwait(struct thread *td, struct darwin_args *uap)		/* (sem, sec, 
 
 static int darwin_sem_timedwait_signal(struct thread *td, struct darwin_args *uap) { return (kr_ret(td, sem_wait_signal(td, (uint32_t)uap->a[0], (uint32_t)uap->a[1], semtimo((uint32_t)uap->a[2], (int32_t)uap->a[3])))); }
 
+/* __semwait_signal(cond_sem, mutex_sem, timeout, relative, tv_sec, tv_nsec) (334, 423): what the old pthread condition variables wait with; the error is the value of the call */
+int
+darwin_semwait_signal(struct thread *td, struct darwin_args *uap)
+{
+	int timo = 0, kr;
+	uint32_t cond = (uint32_t)uap->a[0], mtx = (uint32_t)uap->a[1];
+
+	if ((int)uap->a[2] != 0) {
+		int64_t sec = (int64_t)uap->a[4];
+		int32_t nsec = (int32_t)uap->a[5];
+
+		if ((int)uap->a[3] == 0) {			/* an absolute time */
+			struct timespec now;
+
+			nanotime(&now);
+			sec -= now.tv_sec; nsec -= (int32_t)now.tv_nsec;
+			if (nsec < 0) { sec--; nsec += 1000000000; }
+			if (sec < 0) { sec = 0; nsec = 0; }
+		}
+		timo = semtimo((uint32_t)sec, nsec);
+	}
+	if (mtx != 0)
+		kr = sem_wait_signal(td, cond, mtx, timo);
+	else {
+		struct kport *w;
+
+		kr = KERN_SUCCESS;
+		sx_xlock(&km_sx);
+		if ((w = sem_of(td, cond, &kr)) != NULL)
+			kr = sem_wait_locked(w, timo);
+		sx_xunlock(&km_sx);
+	}
+	td->td_retval[0] = 0;
+	return (kr == KERN_SUCCESS ? 0 : kr == 49 /* KERN_OPERATION_TIMED_OUT */ ? ETIMEDOUT : kr == 14 /* KERN_ABORTED */ ? EINTR : EINVAL);
+}
+
 /* ---- messages ---- */
 
 static uint32_t rd32(const uint8_t *b, size_t off) { uint32_t v; memcpy(&v, b + off, 4); return (v); }

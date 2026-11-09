@@ -149,6 +149,7 @@ darwin_sem_syscalls_init(void)
 		{ 271, 1, (sy_call_t *)darwin_sem_wait, AUE_NULL, "sem_wait" },
 		{ 272, 1, (sy_call_t *)darwin_sem_trywait, AUE_NULL, "sem_trywait" },
 		{ 273, 1, (sy_call_t *)darwin_sem_post, AUE_NULL, "sem_post" },
+		{ 420, 1, (sy_call_t *)darwin_sem_wait, AUE_NULL, "sem_wait_nocancel" },
 		{ 284, 4, (sy_call_t *)darwin_access_extended, AUE_ACCESS_EXTENDED, "access_extended" },
 	};
 	u_int i;
