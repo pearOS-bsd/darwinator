@@ -28,6 +28,8 @@
 #include <sys/sx.h>
 #include <sys/syscallsubr.h>
 #include <sys/smp.h>
+#include <sys/pcpu.h>
+#include <sys/vmmeter.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
@@ -1032,6 +1034,46 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			buf[7] = (uint32_t)mp_ncpus; buf[8] = (uint32_t)mp_ncpus; buf[9] = (uint32_t)mp_ncpus; buf[10] = (uint32_t)mp_ncpus;
 			memcpy(&buf[11], &mem, 8);
 			mig_reply_data(m, id, 0, buf, sizeof(buf));
+		}
+		return (true);
+	case 217: case 220:				/* host_statistics / host_statistics64(host, flavor, *info, *count) */
+		{
+			uint32_t buf[1 + 40];
+			uint64_t q[16];
+			int cnt = 0, i;
+
+			a = m->size >= 40 ? rd32(d, 32) : 0;
+			memset(buf, 0, sizeof(buf));
+			if (a == 4 && id == 220) {			/* HOST_VM_INFO64: vm_statistics64, 38 ints */
+				uint32_t *v = buf + 1;
+				uint64_t w[9] = { VM_CNT_FETCH(v_zfod), 0, VM_CNT_FETCH(v_vnodepgsin), VM_CNT_FETCH(v_vnodepgsout), VM_CNT_FETCH(v_vm_faults), VM_CNT_FETCH(v_cow_faults), 0, 0, 0 };
+
+				v[0] = vm_free_count(); v[1] = (uint32_t)physmem - vm_free_count() - vm_wire_count(); v[2] = 0; v[3] = vm_wire_count();
+				memcpy(v + 4, w, sizeof(w));			/* zero_fill, reactivations, pageins, pageouts, faults, cow_faults, lookups, hits, purges */
+				cnt = 38;
+			} else if (a == 2 && id == 217) {			/* HOST_VM_INFO: vm_statistics, 15 ints */
+				uint32_t *v = buf + 1;
+
+				v[0] = vm_free_count(); v[1] = (uint32_t)physmem - vm_free_count() - vm_wire_count(); v[2] = 0; v[3] = vm_wire_count();
+				v[4] = (uint32_t)VM_CNT_FETCH(v_zfod); v[6] = (uint32_t)VM_CNT_FETCH(v_vnodepgsin); v[7] = (uint32_t)VM_CNT_FETCH(v_vnodepgsout);
+				v[8] = (uint32_t)VM_CNT_FETCH(v_vm_faults); v[9] = (uint32_t)VM_CNT_FETCH(v_cow_faults);
+				cnt = 15;
+			} else if (a == 3) {					/* HOST_CPU_LOAD_INFO: ticks user, system, idle, nice */
+				memset(q, 0, sizeof(q));
+				CPU_FOREACH(i) {
+					struct pcpu *pc = pcpu_find(i);
+
+					if (pc == NULL)
+						continue;
+					q[0] += pc->pc_cp_time[CP_USER] + 0; q[1] += pc->pc_cp_time[CP_SYS] + pc->pc_cp_time[CP_INTR];
+					q[2] += pc->pc_cp_time[CP_IDLE]; q[3] += pc->pc_cp_time[CP_NICE];
+				}
+				for (i = 0; i < 4; i++)
+					buf[1 + i] = (uint32_t)q[i];
+				cnt = 4;
+			} else { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			buf[0] = (uint32_t)cnt;
+			mig_reply_data(m, id, 0, buf, (cnt + 1) * 4);
 		}
 		return (true);
 	case 202:					/* _host_page_size(host, *page_size: 8 bytes) */
