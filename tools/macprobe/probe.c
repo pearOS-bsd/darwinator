@@ -18,6 +18,7 @@
 #include <sys/attr.h>
 #include <sys/ucontext.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -78,7 +79,7 @@ int main(void)
 	{ struct stat st; stat("/", &st); printf("stat(/): st_dev %#x st_mode %o st_nlink %u st_ino %llu st_blksize %d\n", (unsigned)st.st_dev, st.st_mode, (unsigned)st.st_nlink, (unsigned long long)st.st_ino, (int)st.st_blksize);
 	  stat("/dev/null", &st); printf("stat(/dev/null): st_rdev %#x st_dev %#x\n", (unsigned)st.st_rdev, (unsigned)st.st_dev); }
 	{ struct statfs sf; statfs("/", &sf); printf("statfs(/): f_bsize %u f_iosize %d f_fstypename %s f_mntonname %s f_flags %#x f_type %u\n", sf.f_bsize, sf.f_iosize, sf.f_fstypename, sf.f_mntonname, sf.f_flags, sf.f_type); }
-	{ int fd = open("/", O_RDONLY); char buf[4096]; long base = 0; int n = getdirentries(fd, buf, sizeof(buf), &base); struct dirent *d = (struct dirent *)buf; printf("getdirentries(/): %d bytes, first entry reclen %u namlen %u type %u name %s\n", n, d->d_reclen, d->d_namlen, d->d_type, d->d_name); close(fd); }
+	{ int fd = open("/", O_RDONLY); char buf[4096]; long long base = 0; int n = (int)syscall(344 /* getdirentries64 */, fd, buf, (unsigned long)sizeof(buf), &base); struct dirent *d = (struct dirent *)buf; printf("getdirentries(/): %d bytes, first entry reclen %u namlen %u type %u name %s\n", n, d->d_reclen, d->d_namlen, d->d_type, d->d_name); close(fd); }
 	{ struct attrlist al; struct { u_int32_t len; u_int32_t objtype; } __attribute__((packed)) ab; memset(&al, 0, sizeof(al)); al.bitmapcount = ATTR_BIT_MAP_COUNT; al.commonattr = ATTR_CMN_OBJTYPE; int r = getattrlist("/", &al, &ab, sizeof(ab), 0); printf("getattrlist(/, OBJTYPE): r %d length %u objtype %u (VDIR=2)\n", r, ab.len, ab.objtype); }
 	{ char p[1024]; int fd = open("/tmp", O_RDONLY); int r = fcntl(fd, F_GETPATH, p); printf("F_GETPATH(/tmp): r %d %s\n", r, r == 0 ? p : strerror(errno)); close(fd); }
 	{ const char *f = "/tmp/probe_x.txt"; int fd = open(f, O_CREAT | O_WRONLY, 0644); int r = fsetxattr(fd, "com.test.x", "v", 1, 0, 0); char b[8]; ssize_t g = fgetxattr(fd, "com.test.x", b, sizeof(b), 0, 0); char l[64]; ssize_t ln = flistxattr(fd, l, sizeof(l), 0);
