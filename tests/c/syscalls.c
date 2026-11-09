@@ -152,8 +152,16 @@ static void on_usr1(int sig) { got_sig = sig; }
 struct duc { int onstack; unsigned mask; u64 sp, size; int flags, pad; u64 link, mcsize, mcontext; };
 struct dmc { unsigned short trapno, cpu; unsigned err; u64 fault; u64 r[21]; };
 static volatile u64 uc_rip, uc_rsp, uc_mcsize, uc_mcptr_ok, uc_rbp; static volatile unsigned uc_mask;
-static void on_usr1_info(int sig, void *info, void *uc) { struct duc *u = uc; struct dmc *m = (struct dmc *)u->mcontext; got_sig = sig; got_signo_from_info = *(int *)info;
-	uc_mcsize = u->mcsize; uc_mcptr_ok = (u64)m == (u64)uc + 56; uc_rip = m->r[16]; uc_rsp = m->r[7]; uc_rbp = m->r[6]; uc_mask = u->mask; }
+static void on_usr1_info(int sig, void *info, void *uc)
+{
+	got_sig = sig; got_signo_from_info = *(int *)info;
+#if defined(__x86_64__)		/* the Darwin ucontext is built on amd64 only */
+	{ struct duc *u = uc; struct dmc *m = (struct dmc *)u->mcontext;
+	  uc_mcsize = u->mcsize; uc_mcptr_ok = (u64)m == (u64)uc + 56; uc_rip = m->r[16]; uc_rsp = m->r[7]; uc_rbp = m->r[6]; uc_mask = u->mask; }
+#else
+	(void)uc;
+#endif
+}
 struct dflock { i64 start, len; int pid; short type, whence; };
 struct dpollfd { int fd; short events, revents; };
 struct drlimit { u64 cur, max; };
