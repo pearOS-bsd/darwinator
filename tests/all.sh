@@ -20,7 +20,7 @@ for a in $ONLY; do
 		if need XLD.app xld; then out="$(sh "$HERE/xld.sh" "$APPS/XLD.app" 2>&1)"; echo "$out" | grep -q "4 passed, 0 failed\|== 4 passed" && add XLD ok "WAV to FLAC and back, same bytes" || add XLD FAIL "$(echo "$out" | grep -c '^FAIL') checks failed"
 		else add XLD skip "not installed (no network?)"; fi ;;
 	keka)
-		if need Keka.app keka; then KEKA_DIR="$APPS/Keka.app/Contents/MacOS" out="$(sh "$HERE/keka.sh" 2>&1)"; echo "$out" | grep -qi "0 failed\|all passed" && add Keka ok "command line tools extract" || add Keka FAIL "$(echo "$out" | grep -ci 'fail') failures"
+		if need Keka.app keka; then KEKA_DIR="$APPS/Keka.app/Contents/MacOS"; export KEKA_DIR; out="$(sh "$HERE/keka.sh" 2>&1)"; [ "$(echo "$out" | grep -c "^ok")" -gt 0 ] || out="FAIL keka.sh did not run: $out"; echo "$out" | grep -q "^FAIL" && add Keka FAIL "$(echo "$out" | grep -c '^FAIL') checks failed" || add Keka ok "command line tools extract and encrypt ($(echo "$out" | grep -c '^ok') checks)"
 		else add Keka skip "not installed (no network?)"; fi ;;
 	esac
 done
