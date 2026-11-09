@@ -1167,6 +1167,63 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			}
 			return (true);
 		}
+	case 3204:					/* mach_port_allocate(task, right, *name) */
+		{
+			uint32_t right = m->size >= 36 ? rd32(d, 32) : 99;
+			struct kport *np;
+			struct kent *ne;
+
+			if (right != MACH_PORT_RIGHT_RECEIVE && right != MACH_PORT_RIGHT_PORT_SET) { mig_reply_data(m, id, KERN_INVALID_VALUE, NULL, 0); return (true); }
+			np = kp_new(right == MACH_PORT_RIGHT_PORT_SET ? KP_SET : KP_PORT);
+			ne = ent_add(t, np, MM_MOVE_RECEIVE);
+			np->refs--;
+			if (ne == NULL) { kp_unref(np); mig_reply_data(m, id, KERN_NO_SPACE, NULL, 0); return (true); }
+			a = ne->name;
+			mig_reply_data(m, id, 0, &a, 4);
+			return (true);
+		}
+	case 3205: case 3232:				/* mach_port_destroy(task, name), mach_port_destruct(task, name, srdelta, guard): every right of the name goes */
+	case 3206:					/* mach_port_deallocate(task, name): one send or send-once right, or the dead name */
+	case 3208:					/* mach_port_mod_refs(task, name, right, delta) */
+	case 3207:					/* mach_port_get_refs(task, name, right, *refs) */
+		{
+			struct kent *e = m->size >= 36 ? ent_by_name(t, rd32(d, 32)) : NULL;
+			int right = m->size >= 40 ? (int)rd32(d, 36) : 0, delta = m->size >= 44 ? (int)rd32(d, 40) : 0, kr = KERN_SUCCESS;
+
+			if (e == NULL) { mig_reply_data(m, id, KERN_INVALID_NAME, NULL, 0); return (true); }
+			if (id == 3205 || id == 3232) {
+				if (e->recv) { e->recv = false; port_die(e->port); }
+				e->send = 0; e->sonce = 0;
+			} else if (id == 3206) {
+				if (e->send > 0) e->send--;
+				else if (e->sonce > 0) e->sonce--;
+				else if (e->recv) kr = KERN_INVALID_RIGHT;
+			} else if (id == 3208) {
+				kr = KERN_INVALID_RIGHT;
+				if (right == MACH_PORT_RIGHT_RECEIVE && e->recv && delta < 0) { e->recv = false; port_die(e->port); kr = KERN_SUCCESS; }
+				else if (right == MACH_PORT_RIGHT_SEND && e->send > 0 && e->send + delta >= 0) { e->send += delta; kr = KERN_SUCCESS; }
+				else if (right == MACH_PORT_RIGHT_SEND_ONCE && e->sonce > 0 && e->sonce + delta >= 0) { e->sonce += delta; kr = KERN_SUCCESS; }
+			} else {
+				a = right == MACH_PORT_RIGHT_SEND ? e->send : right == MACH_PORT_RIGHT_RECEIVE ? (e->recv ? 1 : 0) : right == MACH_PORT_RIGHT_SEND_ONCE ? e->sonce : 0;
+				if (right == 4) a = (e->port->dead && !e->recv) ? 1 : 0;	/* MACH_PORT_RIGHT_DEAD_NAME */
+				mig_reply_data(m, id, 0, &a, 4);
+				return (true);
+			}
+			ent_drop_if_empty(e);
+			ns_check();
+			mig_reply_data(m, id, kr, NULL, 0);
+			return (true);
+		}
+	case 3222:					/* mach_port_get_srights(task, name, *srights) */
+		{
+			struct kent *e = m->size >= 36 ? ent_by_name(t, rd32(d, 32)) : NULL;
+
+			if (e == NULL || !e->recv) { mig_reply_data(m, id, e == NULL ? KERN_INVALID_NAME : KERN_INVALID_RIGHT, NULL, 0); return (true); }
+			a = (uint32_t)ns_sends(e->port);
+			mig_reply_data(m, id, 0, &a, 4);
+			return (true);
+		}
+	case 3210: case 3216:				/* mach_port_set_mscount, mach_port_set_seqno: accepted */
 	case 3218:					/* mach_port_set_attributes: accepted */
 	case 3229:					/* mach_port_set_context */
 	case 3407: case 3408:				/* task_suspend, task_resume */
