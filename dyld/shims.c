@@ -367,6 +367,72 @@ int cc_CCCryptorCreateWithMode(uint32_t, uint32_t, uint32_t, uint32_t, const voi
 int cc_CCCryptorUpdate(void *, const void *, size_t, void *, size_t, size_t *); int cc_CCCryptorReset(void *, const void *);
 int cc_CCCryptorRelease(void *); int cc_CCCryptorFinal(void *, void *, size_t, size_t *);
 
+
+/* fts: the entry (FTSENT) and its struct stat have other layouts on Darwin (fts_statp is at 96 there, the fields have other sizes).  The calls give the program a copy in Darwin's layout of what FreeBSD's
+ * fts gives; the copies are kept until fts_close.  (fts_number and fts_pointer that the program sets are not given back to FreeBSD's entries.) */
+#include <fts.h>
+struct dftsent {
+	struct dftsent *fts_cycle, *fts_parent, *fts_link;
+	long fts_number; void *fts_pointer; char *fts_accpath, *fts_path;
+	int fts_errno, fts_symfd; unsigned short fts_pathlen, fts_namelen; uint64_t fts_ino;
+	int32_t fts_dev; uint16_t fts_nlink; short fts_level; unsigned short fts_info, fts_flags, fts_instr;
+	struct darwin_stat64 *fts_statp; FTSENT *orig; FTS *owner; struct dftsent *all, *hnext; struct darwin_stat64 st; size_t cap;
+	char fts_name[1];
+};
+_Static_assert(offsetof(struct dftsent, fts_statp) == 96, "FTSENT of Darwin");
+static struct dftsent *dfts_all, *dfts_hash[4096];
+static int (*dfts_compar)(const struct dftsent **, const struct dftsent **);
+static struct dftsent *
+dfts_conv(FTS *h, FTSENT *e, int deep)
+{
+	/* one copy per FreeBSD entry (they live from the first visit of a directory to its last): the program compares entries by address (the parent of a file is the entry of the directory it saw before) */
+	struct dftsent *d, **b; size_t n;
+	if (e == NULL) return (NULL);
+	n = sizeof(*d) + e->fts_namelen + 1;
+	b = &dfts_hash[((uintptr_t)e >> 4) & 4095];
+	for (d = *b; d != NULL; d = d->hnext) if (d->orig == e && d->owner == h) break;
+	if (d != NULL && d->cap < n) { d = NULL; }	/* the address was used again for a longer name: a new copy (the old one stays until fts_close) */
+	if (d == NULL) {
+		if ((d = calloc(1, n)) == NULL) return (NULL);
+		d->cap = n; d->orig = e; d->owner = h; d->all = dfts_all; dfts_all = d; d->hnext = *b; *b = d;
+		d->fts_number = e->fts_number; d->fts_pointer = e->fts_pointer;	/* the program's own (fts_number, fts_pointer) stay in the copy from then on */
+	}
+	d->fts_accpath = e->fts_accpath; d->fts_path = e->fts_path;
+	d->fts_errno = e->fts_errno; d->fts_symfd = e->fts_symfd; d->fts_pathlen = e->fts_pathlen; d->fts_namelen = e->fts_namelen;
+	d->fts_ino = e->fts_ino; d->fts_dev = (int32_t)e->fts_dev; d->fts_nlink = (uint16_t)e->fts_nlink; d->fts_level = e->fts_level;
+	d->fts_info = e->fts_info; d->fts_flags = e->fts_flags; d->fts_instr = e->fts_instr;
+	if (e->fts_statp != NULL) { st_out(e->fts_statp, &d->st); d->fts_statp = &d->st; } else d->fts_statp = NULL;
+	memcpy(d->fts_name, e->fts_name, e->fts_namelen); d->fts_name[e->fts_namelen] = '\0';
+	d->fts_parent = (deep && e->fts_parent != NULL && e->fts_parent->fts_level >= 0) ? dfts_conv(h, e->fts_parent, 0) : NULL;
+	d->fts_link = NULL;
+	if (deep && e->fts_link != NULL) { struct dftsent **t = &d->fts_link; FTSENT *l; for (l = e->fts_link; l != NULL; l = l->fts_link) { *t = dfts_conv(h, l, 0); if (*t == NULL) break; t = &(*t)->fts_link; } }
+	return (d);
+}
+static int
+dfts_wrap_compar(const FTSENT **a, const FTSENT **b)
+{
+	struct dftsent *da = dfts_conv(NULL, (FTSENT *)*a, 0), *db = dfts_conv(NULL, (FTSENT *)*b, 0);
+	const struct dftsent *pa = da, *pb = db;
+	return (dfts_compar != NULL && da != NULL && db != NULL ? dfts_compar(&pa, &pb) : 0);
+}
+static FTS *
+dw_fts_open(char *const *argv, int options, int (*compar)(const struct dftsent **, const struct dftsent **))
+{
+	dfts_compar = compar;
+	return (fts_open(argv, options & 0xff, compar ? (int (*)(const FTSENT * const *, const FTSENT * const *))dfts_wrap_compar : NULL));
+}
+static struct dftsent *dw_fts_read(FTS *h) { return (dfts_conv(h, fts_read(h), 1)); }
+static struct dftsent *dw_fts_children(FTS *h, int instr) { return (dfts_conv(h, fts_children(h, instr), 1)); }
+static int dw_fts_set(FTS *h, struct dftsent *d, int instr) { return (fts_set(h, d != NULL ? d->orig : NULL, instr)); }
+static int
+dw_fts_close(FTS *h)
+{
+	struct dftsent **pp = &dfts_all, *d; int i;
+	for (i = 0; i < 4096; i++) { struct dftsent **hp = &dfts_hash[i]; while (*hp != NULL) { if ((*hp)->owner == h) *hp = (*hp)->hnext; else hp = &(*hp)->hnext; } }
+	while ((d = *pp) != NULL) { if (d->owner == h) { *pp = d->all; free(d); } else pp = &d->all; }
+	return (fts_close(h));
+}
+
 /* Mac-only calls that need no real work here: extended attributes, copyfile, the membership (ACL) API */
 static int dw_fsetxattr(int fd, const char *n, const void *v, size_t sz, uint32_t pos, int opt) { errno = ENOTSUP; return (-1); }
 static ssize_t dw_fgetxattr(int fd, const char *n, void *v, size_t sz, uint32_t pos, int opt) { errno = ENOATTR; return (-1); }
@@ -378,8 +444,19 @@ void *cf_CFStringCreateWithCString(void *, const char *, uint32_t);
 static void *
 dw_UTTypeCreatePreferredIdentifierForTag(void *tagClass, void *tag, void *conforming)
 {
-	(void)tagClass; (void)conforming; (void)tag;
-	return (cf_CFStringCreateWithCString(NULL, "public.data", 0x08000100));
+	/* an Objective-C string (the program sends it messages), retained: "dyn." and the tag, as Mac OS X names a type that it does not know */
+	void *(*gc)(const char *) = dlsym(RTLD_DEFAULT, "objc_getClass"); void *(*sr)(const char *) = dlsym(RTLD_DEFAULT, "sel_registerName"); void *(*lookup)(void *, void *) = dlsym(RTLD_DEFAULT, "objc_msg_lookup");
+	void *cls, *str, *(*imp)(void *, void *, const char *); const char *(*u8)(void *, void *); char buf[300] = "dyn.";
+	(void)tagClass; (void)conforming;
+	if (getenv("MACHRUN_DEBUG_UT")) fprintf(stderr, "machrun: UTTypeCreatePreferredIdentifierForTag(tag %p)\n", tag);
+	if (gc == NULL || sr == NULL || lookup == NULL || (cls = gc("NSString")) == NULL) return (NULL);
+	if (tag == NULL) strlcpy(buf, "dyn.notag", sizeof(buf));	/* a file without extension: a dynamic identifier too (the program puts it in a dictionary as a key) */
+	else if ((u8 = (const char *(*)(void *, void *))lookup(tag, sr("UTF8String"))) != NULL) { const char *t = u8(tag, sr("UTF8String")); if (t != NULL) strlcat(buf, t, sizeof(buf)); }
+	if (strcmp(buf, "dyn.") == 0) strlcpy(buf, "public.data", sizeof(buf));
+	imp = (void *(*)(void *, void *, const char *))lookup(cls, sr("stringWithUTF8String:"));
+	str = imp != NULL ? imp(cls, sr("stringWithUTF8String:"), buf) : NULL;
+	if (str != NULL) { void *(*rt)(void *, void *) = (void *(*)(void *, void *))lookup(str, sr("retain")); if (rt != NULL) rt(str, sr("retain")); }
+	return (str);
 }
 static int dw_copyfile(const char *from, const char *to, void *state, uint32_t flags) { if (flags & (1u << 16)) return (0); errno = ENOTSUP; return (-1); }	/* COPYFILE_CHECK: nothing to copy (no AppleDouble data) */
 static int dw_mbr_uid_to_uuid(unsigned uid, unsigned char *uu) { return (ENOENT); }
@@ -616,12 +693,14 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_IOServiceGetMatchingService", dw_zero }, { "_IOObjectRelease", dw_zero }, { "_IOObjectConformsTo", dw_zero }, { "_IORegistryEntryCreateCFProperties", dw_kern_failure },
 	{ "_IORegistryEntryGetParentEntry", dw_kern_failure },
 	{ "_DASessionCreate", dw_zero }, { "_DADiskCreateFromVolumePath", dw_zero }, { "_DADiskCopyDescription", dw_zero }, { "_DADiskUnmount", dw_zero },
-	{ "_UTTypeCreatePreferredIdentifierForTag", dw_UTTypeCreatePreferredIdentifierForTag }, { "_UTTypeCopyDeclaration", dw_zero }, { "_SecCodeCopySelf", dw_minus_one }, { "_SecCodeCopySigningInformation", dw_minus_one },
+	{ "_UTTypeCreatePreferredIdentifierForTag", dw_UTTypeCreatePreferredIdentifierForTag }, { "_SecCodeCopySelf", dw_minus_one }, { "_SecCodeCopySigningInformation", dw_minus_one },
 	{ "_FSEventStreamCreate", dw_zero }, { "_FSEventStreamSetDispatchQueue", dw_zero }, { "_FSEventStreamStart", dw_zero }, { "_FSEventStreamStop", dw_zero }, { "_FSEventStreamInvalidate", dw_zero }, { "_FSEventStreamRelease", dw_zero },
+	{ "_fts_open$INODE64", dw_fts_open }, { "_fts_read$INODE64", dw_fts_read }, { "_fts_children$INODE64", dw_fts_children }, { "_fts_set$INODE64", dw_fts_set }, { "_fts_close$INODE64", dw_fts_close },
+	{ "_fts_open", dw_fts_open }, { "_fts_read", dw_fts_read }, { "_fts_children", dw_fts_children }, { "_fts_set", dw_fts_set }, { "_fts_close", dw_fts_close },
 	{ "_proc_pidpath", dw_proc_pidpath }, { "_proc_name", dw_proc_name }, { "_GetProcessForPID", dw_minus_one }, { "_CopyProcessName", dw_minus_one },
 	{ "_MDItemCreateWithURL", dw_zero }, { "_MDItemCopyAttributes", dw_zero },
 	{ "_LSCopyAllRoleHandlersForContentType", dw_zero }, { "_LSCopyApplicationURLsForURL", dw_zero }, { "_LSCopyDefaultRoleHandlerForContentType", dw_ls_default_handler },
-	{ "_LSSetDefaultRoleHandlerForContentType", dw_zero }, { "_GetCurrentKeyModifiers", dw_zero }, { "_UTTypeCopyPreferredTagWithClass", dw_zero },
+	{ "_LSSetDefaultRoleHandlerForContentType", dw_zero }, { "_GetCurrentKeyModifiers", dw_zero },
 	{ "_LSSharedFileListCreate", dw_zero }, { "_LSSharedFileListCopySnapshot", dw_zero }, { "_LSSharedFileListItemRemove", dw_minus_one }, { "_LSSharedFileListItemResolve", dw_minus_one },
 	{ "_asl_open", dw_zero }, { "_asl_new", dw_zero }, { "_asl_set", dw_zero }, { "_asl_send", dw_zero }, { "_asl_free", dw_zero }, { "_asl_release", dw_zero }, { "_asl_search", dw_zero },
 	{ "_asl_next", dw_zero }, { "_asl_get", dw_zero }, { "_asl_set_query", dw_zero },
