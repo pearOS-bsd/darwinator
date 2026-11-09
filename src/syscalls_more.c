@@ -409,6 +409,12 @@ darwin_socketpair(struct thread *td, struct darwin_args *uap)
 	return (sys_socketpair(td, (struct socketpair_args *)&a));
 }
 
+int
+darwin_msgflags_pub(int d)
+{
+	return (d & ~DARWIN_MSG_NOSIGNAL) | ((d & DARWIN_MSG_NOSIGNAL) ? MSG_NOSIGNAL : 0);
+}
+
 static int
 darwin_msgflags(int d)
 {
@@ -490,6 +496,12 @@ static const struct darwin_sysctl {
 	{ "hw.byteorder",	6, 4,	K_INT, NULL, 12 },
 	{ "hw.logicalcpu_max",	-1, -1,	K_INT, NULL, 2 },
 	{ "hw.physicalcpu_max",	-1, -1,	K_INT, NULL, 2 },
+	{ "hw.l1dcachesize",	-1, -1,	K_INT, NULL, 13 },
+	{ "hw.l1icachesize",	-1, -1,	K_INT, NULL, 13 },
+	{ "hw.l2cachesize",	-1, -1,	K_INT, NULL, 14 },
+	{ "hw.tbfrequency",	-1, -1,	K_U64, NULL, 15 },
+	{ "hw.optional.x86_64",	-1, -1,	K_INT, NULL, 11 },
+	{ "hw.optional.arm64",	-1, -1,	K_INT, NULL, 11 },
 	{ "hw.logicalcpu",	-1, -1,	K_INT, NULL, 2 },
 	{ "hw.physicalcpu",	-1, -1,	K_INT, NULL, 2 },
 };
@@ -533,6 +545,8 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 		case 10: v.i = 64; break;
 		case 11: v.i = 1; break;
 		case 12: v.i = 1234; break;
+		case 13: v.i = 32768; break;
+		case 14: v.i = 262144; break;
 		default: v.i = (int)MIN((uint64_t)ptoa((uint64_t)physmem), (uint64_t)INT_MAX); break;
 		}
 		data = (const char *)&v;
@@ -550,7 +564,7 @@ darwin_sysctl_value(struct thread *td, const struct darwin_sysctl *e, void *old,
 		break;
 	}
 	default:
-		v.u = (uint64_t)ptoa((uint64_t)physmem);
+		v.u = e->id == 15 ? 1000000000ULL : (uint64_t)ptoa((uint64_t)physmem);
 		data = (const char *)&v;
 		size = sizeof(v.u);
 		break;

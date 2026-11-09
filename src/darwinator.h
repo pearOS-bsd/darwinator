@@ -34,6 +34,7 @@ extern int darwin_debug;
 
 int	darwin_oflags(int);				/* Darwin open flags -> FreeBSD's */
 int	darwin_errno(int);				/* FreeBSD errno -> Darwin errno */
+void	darwin_sigframe_init(struct sysentvec *);	/* per architecture: the signal frame in Darwin's layout (amd64) */
 void	darwin_machdep_syscalls_init(void);		/* per architecture */
 dev_t	darwin_to_dev(int32_t);				/* Darwin dev_t (major << 24 | minor) <-> FreeBSD's */
 int32_t	darwin_from_dev(dev_t);
@@ -42,6 +43,7 @@ struct stat;
 int	darwin_statfs_out(const struct statfs *, void *);
 int	darwin_sigprocmask(struct thread *, struct darwin_args *);
 int	darwin_stat_out(struct thread *, const struct stat *, void *);
+int	darwin_msgflags_pub(int);
 void	darwin_event_syscalls_init(void);		/* syscalls_event.c */
 void	darwin_sync_syscalls_init(void);		/* syscalls_sync.c: psynch, workq, the Mach traps */
 void	darwin_posix_syscalls_init(void);		/* syscalls_posix.c */

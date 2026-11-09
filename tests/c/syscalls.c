@@ -119,7 +119,7 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_psynch_mutexwait = 301, SYS_psynch_mutexdrop = 302, SYS_psynch_cvbroad = 303, SYS_psynch_cvsignal = 304, SYS_psynch_cvwait = 305, SYS_workq_open = 367, SYS_workq_kernreturn = 368, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_fgetattrlist = 228, SYS_psynch_mutexwait = 301, SYS_psynch_mutexdrop = 302, SYS_psynch_cvbroad = 303, SYS_psynch_cvsignal = 304, SYS_psynch_cvwait = 305, SYS_workq_open = 367, SYS_workq_kernreturn = 368, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
 	SYS_pthread_kill = 328, SYS_thread_selfid = 372, SYS_openat = 463, SYS_renameat = 465, SYS_faccessat = 466, SYS_fchmodat = 467, SYS_fstatat64 = 470, SYS_linkat = 471,
 	SYS_unlinkat = 472, SYS_readlinkat = 473, SYS_symlinkat = 474, SYS_mkdirat = 475, SYS_ulock_wait = 515, SYS_ulock_wake = 516, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
 	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
@@ -133,7 +133,11 @@ static struct dkev mk(u64 id, short f, unsigned short fl, unsigned ff, i64 d, u6
 static struct dtv tv0 = { 0, 0, 0 }, tv1 = { 1, 0, 0 }, tv2 = { 2, 0, 0 };
 static volatile int got_sig, got_signo_from_info;
 static void on_usr1(int sig) { got_sig = sig; }
-static void on_usr1_info(int sig, void *info, void *uc) { got_sig = sig; got_signo_from_info = *(int *)info; (void)uc; }
+struct duc { int onstack; unsigned mask; u64 sp, size; int flags, pad; u64 link, mcsize, mcontext; };
+struct dmc { unsigned short trapno, cpu; unsigned err; u64 fault; u64 r[21]; };
+static volatile u64 uc_rip, uc_rsp, uc_mcsize, uc_mcptr_ok, uc_rbp; static volatile unsigned uc_mask;
+static void on_usr1_info(int sig, void *info, void *uc) { struct duc *u = uc; struct dmc *m = (struct dmc *)u->mcontext; got_sig = sig; got_signo_from_info = *(int *)info;
+	uc_mcsize = u->mcsize; uc_mcptr_ok = (u64)m == (u64)uc + 56; uc_rip = m->r[16]; uc_rsp = m->r[7]; uc_rbp = m->r[6]; uc_mask = u->mask; }
 struct dflock { i64 start, len; int pid; short type, whence; };
 struct dpollfd { int fd; short events, revents; };
 struct drlimit { u64 cur, max; };
@@ -296,6 +300,10 @@ int cmain(void)
 	  sa.handler = (u64)on_usr1_info; sa.flags = 0x40; got_sig = 0; got_signo_from_info = 0;
 	  r = S(SYS_sigaction, 30, &sa, &old, 0, 0, 0); check("sigaction SA_SIGINFO (the old handler comes back)", r == 0 && old.handler == (u64)on_usr1, r);
 	  S(SYS_kill, me, 30, 1, 0, 0, 0); check("  siginfo: si_signo", got_sig == 30 && got_signo_from_info == 30, got_signo_from_info);
+#if defined(__x86_64__)
+	  check("  ucontext in Darwin's layout (uc_mcsize 712, uc_mcontext right after it)", uc_mcsize == 712 && uc_mcptr_ok, uc_mcsize);
+	  check("  the registers of the interrupted code (rip in the program, rsp on the stack)", uc_rip >= 0x100000000UL && uc_rip < 0x200000000UL && uc_rsp != 0 && uc_rbp != 0, uc_rip);
+#endif
 	  { unsigned m = 1U << 29, pend = 0, oldm = 0; got_sig = 0;
 	    S(SYS_pthread_sigmask, 1, &m, &oldm, 0, 0, 0); S(SYS_kill, me, 30, 1, 0, 0, 0);
 	    r = S(SYS_sigpending, &pend, 0, 0, 0, 0, 0); check("sigpending (blocked SIGUSR1 is pending)", r == 0 && (pend & m) && got_sig == 0, pend);
@@ -395,6 +403,11 @@ int cmain(void)
 	  { struct dtv t1, t2; i64 base = 0, kr; S(SYS_gettimeofday, &t1, 0, 0, 0, 0, 0); kr = dmach(90, 0, 0, 0, 0, 0, 0); (void)base; (void)t2;
 	    check("mach_wait_until_trap (a past time returns at once)", kr == 0, kr); }
 	  { i64 kr = dmach(31, 0, 0, 0, 0, 0, 0); check("mach_msg_trap fails with MACH_SEND_INVALID_DEST (no IPC)", kr == 0x10000003, kr); } }
+
+	/* fgetattrlist; sysctl hw.tbfrequency */
+	{ struct { unsigned short n, res; unsigned cmn, vol, dir, file, fork; } fal = { 5, 0, 0x8, 0, 0, 0x200, 0 }; static char fb[128]; int fdf = (int)S(SYS_open, "/tmp/dsc/a", 0, 0, 0, 0, 0);
+	  r = S(SYS_fgetattrlist, fdf, &fal, fb, sizeof(fb), 0, 0); check("fgetattrlist (objtype, data length)", r == 0 && *(unsigned *)fb == 16 && *(unsigned *)(fb + 4) == 1 && *(u64 *)(fb + 8) == 5, r); S(SYS_close, fdf, 0, 0, 0, 0, 0); }
+	{ u64 f = 0, len = 8; r = S(SYS_sysctlbyname, "hw.tbfrequency", 14, &f, &len, 0, 0); check("sysctlbyname hw.tbfrequency", r == 0 && f == 1000000000UL, r); }
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
