@@ -3,7 +3,7 @@
 .PATH: ${.CURDIR}/src
 
 KMOD=	darwinator
-SRCS=	darwinator.c macho.c syscalls.c syscalls_more.c syscalls_event.c syscalls_posix.c syscalls_sync.c syscalls_compat.c syscalls_proc.c mach_ipc.c darwin_${MACHINE_CPUARCH}.c
+SRCS=	darwinator.c macho.c syscalls.c syscalls_more.c syscalls_event.c syscalls_posix.c syscalls_sync.c syscalls_compat.c syscalls_proc.c syscalls_spawn.c mach_ipc.c darwin_${MACHINE_CPUARCH}.c
 SRCS+=	vnode_if.h
 
 .include <bsd.kmod.mk>

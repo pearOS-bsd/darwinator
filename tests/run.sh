@@ -39,6 +39,14 @@ if sh tests/build-c.sh $T/syscalls "" tests/c/syscalls.c; then
 	[ $st -eq 0 ] && echo "ok   syscalls (the other BSD calls)" || { echo "FAIL syscalls: $st failure(s)"; fail=1; }
 else echo "FAIL building syscalls"; fail=1; fi
 
+# posix_spawn (Darwin syscall 244) asked for by an application
+if sh tests/build-c.sh $T/spawn "" tests/c/spawn.c; then
+	out="$($T/spawn 2>&1)"; st=$?
+	echo "$out" | grep -v '^ok ' | sed 's/^/     | /'
+	echo "$out" | grep -c '^ok ' | sed 's/^/     | checks passed: /'
+	[ $st -eq 0 ] && echo "ok   spawn (posix_spawn)" || { echo "FAIL spawn: $st failure(s)"; fail=1; }
+else echo "FAIL building spawn"; fail=1; fi
+
 # a Mach-O file of the other architecture is refused, ELF programs and scripts still run
 OTHER=arm64; [ $ARCH = arm64 ] && OTHER=x86_64
 python3 tools/mkmacho.py --arch $OTHER -o $T/other
