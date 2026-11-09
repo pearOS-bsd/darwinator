@@ -32,7 +32,10 @@ darwin_fetch_syscall_args(struct thread *td)
 	if (frame->tf_elr - 4 >= sigpc && frame->tf_elr - 4 < sigpc + (uint64_t)*td->td_proc->p_sysent->sv_szsigcode) {
 		sa->code = SYS_sigreturn;		/* the signal trampoline of the kernel (svc #0, number in x8) */
 		sa->callp = &sysent[SYS_sigreturn];
-	} else if (x16 < 0 || x16 >= darwin_nsyscalls)		/* negative: Mach traps, not implemented yet */
+	} else if (x16 < 0) {				/* negative: Mach traps */
+		sa->code = (-x16 < 128) ? (u_int)(-x16) + DARWIN_MACH_BASE : (u_int)darwin_nsyscalls;
+		sa->callp = sa->code < (u_int)darwin_nsyscalls ? &darwin_sysent[sa->code] : &nosys_sysent;
+	} else if (x16 >= darwin_nsyscalls || x16 >= DARWIN_MACHDEP_BASE)
 		sa->callp = &nosys_sysent;
 	else
 		sa->callp = &darwin_sysent[sa->code];

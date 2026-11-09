@@ -45,7 +45,7 @@ static i64 dsys7(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g)
 	register i64 r9 __asm__("r9") = f;
 	i64 ret = 0x2000000 | n;
 	unsigned char err;
-	__asm__ volatile("push %7; push $0; syscall; setc %1; add $16, %%rsp" : "+a"(ret), "=q"(err), "+d"(c), "+D"(a), "+S"(b), "+r"(r10), "+r"(r8), "+r"(r9)
+	__asm__ volatile("push %8; push $0; syscall; setc %1; add $16, %%rsp" : "+a"(ret), "=q"(err), "+d"(c), "+D"(a), "+S"(b), "+r"(r10), "+r"(r8), "+r"(r9)
 	    : "r"(g) : "rcx", "r11", "memory", "cc");
 	return err ? -ret : ret;
 #else
@@ -69,6 +69,40 @@ __asm__(".globl thread_entry\nthread_entry:\n\tadrp x9, thread_port\n\tstr x1, [
 	"\tmov x0, #0\n\tmov x1, #0\n\tmov x2, #0\n\tmov x3, #0\n\tmov x16, #361\n\tsvc #0\n\tbrk #1\n");
 #endif
 
+
+/* a Mach trap: the result is a kern_return_t (no carry flag) */
+static i64 dmach(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f)
+{
+#if defined(__x86_64__)
+	register i64 r10 __asm__("r10") = d; register i64 r8 __asm__("r8") = e; register i64 r9 __asm__("r9") = f;
+	i64 ret = 0x1000000 | n;
+	__asm__ volatile("syscall" : "+a"(ret), "+d"(c), "+D"(a), "+S"(b), "+r"(r10), "+r"(r8), "+r"(r9) : : "rcx", "r11", "memory", "cc");
+	return ret;
+#else
+	register i64 x0 __asm__("x0") = a, x1 __asm__("x1") = b, x2 __asm__("x2") = c, x3 __asm__("x3") = d, x4 __asm__("x4") = e, x5 __asm__("x5") = f, x16 __asm__("x16") = -n;
+	__asm__ volatile("svc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5) : "r"(x16) : "memory", "cc");
+	return x0;
+#endif
+}
+
+/* a call with eight arguments (psynch_cvwait): two on the stack on x86-64, x6 and x7 on arm64 */
+static i64 dsys8(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h)
+{
+#if defined(__x86_64__)
+	register i64 r10 __asm__("r10") = d; register i64 r8 __asm__("r8") = e; register i64 r9 __asm__("r9") = f;
+	i64 ret = 0x2000000 | n; unsigned char err;
+	__asm__ volatile("push %9; push %8; push $0; syscall; setc %1; add $24, %%rsp" : "+a"(ret), "=q"(err), "+d"(c), "+D"(a), "+S"(b), "+r"(r10), "+r"(r8), "+r"(r9) : "r"(g), "r"(h) : "rcx", "r11", "memory", "cc");
+	return err ? -ret : ret;
+#else
+	register i64 x0 __asm__("x0") = a, x1 __asm__("x1") = b, x2 __asm__("x2") = c, x3 __asm__("x3") = d, x4 __asm__("x4") = e, x5 __asm__("x5") = f, x6 __asm__("x6") = g, x7 __asm__("x7") = h, x16 __asm__("x16") = n;
+	unsigned long err;
+	__asm__ volatile("svc #0\n\tcset %0, cs" : "=r"(err), "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6), "+r"(x7) : "r"(x16) : "memory", "cc");
+	return err ? -x0 : x0;
+#endif
+}
+static volatile u64 psy_mx; static volatile int psy_state; static volatile unsigned dummy2 = 1;
+static void twait(u64 arg) { (void)arg; psy_state = 1; dsys(301, (i64)psy_mx, 0, 0, 0, 0, 0); psy_state = 2; }
+
 static int fails;
 static void check(const char *name, int cond, i64 detail)
 {
@@ -85,7 +119,7 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_psynch_mutexwait = 301, SYS_psynch_mutexdrop = 302, SYS_psynch_cvbroad = 303, SYS_psynch_cvsignal = 304, SYS_psynch_cvwait = 305, SYS_workq_open = 367, SYS_workq_kernreturn = 368, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
 	SYS_pthread_kill = 328, SYS_thread_selfid = 372, SYS_openat = 463, SYS_renameat = 465, SYS_faccessat = 466, SYS_fchmodat = 467, SYS_fstatat64 = 470, SYS_linkat = 471,
 	SYS_unlinkat = 472, SYS_readlinkat = 473, SYS_symlinkat = 474, SYS_mkdirat = 475, SYS_ulock_wait = 515, SYS_ulock_wake = 516, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
 	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
@@ -330,6 +364,37 @@ int cmain(void)
 	  for (i = 0; i < 300 && thread_val == 0; i++) S(SYS_ulock_wait, 1, &dummy, 1, 10000, 0, 0);
 	  check("  the new thread ran func(arg) (registers of the start routine)", thread_val == 0x1234, (i64)thread_val);
 	  check("  its kernel port is its thread id", thread_port > 0, (i64)thread_port); }
+
+	/* psynch: a drop before the wait is remembered (mutex); a signal with nobody waiting is lost (condition variable); a wait that times out; a thread that waits and is woken */
+	{ static unsigned long mx, cv, mx2; i64 base2, top2;
+	  r = S(SYS_psynch_mutexdrop, &mx, 0, 0, 0, 0, 0); check("psynch_mutexdrop", r == 0, r);
+	  r = S(SYS_psynch_mutexwait, &mx, 7, 0, 0, 0, 0); check("psynch_mutexwait after a drop returns at once (gives the generation back)", r == 7, r);
+	  r = S(SYS_psynch_cvsignal, &cv, 0, 0, 0, 0, 0); check("psynch_cvsignal with no waiter", r == 0, r);
+	  r = dsys8(SYS_psynch_cvwait, (i64)&cv, 0, 0, 0, 0, 0, 0, 30000000); check("psynch_cvwait times out (ETIMEDOUT = 60): the earlier signal was not kept", r == -60, r);
+	  psy_mx = (u64)&mx2; psy_state = 0;
+	  base2 = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0); top2 = (base2 + 65536 - 64) & ~15L;
+	  S(SYS_bsdthread_register, thread_entry, 0, 0, 0, 0, 0);
+	  r = S(SYS_bsdthread_create, twait, 0, top2, 0xdef000, 0, 0); check("a second thread is made", r == 0xdef000, r);
+	  for (i = 0; i < 200 && psy_state < 1; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
+	  check("  it is blocked in psynch_mutexwait (it has not run on)", psy_state == 1, psy_state);
+	  S(SYS_psynch_mutexdrop, &mx2, 0, 0, 0, 0, 0);
+	  for (i = 0; i < 400 && psy_state < 2; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
+	  check("  psynch_mutexdrop wakes it", psy_state == 2, psy_state); }
+	check("workq_open", S(SYS_workq_open, 0, 0, 0, 0, 0, 0) == 0, 0);
+	check("workq_kernreturn is EINVAL (no workqueue)", S(SYS_workq_kernreturn, 0, 0, 0, 0, 0, 0) == -22, 0);
+
+	/* Mach traps */
+	{ u64 task = dmach(28, 0, 0, 0, 0, 0, 0), host = dmach(29, 0, 0, 0, 0, 0, 0), rp = dmach(26, 0, 0, 0, 0, 0, 0), th = dmach(27, 0, 0, 0, 0, 0, 0);
+	  check("task_self_trap, host_self_trap, mach_reply_port, thread_self_trap give names", task == 0x103 && host == 0x203 && rp != 0 && th != 0 && rp != dmach(26, 0, 0, 0, 0, 0, 0), rp);
+	  { u64 addr = 0; i64 kr = dmach(10, (i64)task, (i64)&addr, 65536, 1, 0, 0);
+	    check("mach_vm_allocate (anywhere)", kr == 0 && addr != 0, kr);
+	    if (kr == 0) { *(volatile char *)addr = 5; check("  the memory is usable", *(volatile char *)addr == 5, 0);
+		    check("mach_vm_protect", dmach(14, (i64)task, (i64)addr, 65536, 0, 1, 0) == 0, 0);
+		    check("mach_vm_deallocate", dmach(12, (i64)task, (i64)addr, 65536, 0, 0, 0) == 0, 0); } }
+	  { unsigned tb[2] = { 0, 0 }; check("mach_timebase_info_trap (1/1: nanoseconds)", dmach(89, (i64)tb, 0, 0, 0, 0, 0) == 0 && tb[0] == 1 && tb[1] == 1, tb[0]); }
+	  { struct dtv t1, t2; i64 base = 0, kr; S(SYS_gettimeofday, &t1, 0, 0, 0, 0, 0); kr = dmach(90, 0, 0, 0, 0, 0, 0); (void)base; (void)t2;
+	    check("mach_wait_until_trap (a past time returns at once)", kr == 0, kr); }
+	  { i64 kr = dmach(31, 0, 0, 0, 0, 0, 0); check("mach_msg_trap fails with MACH_SEND_INVALID_DEST (no IPC)", kr == 0x10000003, kr); } }
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);

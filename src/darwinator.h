@@ -21,8 +21,9 @@ struct darwin_args {
 	register_t a[8];
 };
 
-#define	DARWIN_NSYSCALLS	1088		/* BSD class: numbers below 1024 (xnu has them up to about 560); machdep class: 1024 + number */
+#define	DARWIN_NSYSCALLS	1216		/* BSD class: numbers below 1024 (xnu has them up to about 560); machdep class: 1024 + number (below 64); Mach traps: 1088 + number (below 128) */
 #define	DARWIN_MACHDEP_BASE	1024
+#define	DARWIN_MACH_BASE	1088
 extern int darwin_debug;
 
 /* The Darwin system call number space: the top byte of the number selects a class. */
@@ -42,6 +43,7 @@ int	darwin_statfs_out(const struct statfs *, void *);
 int	darwin_sigprocmask(struct thread *, struct darwin_args *);
 int	darwin_stat_out(struct thread *, const struct stat *, void *);
 void	darwin_event_syscalls_init(void);		/* syscalls_event.c */
+void	darwin_sync_syscalls_init(void);		/* syscalls_sync.c: psynch, workq, the Mach traps */
 void	darwin_posix_syscalls_init(void);		/* syscalls_posix.c */
 void	darwin_more_syscalls_init(void);		/* syscalls_more.c */
 void	darwin_syscalls_init(void);			/* fills the unused entries with nosys */

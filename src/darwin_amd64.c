@@ -37,7 +37,10 @@ darwin_fetch_syscall_args(struct thread *td)
 			sa->code = (u_int)darwin_nsyscalls;
 		break;
 	case DARWIN_CLASS_MACHDEP:
-		sa->code += DARWIN_MACHDEP_BASE;
+		sa->code = sa->code < 64 ? sa->code + DARWIN_MACHDEP_BASE : (u_int)darwin_nsyscalls;
+		break;
+	case DARWIN_CLASS_MACH:		/* Mach traps: 0x1000000 | n */
+		sa->code = sa->code < 128 ? sa->code + DARWIN_MACH_BASE : (u_int)darwin_nsyscalls;
 		break;
 	case 0:					/* no class: the signal trampoline of the kernel returning with FreeBSD's sigreturn */
 		if (sa->code == SYS_sigreturn)
@@ -51,7 +54,7 @@ darwin_fetch_syscall_args(struct thread *td)
 	}
 	if (native_sigreturn)
 		sa->callp = &sysent[SYS_sigreturn];
-	else if (sa->code >= (u_int)darwin_nsyscalls || sa->code >= DARWIN_MACHDEP_BASE + 64)
+	else if (sa->code >= (u_int)darwin_nsyscalls)
 		sa->callp = &nosys_sysent;
 	else
 		sa->callp = &darwin_sysent[sa->code];
