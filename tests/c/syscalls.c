@@ -256,6 +256,25 @@ int cmain(void)
 	  r = S(157, "/", &sf, 0, 0, 0, 0); check("statfs (157)", r == 0 && sf.blocks > 0 && sf.on[0] == '/', r);
 	  r = S(158, fd, &sf, 0, 0, 0, 0); check("fstatfs (158)", r == 0 && sf.blocks > 0, r); S(SYS_close, fd, 0, 0, 0, 0, 0); }
 
+	/* named semaphores, access_extended */
+	{ r = S(268, "/darwinator-sem", 0x200, 0600, 2, 0, 0);
+	  check("sem_open creates", r >= 0, r);
+	  if (r >= 0) { i64 h = r;
+	    check("sem_wait 1", S(271, h, 0, 0, 0, 0, 0) == 0, 0);
+	    check("sem_trywait 2", S(272, h, 0, 0, 0, 0, 0) == 0, 0);
+	    check("sem_trywait is EAGAIN at zero", S(272, h, 0, 0, 0, 0, 0) == -35, 0);
+	    check("sem_post", S(273, h, 0, 0, 0, 0, 0) == 0, 0);
+	    check("sem_trywait after post", S(272, h, 0, 0, 0, 0, 0) == 0, 0);
+	    check("sem_close", S(269, h, 0, 0, 0, 0, 0) == 0, 0); }
+	  check("sem_unlink", S(270, "/darwinator-sem", 0, 0, 0, 0, 0) == 0, 0);
+	  check("sem_open without O_CREAT is ENOENT", S(268, "/darwinator-sem", 0, 0, 0, 0, 0) == -2, 0); }
+	{ static char ent[64]; static int res[2] = { 99, 99 };
+	  unsigned o0 = 32, o1 = 40; int f0 = 4, f1 = 2;
+	  memcpy(ent, &o0, 4); memcpy(ent + 4, &f0, 4); memcpy(ent + 16, &o1, 4); memcpy(ent + 20, &f1, 4);
+	  memcpy(ent + 32, "/\0", 2); memcpy(ent + 40, "/nonexistent\0", 13);
+	  r = S(284, ent, 64, res, 0, 0, 0);
+	  check("access_extended", r == 0 && res[0] == 0 && res[1] == 2, res[1]); }
+
 	/* signals' mask, limits, ids */
 	{ unsigned set = 1U << 29, old = 0, cur = 0; r = S(SYS_sigprocmask, 1, &set, &old, 0, 0, 0);
 	  check("sigprocmask (SIG_BLOCK SIGUSR1)", r == 0 && !(old & set), r);

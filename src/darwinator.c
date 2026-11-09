@@ -116,4 +116,5 @@ static moduledata_t darwinator_mod = {
 };
 DECLARE_MODULE(darwinator, darwinator_mod, SI_SUB_EXEC, SI_ORDER_ANY);
 MODULE_VERSION(darwinator, 1);
+MODULE_DEPEND(darwinator, sem, 1, 1, 1);
 FEATURE(darwinator, "Mach-O executables");
