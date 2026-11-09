@@ -233,6 +233,16 @@ const char *darwin_syscallnames[DARWIN_NSYSCALLS] = {
 
 const int darwin_nsyscalls = DARWIN_NSYSCALLS;
 
+/* what is not implemented fails with ENOSYS; with kern.darwinator.debug it is logged: the list of what a program needs */
+static int
+darwin_nosys(struct thread *td, struct nosys_args *uap)
+{
+	if (darwin_debug)
+		printf("darwinator: %s[%d]: unimplemented system call %#x (%s)\n", td->td_proc->p_comm, td->td_proc->p_pid,
+		    td->td_sa.original_code, td->td_sa.code < (u_int)DARWIN_NSYSCALLS && darwin_syscallnames[td->td_sa.code] != NULL ? darwin_syscallnames[td->td_sa.code] : "?");
+	return (nosys(td, uap));
+}
+
 void
 darwin_syscalls_init(void)
 {
@@ -242,7 +252,7 @@ darwin_syscalls_init(void)
 	darwin_machdep_syscalls_init();		/* the entries of the machdep class (per architecture) */
 	for (i = 0; i < DARWIN_NSYSCALLS; i++) {
 		if (darwin_sysent[i].sy_call == NULL) {
-			darwin_sysent[i] = (struct sysent){ .sy_narg = 0, .sy_call = (sy_call_t *)nosys,
+			darwin_sysent[i] = (struct sysent){ .sy_narg = 0, .sy_call = (sy_call_t *)darwin_nosys,
 			    .sy_auevent = AUE_NULL, .sy_thrcnt = SY_THR_STATIC };
 			darwin_syscallnames[i] = "#unimplemented";
 		} else if (darwin_syscallnames[i] == NULL)

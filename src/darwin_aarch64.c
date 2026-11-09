@@ -57,3 +57,7 @@ darwin_machdep_syscalls_init(void)
 {
 	/* TPIDRRO_EL0 (the TSD base) is set through a Mach trap on arm64: not implemented yet */
 }
+
+void darwin_commpage_init(void) { }
+int darwin_commpage_map(struct vmspace *vms __unused) { return (0); }
+void darwin_stack_init(struct sysentvec *sv __unused) { }

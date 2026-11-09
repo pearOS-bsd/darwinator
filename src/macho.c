@@ -17,6 +17,8 @@
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mutex.h>
+#include <sys/namei.h>
+#include <sys/fcntl.h>
 #include <sys/proc.h>
 #include <sys/resourcevar.h>
 #include <sys/sysent.h>
@@ -61,15 +63,21 @@ struct macho_info {
 	uint64_t	entry;
 	bool		have_entry;
 	bool		needs_dyld;
+	bool		has_dylinker;
+	char		dyld_path[128];		/* LC_LOAD_DYLINKER */
+	struct vnode	*vp;			/* the file that is read (the executable, or dyld) */
+	off_t		fsize;
+	uint32_t	want_filetype;		/* MH_EXECUTE, or MH_DYLINKER for dyld */
+	uint64_t	slide;			/* added to every address of the image (dyld is placed by the kernel) */
 };
 
 static int
-macho_read(struct image_params *imgp, void *buf, size_t len, off_t off)
+macho_read(struct vnode *vp, void *buf, size_t len, off_t off)
 {
 	ssize_t resid;
 	int error;
 
-	error = vn_rdwr(UIO_READ, imgp->vp, buf, len, off, UIO_SYSSPACE, IO_NODELOCKED,
+	error = vn_rdwr(UIO_READ, vp, buf, len, off, UIO_SYSSPACE, IO_NODELOCKED,
 	    curthread->td_ucred, NOCRED, &resid, curthread);
 	if (error == 0 && resid != 0)
 		error = ENOEXEC;		/* the file is shorter than its headers say */
@@ -107,14 +115,14 @@ macho_fat_slice(struct image_params *imgp, struct macho_info *mi)
 	int error, best = -1;
 	struct fat_arch bestfa = { 0 };
 
-	error = macho_read(imgp, &fh, sizeof(fh), 0);
+	error = macho_read(mi->vp, &fh, sizeof(fh), 0);
 	if (error != 0)
 		return (error);
 	n = be32toh(fh.nfat_arch);
 	if (n == 0 || n > 16)
 		return (ENOEXEC);
 	for (i = 0; i < n; i++) {
-		error = macho_read(imgp, &fa, sizeof(fa), sizeof(fh) + (off_t)i * sizeof(fa));
+		error = macho_read(mi->vp, &fa, sizeof(fa), sizeof(fh) + (off_t)i * sizeof(fa));
 		if (error != 0)
 			return (error);
 		if (be32toh(fa.cputype) != HOST_CPUTYPE)
@@ -131,7 +139,7 @@ macho_fat_slice(struct image_params *imgp, struct macho_info *mi)
 	}
 	mi->base = be32toh(bestfa.offset);
 	mi->size = be32toh(bestfa.size);
-	if (mi->base + mi->size > imgp->attr->va_size || mi->size < (off_t)sizeof(struct mach_header_64))
+	if (mi->base + mi->size > mi->fsize || mi->size < (off_t)sizeof(struct mach_header_64))
 		return (ENOEXEC);
 	return (0);
 }
@@ -148,16 +156,27 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 	bool have_main = false, have_thread = false;
 	uint64_t main_off = 0, thread_pc = 0;
 
-	memset(mi, 0, sizeof(*mi));
-	mi->size = imgp->attr->va_size;
+	{
+		struct vnode *vp = mi->vp;
+		off_t fsize = mi->fsize;
+		uint32_t want = mi->want_filetype;
+		uint64_t slide = mi->slide;
+		uint32_t m0;
 
-	magic_be = be32toh(*(const uint32_t *)imgp->image_header);
+		memset(mi, 0, sizeof(*mi));
+		mi->vp = vp; mi->fsize = fsize; mi->want_filetype = want; mi->slide = slide;
+		mi->size = fsize;
+		error = macho_read(vp, &m0, sizeof(m0), 0);
+		if (error != 0)
+			return (error);
+		magic_be = be32toh(m0);
+	}
 	if (magic_be == FAT_MAGIC) {
 		error = macho_fat_slice(imgp, mi);
 		if (error != 0)
 			return (error);
 	}
-	error = macho_read(imgp, &mh, sizeof(mh), mi->base);
+	error = macho_read(mi->vp, &mh, sizeof(mh), mi->base);
 	if (error != 0)
 		return (error);
 	if (mh.magic != MH_MAGIC_64)
@@ -166,7 +185,7 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 		DPRINTF("cputype %#x is not this architecture\n", mh.cputype);
 		return (ENOEXEC);
 	}
-	if (mh.filetype != MH_EXECUTE) {
+	if (mh.filetype != mi->want_filetype) {
 		DPRINTF("filetype %u is not an executable\n", mh.filetype);
 		return (ENOEXEC);
 	}
@@ -175,7 +194,7 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 		return (ENOEXEC);
 
 	cmds = macho_alloc(imgp, mh.sizeofcmds ? mh.sizeofcmds : 1);
-	error = macho_read(imgp, cmds, mh.sizeofcmds, mi->base + sizeof(mh));
+	error = macho_read(mi->vp, cmds, mh.sizeofcmds, mi->base + sizeof(mh));
 	if (error != 0)
 		goto out;
 
@@ -191,7 +210,7 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 		case LC_SEGMENT_64: {
 			struct segment_command_64 *sc = (struct segment_command_64 *)lc;
 			struct macho_seg *s;
-			uint64_t end;
+			uint64_t end, va;
 
 			if (lc->cmdsize < sizeof(*sc))
 				goto out;
@@ -199,23 +218,24 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 				break;			/* the unmapped bottom of the address space */
 			if (sc->vmsize == 0)
 				break;
-			if (mi->nseg == MACHO_MAXSEGS || (sc->vmaddr & PAGE_MASK) != 0 ||
+			if (mi->nseg == MACHO_MAXSEGS || ((sc->vmaddr + mi->slide) & PAGE_MASK) != 0 ||
 			    sc->filesize > sc->vmsize || sc->fileoff + sc->filesize < sc->fileoff ||
 			    sc->fileoff + sc->filesize > (uint64_t)mi->size)
 				goto out;
-			end = sc->vmaddr + sc->vmsize;
-			if (end < sc->vmaddr || sc->vmaddr < PAGE_SIZE ||
+			va = sc->vmaddr + mi->slide;
+			end = va + sc->vmsize;
+			if (end < va || va < PAGE_SIZE ||
 			    end > darwin_sysvec.sv_usrstack - maxssiz)
 				goto out;
 			s = &mi->seg[mi->nseg++];
-			s->vmaddr = sc->vmaddr;
-			s->start = trunc_page(sc->vmaddr);
+			s->vmaddr = va;
+			s->start = trunc_page(va);
 			s->end = round_page(end);
 			s->fileoff = sc->fileoff;
 			s->filesize = sc->filesize;
 			s->prot = macho_prot(sc->initprot);
 			if (strncmp(sc->segname, "__TEXT", sizeof(sc->segname)) == 0)
-				mi->text_vmaddr = sc->vmaddr;
+				mi->text_vmaddr = va;
 			break;
 		}
 		case LC_MAIN:
@@ -249,6 +269,10 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 			uint32_t noff = lc->cmdsize >= 12 ? ((const uint32_t *)lc)[2] : 0;
 
 			mi->needs_dyld = true;
+			if (lc->cmd == LC_LOAD_DYLINKER && noff >= 12 && noff < lc->cmdsize) {
+				mi->has_dylinker = true;
+				strlcpy(mi->dyld_path, (const char *)lc + noff, MIN(sizeof(mi->dyld_path), lc->cmdsize - noff + 1));
+			}
 			if (noff >= 12 && noff < lc->cmdsize)
 				DPRINTF("  needs %s %.*s\n", lc->cmd == LC_LOAD_DYLINKER ? "linker" : "library",
 				    (int)(lc->cmdsize - noff), (const char *)lc + noff);
@@ -267,7 +291,7 @@ macho_parse(struct image_params *imgp, struct macho_info *mi)
 			goto out;
 		mi->entry = mi->text_vmaddr + main_off;
 	} else
-		mi->entry = thread_pc;
+		mi->entry = thread_pc + mi->slide;
 	/* the entry point has to be in an executable segment */
 	for (i = 0; i < (uint32_t)mi->nseg; i++)
 		if (mi->entry >= mi->seg[i].vmaddr && mi->entry < mi->seg[i].end && (mi->seg[i].prot & VM_PROT_EXECUTE))
@@ -296,7 +320,7 @@ macho_map_segment(struct image_params *imgp, vm_map_t map, const struct macho_in
 
 	for (done = 0; done < s->filesize; done += n) {
 		n = MIN(s->filesize - done, MACHO_CHUNK);
-		error = macho_read(imgp, buf, n, mi->base + s->fileoff + done);
+		error = macho_read(mi->vp, buf, n, mi->base + s->fileoff + done);
 		if (error == 0)
 			error = copyout(buf, (void *)(uintptr_t)(s->vmaddr + done), n);
 		if (error != 0) {
@@ -319,13 +343,73 @@ macho_map_segment(struct image_params *imgp, vm_map_t map, const struct macho_in
 	return (0);
 }
 
+#define	DARWIN_DYLD_BASE	0x7ff700000000ULL	/* where dyld is placed: below the shared region (0x7ff800000000) */
+
+/* opens a file for reading (the way imgact_elf opens its interpreter); the vnode comes back locked shared and referenced, with its size */
+static int
+macho_open_file(struct image_params *imgp, const char *path, struct vnode **vpp, off_t *sizep)
+{
+	struct nameidata nd;
+	struct vattr va;
+	int error;
+
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKSHARED | LOCKLEAF, UIO_SYSSPACE, path);
+	error = namei(&nd);
+	if (error != 0)
+		return (error);
+	NDFREE_PNBUF(&nd);
+	if (nd.ni_vp->v_type != VREG) {
+		vput(nd.ni_vp);
+		return (ENOEXEC);
+	}
+	error = VOP_GETATTR(nd.ni_vp, &va, curthread->td_ucred);
+	if (error == 0)
+		error = VOP_ACCESS(nd.ni_vp, VREAD, curthread->td_ucred, curthread);
+	if (error == 0)
+		error = VOP_OPEN(nd.ni_vp, FREAD, curthread->td_ucred, curthread, NULL);
+	if (error != 0) {
+		vput(nd.ni_vp);
+		return (error);
+	}
+	*vpp = nd.ni_vp;
+	*sizep = va.va_size;
+	return (0);
+}
+
+/* the strings of the "apple" vector that dyld reads: appended to the environment strings and hidden from the environment (envc is taken back) */
+static void
+macho_add_apple(struct image_params *imgp, struct darwin_auxargs *aa)
+{
+	char str[1100];
+	uint64_t r1, r2, r3, r4;
+	int i;
+
+	arc4rand(&r1, sizeof(r1), 0); arc4rand(&r2, sizeof(r2), 0); arc4rand(&r3, sizeof(r3), 0); arc4rand(&r4, sizeof(r4), 0);
+	for (i = 0; i < 5; i++) {
+		switch (i) {
+		case 0: snprintf(str, sizeof(str), "executable_path=%s", imgp->execpath != NULL ? imgp->execpath : ""); break;
+		case 1: snprintf(str, sizeof(str), "ptr_munge=0x%016lx", (u_long)r1 & ~0xfful); break;
+		case 2: snprintf(str, sizeof(str), "stack_guard=0x%016lx", (u_long)r2 & ~0xfful); break;
+		case 3: snprintf(str, sizeof(str), "malloc_entropy=0x%016lx,0x%016lx", (u_long)r3, (u_long)r4); break;
+		default: snprintf(str, sizeof(str), "th_port=0x103"); break;
+		}
+		aa->off[aa->n] = (uint32_t)(imgp->args->endp - imgp->args->begin_argv);
+		if (exec_args_add_env(imgp->args, str, UIO_SYSSPACE) != 0)
+			break;
+		imgp->args->envc--;			/* it is in the buffer, and not in the environment */
+		aa->n++;
+	}
+}
+
 int
 macho_imgact(struct image_params *imgp)
 {
-	struct macho_info *mi;
+	struct macho_info *mi, *dmi = NULL;
 	struct vmspace *vmspace;
+	struct vnode *dvp = NULL;
 	void *buf;
 	uint32_t magic;
+	off_t dsize = 0;
 	int error, i;
 
 	if (imgp->attr->va_size < sizeof(struct mach_header_64))
@@ -336,18 +420,34 @@ macho_imgact(struct image_params *imgp)
 
 	mi = macho_alloc(imgp, sizeof(*mi));
 	buf = NULL;
+	mi->vp = imgp->vp; mi->fsize = imgp->attr->va_size; mi->want_filetype = MH_EXECUTE; mi->slide = 0;
 	error = macho_parse(imgp, mi);
 	if (error != 0)
 		goto out;
 	if (mi->needs_dyld) {
-		DPRINTF("%s: refused, it needs dyld and its libraries\n", imgp->execpath != NULL ? imgp->execpath : "?");
-		/* not ours: -1 lets the next activator try; with imgact_binmisc set up for Mach-O files (binmiscctl add ... --interpreter machrun) the file runs
-		 * through machrun, otherwise the exec fails with ENOEXEC as for any unknown format */
-		error = -1;
-		goto out;
+		if (!darwin_dyld || !mi->has_dylinker) {
+			DPRINTF("%s: refused, it needs dyld and its libraries\n", imgp->execpath != NULL ? imgp->execpath : "?");
+			/* not ours: -1 lets the next activator try; with imgact_binmisc set up for Mach-O files (binmiscctl add ... --interpreter machrun) the file runs
+			 * through machrun, otherwise the exec fails with ENOEXEC as for any unknown format */
+			error = -1;
+			goto out;
+		}
+		/* kern.darwinator.dyld: the linker that the file names (the dyld of a Mac) is mapped, and it starts first */
+		error = macho_open_file(imgp, mi->dyld_path, &dvp, &dsize);
+		if (error != 0) {
+			DPRINTF("%s: cannot open %s: %d\n", imgp->execpath != NULL ? imgp->execpath : "?", mi->dyld_path, error);
+			goto out;
+		}
+		dmi = macho_alloc(imgp, sizeof(*dmi));
+		dmi->vp = dvp; dmi->fsize = dsize; dmi->want_filetype = MH_DYLINKER; dmi->slide = DARWIN_DYLD_BASE;
+		error = macho_parse(imgp, dmi);
+		if (error != 0) {
+			DPRINTF("%s: %s is not a usable dyld\n", imgp->execpath != NULL ? imgp->execpath : "?", mi->dyld_path);
+			goto out;
+		}
 	}
 
-	DPRINTF("%s: %d segments, entry %#lx\n", imgp->execpath != NULL ? imgp->execpath : "?", mi->nseg, (u_long)mi->entry);
+	DPRINTF("%s: %d segments, entry %#lx%s\n", imgp->execpath != NULL ? imgp->execpath : "?", mi->nseg, (u_long)mi->entry, dmi != NULL ? " (through dyld)" : "");
 	error = exec_new_vmspace(imgp, &darwin_sysvec);
 	/* as imgact_elf does, whatever the result: the address space is the new one, the process is a Darwin process */
 	imgp->proc->p_sysent = &darwin_sysvec;
@@ -364,21 +464,51 @@ macho_imgact(struct image_params *imgp)
 		if (error != 0)
 			goto out;
 	}
+	if (dmi != NULL) {
+		for (i = 0; i < dmi->nseg; i++) {
+			error = macho_map_segment(imgp, &vmspace->vm_map, dmi, &dmi->seg[i], buf);
+			if (error != 0)
+				goto out;
+		}
+	}
 	error = exec_map_stack(imgp);
 	if (error != 0) {
 		DPRINTF("exec_map_stack failed: %d\n", error);
 		goto out;
 	}
+	error = darwin_commpage_map(vmspace);
+	if (error != 0) {
+		DPRINTF("the comm page: %d\n", error);
+		goto out;
+	}
 
-	imgp->entry_addr = mi->entry;
+	if (dmi != NULL) {
+		struct darwin_auxargs *aa = malloc(sizeof(*aa), M_TEMP, M_NOWAIT | M_ZERO);
+
+		if (aa == NULL) {
+			error = ENOMEM;
+			goto out;
+		}
+		aa->mh = mi->text_vmaddr;			/* the mach_header of the program is the start of its __TEXT segment */
+		macho_add_apple(imgp, aa);
+		imgp->auxargs = aa;			/* freed by do_execve; the stack gets the mach_header, then argc, argv, envp, apple */
+		imgp->entry_addr = dmi->entry;
+	} else {
+		imgp->auxargs = NULL;			/* the stack has argc, argv, envp: no ELF auxiliary vector */
+		imgp->entry_addr = mi->entry;
+	}
 	imgp->reloc_base = mi->text_vmaddr;
-	imgp->auxargs = NULL;			/* the stack has argc, argv, envp: no ELF auxiliary vector */
 	imgp->interpreted = 0;
 	imgp->proc->p_osrel = osreldate;
 	imgp->proc->p_fctl0 = 0;
 	imgp->proc->p_elf_flags = 0;
 out:
+	if (dvp != NULL) {
+		VOP_UNLOCK(dvp);
+		vn_close(dvp, FREAD, curthread->td_ucred, curthread);
+	}
 	free(buf, M_DARWIN);
+	free(dmi, M_DARWIN);
 	free(mi, M_DARWIN);
 	return (error);
 }

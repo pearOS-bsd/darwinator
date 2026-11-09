@@ -358,6 +358,58 @@ darwin_port_allocate(struct thread *td, struct darwin_args *uap)	/* (target, rig
 	return (kr_ret(td, kr));
 }
 
+/* _kernelrpc_mach_port_construct_trap(target, options *, context, *name): a receive right, with the options of mach_port_options_t (flags in the first word: 0x10 is MPO_INSERT_SEND_RIGHT) */
+static int
+darwin_port_construct(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kport *p;
+	struct kent *e;
+	uint32_t flags = 0, name = 0;
+	int kr = KERN_SUCCESS;
+
+	if (uap->a[1] != 0 && copyin((void *)uap->a[1], &flags, sizeof(flags)) != 0)
+		return (kr_ret(td, KERN_INVALID_ADDRESS));
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) == NULL) {
+		sx_xunlock(&km_sx);
+		return (kr_ret(td, KERN_NO_SPACE));
+	}
+	p = kp_new(KP_PORT);
+	e = ent_add(t, p, MM_MOVE_RECEIVE);
+	p->refs--;
+	if (e == NULL) { kp_unref(p); kr = KERN_NO_SPACE; }
+	else {
+		if (flags & 0x10)
+			e->send++;
+		name = e->name;
+	}
+	sx_xunlock(&km_sx);
+	if (kr == KERN_SUCCESS && copyout(&name, (void *)uap->a[3], sizeof(name)) != 0)
+		kr = KERN_INVALID_ADDRESS;
+	return (kr_ret(td, kr));
+}
+
+/* _kernelrpc_mach_port_destruct_trap(target, name, srdelta, guard): the receive right goes, and srdelta (negative) send rights */
+static int
+darwin_port_destruct(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kent *e;
+	int kr = KERN_INVALID_NAME, srdelta = (int)uap->a[2];
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
+		kr = KERN_SUCCESS;
+		if (e->recv) { e->recv = false; port_die(e->port); }
+		if (srdelta < 0 && e->send >= -srdelta) e->send += srdelta;
+		ent_drop_if_empty(e);
+		ns_check();
+	}
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
 static int
 darwin_port_insert_right(struct thread *td, struct darwin_args *uap)	/* (target, name, poly, polyPoly): a send right for a port that this task names */
 {
@@ -1725,6 +1777,8 @@ static const struct {
 	E(37, 2, darwin_sem_wait_signal,	"semaphore_wait_signal_trap"),
 	E(38, 3, darwin_sem_timedwait,		"semaphore_timedwait_trap"),
 	E(39, 4, darwin_sem_timedwait_signal,	"semaphore_timedwait_signal_trap"),
+	E(24, 4, darwin_port_construct,		"_kernelrpc_mach_port_construct_trap"),
+	E(25, 4, darwin_port_destruct,		"_kernelrpc_mach_port_destruct_trap"),
 	E(26, 0, darwin_mach_reply_port,	"mach_reply_port"),
 	E(27, 0, darwin_self_thread,		"thread_self_trap"),
 	E(28, 0, darwin_self_task,		"task_self_trap"),

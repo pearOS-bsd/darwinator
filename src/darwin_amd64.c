@@ -13,6 +13,17 @@
 #include <machine/frame.h>
 #include <machine/pcb.h>
 #include <x86/x86_var.h>
+#include <machine/md_var.h>
+#include <machine/cpufunc.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
+#include <sys/smp.h>
+#include <sys/exec.h>
+#include <vm/vm_extern.h>
+
+extern uint64_t tsc_freq;
 
 #include <bsm/audit_kevents.h>
 
@@ -56,6 +67,9 @@ darwin_fetch_syscall_args(struct thread *td)
 		sa->code = (u_int)darwin_nsyscalls;
 		break;
 	}
+	if (darwin_debug >= 2)
+		printf("darwinator: %s[%d]: syscall %#lx -> %s\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)rax,
+		    sa->code < (u_int)darwin_nsyscalls && darwin_syscallnames[sa->code] != NULL ? darwin_syscallnames[sa->code] : "?");
 	if (native_sigreturn)
 		sa->callp = &sysent[SYS_sigreturn];
 	else if (sa->code >= (u_int)darwin_nsyscalls)
@@ -213,4 +227,64 @@ darwin_sigframe_init(struct sysentvec *sv)
 {
 	native_sendsig = sv->sv_sendsig;
 	sv->sv_sendsig = darwin_sendsig;
+}
+
+/*
+ * The comm page: Darwin maps a read only page at 0x7fffffe00000 in every process, and libSystem reads the CPU capabilities, the number of CPUs and (for mach_absolute_time) the
+ * time base from it.  The layout is that of xnu's cpu_capabilities.h; the bytes of the CPU part were read from a Mac (tools/macprobe), the time is the TSC of this machine.
+ *   0x00 signature "commpage 64-bit"   0x10 capabilities (64 bit)   0x1e version (14)   0x20 capabilities (32 bit)   0x22 ncpus   0x34 active, 0x35 physical, 0x36 logical cpus
+ *   0x50 nt_tsc_base (64)   0x58 nt_scale (32)   0x5c nt_shift (32)   0x60 nt_ns_base (64)   0x68 nt_generation (32, 0 means that the time is being changed)
+ * mach_absolute_time is ((tsc - nt_tsc_base) << nt_shift) * nt_scale >> 32 + nt_ns_base (in nanoseconds: the timebase of an Intel Mac is 1/1).
+ */
+#define	DARWIN_COMMPAGE_ADDR	0x7fffffe00000UL
+static uint8_t darwin_commpage[PAGE_SIZE];
+
+void
+darwin_commpage_init(void)
+{
+	static const uint8_t head[0x50] = {			/* 0x00 .. 0x4f from a Mac: signature, capabilities, version, ... */
+		'c','o','m','m','p','a','g','e',' ','6','4','-','b','i','t',0,
+		0xaf,0x1f,0x04,0xff,0x0c,0,0,0,  0,0,0,0,0,0,0x0e,0,
+		0xaf,0x1f,0x04,0xff,0,0,0x40,0,  0,0,0,0,0x04,0x02,0x04,0x01,
+		0,0,0,0,0x02,0,0,0,  0x9f,0x21,0xfc,0x37,0,0,0,0,
+		0x01,0,0,0,0x01,0x0c,0x0c,0,
+	};
+	uint64_t base = rdtsc();
+	uint32_t scale = (uint32_t)(((uint64_t)1000000000 << 32) / (tsc_freq != 0 ? tsc_freq : 2000000000ULL));
+	uint32_t gen = 1, shift = 0;
+	uint64_t nsbase = 0;
+	uint8_t n = (uint8_t)mp_ncpus;
+
+	memset(darwin_commpage, 0, sizeof(darwin_commpage));
+	memcpy(darwin_commpage, head, sizeof(head) - 8);
+	darwin_commpage[0x22] = n; darwin_commpage[0x34] = n; darwin_commpage[0x35] = n; darwin_commpage[0x36] = n;
+	memcpy(darwin_commpage + 0x50, &base, 8);
+	memcpy(darwin_commpage + 0x58, &scale, 4);
+	memcpy(darwin_commpage + 0x5c, &shift, 4);
+	memcpy(darwin_commpage + 0x60, &nsbase, 8);
+	memcpy(darwin_commpage + 0x68, &gen, 4);
+}
+
+int
+darwin_commpage_map(struct vmspace *vms)
+{
+	vm_map_t map = &vms->vm_map;
+	int rv, error;
+
+	rv = vm_map_fixed(map, NULL, 0, DARWIN_COMMPAGE_ADDR, PAGE_SIZE, VM_PROT_RW, VM_PROT_ALL, MAP_CHECK_EXCL);
+	if (rv != KERN_SUCCESS)
+		return (vm_mmap_to_errno(rv));
+	error = copyout(darwin_commpage, (void *)DARWIN_COMMPAGE_ADDR, PAGE_SIZE);
+	if (error != 0)
+		return (error);
+	rv = vm_map_protect(map, DARWIN_COMMPAGE_ADDR, DARWIN_COMMPAGE_ADDR + PAGE_SIZE, VM_PROT_READ, 0, VM_MAP_PROTECT_SET_PROT);
+	return (rv == KERN_SUCCESS ? 0 : vm_mmap_to_errno(rv));
+}
+
+/* the stack of a Mac program is near 0x7ff7bfeff000 (the shared region of the dyld cache starts at 0x7ff800000000 and the comm page is at 0x7fffffe00000) */
+void
+darwin_stack_init(struct sysentvec *sv)
+{
+	sv->sv_usrstack = 0x7ff7c0000000UL;
+	sv->sv_psstrings = sv->sv_usrstack - sizeof(struct ps_strings);
 }
