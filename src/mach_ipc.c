@@ -92,7 +92,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP };
 
 struct kmsg;
 struct kport {
@@ -407,6 +407,70 @@ darwin_port_destruct(struct thread *td, struct darwin_args *uap)
 		ns_check();
 	}
 	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+/* thread_get_special_reply_port (50): the special reply port of the thread (libdispatch and XPC reply on it); made on the first call, the same name after that */
+static int
+darwin_thread_special_reply_port(struct thread *td, struct darwin_args *uap __unused)
+{
+	static struct { pid_t pid; lwpid_t tid; uint32_t name; } cache[64];
+	struct ktask *t;
+	struct kport *p;
+	struct kent *e;
+	uint32_t name = 0;
+	int i, slot = -1;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL) {
+		for (i = 0; i < 64; i++) {
+			if (cache[i].pid == td->td_proc->p_pid && cache[i].tid == td->td_tid && (e = ent_by_name(t, cache[i].name)) != NULL && e->recv) {
+				name = cache[i].name;
+				break;
+			}
+			if (slot < 0 && (cache[i].pid == 0))
+				slot = i;
+		}
+		if (name == 0) {
+			p = kp_new(KP_PORT);
+			e = ent_add(t, p, MM_MOVE_RECEIVE);
+			p->refs--;
+			if (e != NULL) {
+				name = e->name;
+				if (slot < 0)
+					slot = (int)(td->td_tid % 64);
+				cache[slot].pid = td->td_proc->p_pid; cache[slot].tid = td->td_tid; cache[slot].name = name;
+			} else
+				kp_unref(p);
+		}
+	}
+	sx_xunlock(&km_sx);
+	td->td_retval[0] = name;
+	return (0);
+}
+
+/* host_create_mach_voucher_trap (70)(host, recipes, size, *voucher): a voucher is a port that only has to exist (libdispatch makes them for its queues); the recipes are not looked at */
+static int
+darwin_host_create_voucher(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kport *p;
+	struct kent *e;
+	uint32_t name = 0;
+	int kr = KERN_SUCCESS;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) == NULL) {
+		sx_xunlock(&km_sx);
+		return (kr_ret(td, KERN_NO_SPACE));
+	}
+	p = kp_new(KP_PORT);
+	e = ent_add(t, p, MM_MAKE_SEND);
+	p->refs--;
+	if (e != NULL) name = e->name; else { kp_unref(p); kr = KERN_NO_SPACE; }
+	sx_xunlock(&km_sx);
+	if (kr == KERN_SUCCESS && copyout(&name, (void *)uap->a[3], sizeof(name)) != 0)
+		kr = KERN_INVALID_ADDRESS;
 	return (kr_ret(td, kr));
 }
 
@@ -776,6 +840,7 @@ right_in(struct ktask *t, struct kcarry *c)
 }
 
 static void mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m);
+static void bootstrap_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m);
 
 static int
 send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
@@ -877,6 +942,15 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 		}
 	}
 	nd = dp->kind;
+	if (darwin_debug >= 2)
+		printf("darwinator: %s[%d]: message id %#x to name %#x (port kind %d, %d queued)\n", td->td_proc->p_comm, td->td_proc->p_pid, rd32(d, 20), rname, nd, dp->qn);
+	if (nd == KP_BOOTSTRAP) {					/* the bootstrap port: the kernel answers as a launchd that has no services */
+		bootstrap_server(td, t, dp, m);
+		kp_unref(dp);
+		sx_xunlock(&km_sx);
+		kmsg_free(m);
+		return (KERN_SUCCESS);
+	}
 	if (nd != KP_PORT) {						/* the kernel answers for the task and host ports */
 		mig_server(td, t, dp, m);
 		kp_unref(dp);
@@ -1650,6 +1724,44 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 	}
 }
 
+/*
+ * The bootstrap port: libxpc and the libraries send their requests to launchd here as XPC messages ("@XPC", version 5, then a dictionary: type 0xf000, size, count, and for each
+ * entry the key (a C string padded to 4) and the value (a type word and the data)).  The request of a look-up has the keys handle, instance, flags, name, type, targetpid and
+ * domain-port, and the message id 0xcf.  The kernel answers as a launchd without any service: an empty dictionary, which libxpc reads as "unknown service".
+ */
+static void
+bootstrap_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m)
+{
+	uint32_t i, n = MIN(m->size, 256);
+	struct kmsg *r;
+	struct kport *rp = m->reply.port;
+	uint8_t *rd;
+
+	(void)t; (void)dest;
+	if (darwin_debug >= 1) {
+		printf("darwinator: %s[%d]: message to the bootstrap port: id %#x size %u bits %#x:", td->td_proc->p_comm, td->td_proc->p_pid, rd32(m->data, 20), m->size, rd32(m->data, 0));
+		for (i = 0; i < n; i += 4)
+			printf(" %08x", rd32(m->data, i));
+		printf("\n");
+	}
+	if (rp == NULL || rp->dead)
+		return;
+	r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->data = rd = malloc(44, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->size = 44;
+	wr32(rd, 0, MM_MOVE_SEND_ONCE);
+	wr32(rd, 4, 44);
+	wr32(rd, 20, rd32(m->data, 20));			/* the id of the request */
+	wr32(rd, 24, 0x40585043);				/* "CPX@" */
+	wr32(rd, 28, 5);					/* version */
+	wr32(rd, 32, 0xf000);					/* a dictionary ... */
+	wr32(rd, 36, 4);					/* ... of 4 bytes (the count) ... */
+	wr32(rd, 40, 0);					/* ... with no entry */
+	TAILQ_INSERT_TAIL(&rp->q, r, link);
+	rp->qn++;
+	wakeup(rp);
+}
+
 static void
 mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m)
 {
@@ -1666,6 +1778,8 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 	switch (id) {
 	case 3409:				/* task_get_special_port(task, which): the reply carries a send right */
 		which = m->size >= 36 ? rd32(d, 32) : 99;
+		if (which == 4 && t->special[4] == NULL)		/* the bootstrap port: nobody serves it, but libxpc needs one to exist (a real launchd is a program of user space) */
+			t->special[4] = kp_new(KP_BOOTSTRAP);
 		if (which < 1 || which > 7 || t->special[which] == NULL) { mig_reply(t, m, id, which > 7 || which < 1 ? KERN_INVALID_ARGUMENT : KERN_FAILURE, NULL, NULL, 0, NULL, 0); break; }
 		mig_reply(t, m, id, 0, t->special[which], NULL, 0, NULL, 0);
 		break;
@@ -1909,6 +2023,8 @@ static const struct {
 	E(29, 0, darwin_self_host,		"host_self_trap"),
 	E(31, 7, darwin_mach_msg,		"mach_msg_trap"),
 	E(47, 8, darwin_mach_msg2,		"mach_msg2_trap"),
+	E(50, 0, darwin_thread_special_reply_port, "thread_get_special_reply_port"),
+	E(70, 4, darwin_host_create_voucher,	"host_create_mach_voucher_trap"),
 	E(32, 9, darwin_mach_msg,		"mach_msg_overwrite_trap"),
 #undef E
 };
