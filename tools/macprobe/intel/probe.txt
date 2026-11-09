@@ -1,0 +1,248 @@
+== machine
+hw.machine = x86_64
+kern.osproductversion = 26.7.2
+== sizes
+sizeof struct stat = 144
+sizeof struct statfs = 2168
+sizeof struct dirent = 1048
+sizeof struct termios = 72
+sizeof struct sigaction = 16
+sizeof siginfo_t = 104
+sizeof ucontext_t = 56
+sizeof mcontext_t = 8
+sizeof struct kevent = 32
+sizeof struct kevent64_s = 48
+sizeof struct flock = 24
+sizeof struct timeval = 16
+sizeof struct rlimit = 16
+sizeof struct rusage = 144
+sizeof struct sockaddr_in = 16
+sizeof struct sockaddr_in6 = 28
+sizeof struct attrlist = 24
+sizeof struct msghdr = 48
+sizeof FTSENT = 112
+sizeof fsid_t = 8
+sizeof sigset_t = 4
+offsetof struct stat.st_mode = 4
+offsetof struct stat.st_ino = 8
+offsetof struct stat.st_atimespec = 32
+offsetof struct stat.st_birthtimespec = 80
+offsetof struct stat.st_size = 96
+offsetof struct stat.st_blocks = 104
+offsetof struct stat.st_flags = 116
+offsetof struct statfs.f_fstypename = 72
+offsetof struct statfs.f_mntonname = 88
+offsetof struct statfs.f_fsid = 48
+offsetof struct dirent.d_name = 21
+offsetof struct dirent.d_namlen = 18
+offsetof struct dirent.d_type = 20
+offsetof struct dirent.d_seekoff = 8
+offsetof FTSENT.fts_statp = 96
+offsetof FTSENT.fts_name = 104
+offsetof FTSENT.fts_path = 48
+offsetof FTSENT.fts_info = 88
+offsetof FTSENT.fts_parent = 8
+offsetof FTSENT.fts_number = 24
+offsetof struct kevent.filter = 8
+offsetof struct kevent.udata = 24
+offsetof struct sockaddr_in6.sin6_family = 1
+offsetof struct sockaddr_in6.sin6_addr = 8
+offsetof struct termios.c_cc = 32
+offsetof struct termios.c_ispeed = 56
+== constants
+AF_INET6 = 30
+AF_UNIX = 1
+SO_NOSIGPIPE = 4130
+MSG_NOSIGNAL = 524288
+O_CLOEXEC = 16777216
+O_DIRECTORY = 1048576
+O_NOFOLLOW = 256
+O_EXLOCK = 32
+O_SYNC = 128
+O_DSYNC = 4194304
+AT_FDCWD = -2
+AT_SYMLINK_NOFOLLOW = 32
+AT_REMOVEDIR = 128
+AT_EACCESS = 16
+F_GETPATH = 50
+F_FULLFSYNC = 51
+F_NOCACHE = 48
+F_DUPFD_CLOEXEC = 67
+F_GETLK = 7
+F_SETLKW = 9
+MAP_ANON = 4096
+MAP_FIXED = 16
+MAP_JIT = 2048
+MAP_NORESERVE = 64
+MS_SYNC = 16
+MS_ASYNC = 1
+MS_INVALIDATE = 2
+SA_SIGINFO = 64
+SA_RESTART = 2
+SA_ONSTACK = 1
+SA_USERTRAMP = 256
+SIGUSR1 = 30
+SIGBUS = 10
+SIGSYS = 12
+EVFILT_READ = -1
+EVFILT_USER = -10
+EVFILT_TIMER = -7
+EVFILT_MACHPORT = -8
+EVFILT_VM = -12
+EV_UDATA_SPECIFIC = 256
+NOTE_SECONDS = 1
+NOTE_USECONDS = 2
+NOTE_NSECONDS = 4
+ENOATTR = 93
+EOVERFLOW = 84
+ECANCELED = 89
+EILSEQ = 92
+EBADMSG = 94
+EPROTO = 100
+ENOTSUP = 45
+EDEVERR = 83
+EAUTH = 80
+TIOCGETA = 1078490131
+TIOCSETA = 2152231956
+TIOCGWINSZ = 1074295912
+FIONREAD = 1074030207
+RLIMIT_NOFILE = 8
+RLIMIT_AS = 5
+KERN_SUCCESS = 0
+MACH_RCV_TIMED_OUT = 268451843
+MACH_SEND_INVALID_DEST = 268435459
+MACH_MSG_TYPE_MAKE_SEND = 20
+== sysctl
+hw.ncpu = 4 (4 bytes)
+hw.activecpu = 4 (4 bytes)
+hw.logicalcpu = 4 (4 bytes)
+hw.physicalcpu = 2 (4 bytes)
+hw.memsize = 8589934592 (8 bytes)
+hw.pagesize = 4096 (8 bytes)
+hw.cachelinesize = 64 (8 bytes)
+hw.l1dcachesize = 32768 (8 bytes)
+hw.l2cachesize = 4194304 (8 bytes)
+hw.tbfrequency = 1000000000 (8 bytes)
+hw.cpufrequency = 2420000000 (8 bytes)
+hw.byteorder = 1234 (4 bytes)
+hw.cpu64bit_capable = 1 (4 bytes)
+kern.ostype = "Darwin" (7 bytes)
+kern.osrelease = "25.6.0" (7 bytes)
+kern.osversion = "25G332" (7 bytes)
+kern.version = "Darwin Kernel Version 25.6.0: Mon Oct 12 00:33:09 PDT 2026; root:xnu-12377.161.15.701.48~2/RELEASE_X86_64" (106 bytes)
+kern.hostname = "mac.local" (10 bytes)
+kern.argmax = 1048576 (4 bytes)
+kern.maxproc = 2088 (4 bytes)
+kern.maxfiles = 30720 (4 bytes)
+kern.maxfilesperproc = 10240 (4 bytes)
+kern.osrev: error 2
+kern.boottime = 1794246784 s 316310 us (16 bytes)
+hw.model = "iMac19,1" (9 bytes)
+hw.targettype = 6512973 (4 bytes)
+== mach
+timebase 1/1
+task_self 0x203 host_self 0x60b thread_self 0x103
+mach_port_allocate kr 0 name 0x1d03; reply port 0x803
+== calls
+stat(/): st_dev 0x1000009 st_mode 40755 st_nlink 22 st_ino 2 st_blksize 4096
+stat(/dev/null): st_rdev 0x3000002 st_dev 0xa11a5b1e
+statfs(/): f_bsize 4096 f_iosize 1048576 f_fstypename apfs f_mntonname / f_flags 0x4480d001 f_type 26
+getdirentries(/): 776 bytes, first entry reclen 32 namlen 1 type 4 name .
+getattrlist(/, OBJTYPE): r 0 length 8 objtype 2 (VDIR=2)
+F_GETPATH(/tmp): r 0 /private/tmp
+xattr: set 0 get 1 list 11 first name "com.test.x"
+xattr missing: -1 errno 93 (Attribute not found)
+kevent: n 1 filter -1 data 1 udata 0x1234
+signal handler: sig 30 si_signo 30 uc_mcsize 1032 uc_onstack 0 uc_sigmask 0
+signal handler: uc_mcontext - uc = -1136 (mcontext64 follows the ucontext when 56)
+signal handler: ss.rip 0x7ff8119e5312 ss.rsp 0x7ff7b3cb9d18
+sigaction: old handler 0x0
+RLIMIT_NOFILE: cur 256 max 9223372036854775807
+AF_INET6 socket 6: sin6_len 28 family 30 port 49152
+setsockopt(0, SO_NOSIGPIPE): r -1 errno 38
+== process structures
+sizeof struct kinfo_proc = 648
+sizeof struct extern_proc = 296
+sizeof struct eproc = 352
+sizeof struct proc_bsdinfo = 136
+sizeof struct proc_taskinfo = 96
+sizeof struct proc_taskallinfo = 232
+sizeof struct proc_threadinfo = 112
+sizeof struct proc_vnodepathinfo = 2352
+sizeof struct proc_fdinfo = 8
+sizeof struct vnode_fdinfowithpath = 1200
+offsetof struct kinfo_proc.kp_proc = 0
+offsetof struct kinfo_proc.kp_eproc = 296
+offsetof struct extern_proc.p_starttime = 0
+offsetof struct extern_proc.p_flag = 32
+offsetof struct extern_proc.p_stat = 36
+offsetof struct extern_proc.p_pid = 40
+offsetof struct extern_proc.p_oppid = 44
+offsetof struct extern_proc.p_estcpu = 80
+offsetof struct extern_proc.p_pctcpu = 88
+offsetof struct extern_proc.p_priority = 240
+offsetof struct extern_proc.p_nice = 242
+offsetof struct extern_proc.p_comm = 243
+offsetof struct extern_proc.p_pgrp = 264
+offsetof struct extern_proc.p_xstat = 280
+offsetof struct eproc.e_paddr = 0
+offsetof struct eproc.e_sess = 8
+offsetof struct eproc.e_pcred = 16
+offsetof struct eproc.e_ucred = 120
+offsetof struct eproc.e_vm = 200
+offsetof struct eproc.e_ppid = 264
+offsetof struct eproc.e_pgid = 268
+offsetof struct eproc.e_jobc = 272
+offsetof struct eproc.e_tdev = 276
+offsetof struct eproc.e_tpgid = 280
+offsetof struct eproc.e_tsess = 288
+offsetof struct eproc.e_wmesg = 296
+offsetof struct eproc.e_xsize = 304
+offsetof struct eproc.e_xrssize = 308
+offsetof struct eproc.e_xccount = 310
+offsetof struct eproc.e_xswrss = 312
+offsetof struct eproc.e_flag = 316
+offsetof struct eproc.e_login = 320
+offsetof struct eproc.e_spare = 332
+offsetof struct proc_bsdinfo.pbi_status = 4
+offsetof struct proc_bsdinfo.pbi_pid = 12
+offsetof struct proc_bsdinfo.pbi_ppid = 16
+offsetof struct proc_bsdinfo.pbi_uid = 20
+offsetof struct proc_bsdinfo.pbi_comm = 48
+offsetof struct proc_bsdinfo.pbi_name = 64
+offsetof struct proc_bsdinfo.pbi_start_tvsec = 120
+offsetof struct proc_bsdinfo.pbi_nice = 116
+offsetof struct proc_taskinfo.pti_virtual_size = 0
+offsetof struct proc_taskinfo.pti_resident_size = 8
+offsetof struct proc_taskinfo.pti_threadnum = 84
+offsetof struct proc_taskinfo.pti_total_user = 16
+PROC_PIDTBSDINFO = 3
+PROC_PIDTASKINFO = 4
+PROC_PIDTASKALLINFO = 2
+PROC_PIDPATHINFO = 11
+PROC_PIDVNODEPATHINFO = 9
+PROC_PIDLISTFDS = 1
+PROC_PIDTHREADINFO = 5
+PROC_ALL_PIDS = 1
+PROC_PIDPATHINFO_MAXSIZE = 4096
+KERN_PROC = 14
+KERN_PROC_ALL = 0
+KERN_PROC_PID = 1
+KERN_PROC_PGRP = 2
+KERN_PROC_UID = 5
+KERN_PROCARGS2 = 49
+KERN_PROC_RUID = 6
+KERN_PROC_TTY = 4
+SIDL = 1
+SRUN = 2
+SSLEEP = 3
+SSTOP = 4
+SZOMB = 5
+sysctl KERN_PROC_PID: r 0 size 648 pid 1264 ppid 1255 stat 2 flag 0x4004 comm probe uid 501 ruid 501 pgid 1253 tpgid 0 login  ngroups 16
+sysctl KERN_PROC_ALL: r 0 size 337608 (521 entries)
+proc_pidpath: 33 /Users/alex/mp/macprobe-out/probe
+proc_name: 5 probe
+proc_pidinfo TBSDINFO: r 136 pid 1264 ppid 1255 status 2 uid 501 comm probe name probe nice 0 start 1794247505
+proc_listpids: 2064 bytes (516 pids)
+KERN_PROCARGS2: r 0 size 900 argc 1 first string /Users/alex/mp/macprobe-out/probe
+== done
