@@ -1,0 +1,8 @@
+In file included from /Users/alxb421/Desktop/darwinator/tools/macprobe/probe.c:28:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/ucontext.h:51:2: error: The deprecated ucontext routines require _XOPEN_SOURCE to be defined
+   51 | #error The deprecated ucontext routines require _XOPEN_SOURCE to be defined
+      |  ^
+/Users/alxb421/Desktop/darwinator/tools/macprobe/probe.c:65:61: error: use of undeclared identifier 'FIONREAD'
+   65 |         CONST(TIOCGETA); CONST(TIOCSETA); CONST(TIOCGWINSZ); CONST(FIONREAD); CONST(RLIMIT_NOFILE); CONST(RLIMIT_AS);
+      |                                                                    ^~~~~~~~
+2 errors generated.
