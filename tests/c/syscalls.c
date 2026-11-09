@@ -273,7 +273,10 @@ int cmain(void)
 	  memcpy(ent, &o0, 4); memcpy(ent + 4, &f0, 4); memcpy(ent + 16, &o1, 4); memcpy(ent + 20, &f1, 4);
 	  memcpy(ent + 32, "/\0", 2); memcpy(ent + 40, "/nonexistent\0", 13);
 	  r = S(284, ent, 64, res, 0, 0, 0);
-	  check("access_extended", r == 0 && res[0] == 0 && res[1] == 2, res[1]); }
+	  check("access_extended", r == 0 && res[0] == 0 && res[1] == 2, res[1]);
+	  f0 = 1 << 9; memcpy(ent + 4, &f0, 4); res[0] = 99;
+	  r = S(284, ent, 64, res, 0, 0, 0);
+	  check("access_extended with _READ_OK", r == 0 && res[0] == 0 && res[1] == 2, res[0]); }
 
 	/* signals' mask, limits, ids */
 	{ unsigned set = 1U << 29, old = 0, cur = 0; r = S(SYS_sigprocmask, 1, &set, &old, 0, 0, 0);
