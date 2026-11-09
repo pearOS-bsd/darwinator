@@ -29,8 +29,12 @@ memory that is read without having been written. Found:
 * `MALLOC_CONF=zero:true` (the allocator gives zeroed memory, as a Mac's `+alloc` does for the instance variables) takes away the crashes of the controller; `macapp` and the test start it that way;
 * what is left depends on the path length (27 to 33 characters). The crash is in `-[NSAutoreleasePool emptyPool]` -> `objc_autoreleasePoolPop` in the run loop (the pool of the main thread is
   damaged: something is released once too often and its memory is reused; `MACHRUN_TRACEPOOL=1` with `LD_PRELOAD=libexctrace.so` follows the pools per thread). **`NSZombieEnabled=YES` makes the crashes go away**
-  (objects are not freed; 0 crashes in 24 runs for the lengths 26 to 33, 3 of 3 extracted each), and `macapp` starts the application that way. The cause (an over-release; with the zombies on, the first
-  report is `-[GSCInlineString release]: message sent to deallocated instance` for the path string that `application:openFile:` got) is not found; the price of the workaround is memory that is not given back.
+  (objects are not freed; 0 crashes in 24 runs for the lengths 26 to 33, 3 of 3 extracted each), and `macapp` starts the application that way. **The cause, found with `MACHRUN_TRACEMSG=1 MACHRUN_TRACEADDR=1`** (the messages that the program sends, with the receiver's address; the first zombie report is already in a plain launch, before any file is opened, and it
+  does not depend on any of the `MACHRUN_NO*` switches): the program sends `autorelease` over and over to a string that it took out of a dictionary (`-[GSDictionary objectForKey:]`) and does not own, in the data
+  source of its table of file types (the same object every time, then `caseInsensitiveCompare:`). Each of those is a release too many. On a Mac this does no harm: such strings are tagged pointers or constants,
+  whose retain and release do nothing; the strings of GNUstep (`GSCInlineString`) are real objects, they are freed at the next pool drain, the main thread's pool then holds a freed object or the freed memory is
+  reused. `NSZombieEnabled=YES` keeps the objects alive, which is why it helps; the price is memory that is not given back. A better fix would make the strings of such a table immortal (a string class that
+  ignores retain and release) or ignore `autorelease` on them.
 
 `MACHRUN_SEGV=1` prints the frames of the crash (`frame[n]`, by the frame pointers) and `MACHRUN_SEGV_HOLD=1` keeps the process for 90 seconds so that `procstat -v PID` can show its memory.
 
