@@ -24,6 +24,8 @@ MALLOC_DEFINE(M_DARWIN, "darwinator", "Mach-O loader and Darwin system call laye
 int darwin_debug;
 SYSCTL_NODE(_kern, OID_AUTO, darwinator, CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Darwin (Mach-O) support");
 SYSCTL_INT(_kern_darwinator, OID_AUTO, debug, CTLFLAG_RWTUN, &darwin_debug, 0, "1: log why a Mach-O file is refused and the system calls that are not implemented; 2: log every system call");
+int darwin_stop;
+SYSCTL_INT(_kern_darwinator, OID_AUTO, stop, CTLFLAG_RWTUN, &darwin_stop, 0, "debugging: a Mach-O program stops (SIGSTOP) before its first instruction, so that a debugger can attach");
 int darwin_dyld;
 SYSCTL_INT(_kern_darwinator, OID_AUTO, dyld, CTLFLAG_RWTUN, &darwin_dyld, 0, "run a dynamic Mach-O program with the dyld that its load commands name (/usr/lib/dyld of a Mac)");
 

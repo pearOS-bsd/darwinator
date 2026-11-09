@@ -67,9 +67,36 @@ darwin_fetch_syscall_args(struct thread *td)
 		sa->code = (u_int)darwin_nsyscalls;
 		break;
 	}
-	if (darwin_debug >= 2)
-		printf("darwinator: %s[%d]: syscall %#lx -> %s\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)rax,
-		    sa->code < (u_int)darwin_nsyscalls && darwin_syscallnames[sa->code] != NULL ? darwin_syscallnames[sa->code] : "?");
+	if (darwin_debug >= 2) {
+		char path[160] = "";
+		const char *nm = sa->code < (u_int)darwin_nsyscalls && darwin_syscallnames[sa->code] != NULL ? darwin_syscallnames[sa->code] : "?";
+		size_t done;
+
+		/* the path of the calls that take one (first argument, or the second of the *at calls) */
+		if ((rax >> 24) == 2) {
+			switch (rax & 0xffffff) {
+			case 5: case 33: case 58: case 338: case 340: case 398: case 274:
+				(void)copyinstr((void *)frame->tf_rdi, path, sizeof(path), &done); break;
+			case 463: case 470:
+				(void)copyinstr((void *)frame->tf_rsi, path, sizeof(path), &done); break;
+			case 92:						/* fcntl: the command */
+				snprintf(path, sizeof(path), "fd %ld cmd %ld arg %#lx", (long)frame->tf_rdi, (long)frame->tf_rsi, (u_long)frame->tf_rdx);
+				break;
+			case 202: {						/* sysctl: the numbers of the name */
+				int mib[6] = { 0 }, n = (int)frame->tf_rsi > 6 ? 6 : (int)frame->tf_rsi, q;
+				size_t l = 0;
+
+				if (copyin((void *)frame->tf_rdi, mib, n * sizeof(int)) == 0)
+					for (q = 0; q < n; q++)
+						l += snprintf(path + l, sizeof(path) - l, "%d ", mib[q]);
+				if (n >= 2 && mib[0] == 0 && mib[1] == 3)		/* name to oid: the name is the new value */
+					(void)copyinstr((void *)frame->tf_r8, path + l, sizeof(path) - l, &done);
+				break;
+			}
+			}
+		}
+		printf("darwinator: %s[%d]: syscall %#lx -> %s %s\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)rax, nm, path);
+	}
 	if (native_sigreturn)
 		sa->callp = &sysent[SYS_sigreturn];
 	else if (sa->code >= (u_int)darwin_nsyscalls)
@@ -242,13 +269,17 @@ static uint8_t darwin_commpage[PAGE_SIZE];
 void
 darwin_commpage_init(void)
 {
-	static const uint8_t head[0x50] = {			/* 0x00 .. 0x4f from a Mac: signature, capabilities, version, ... */
-		'c','o','m','m','p','a','g','e',' ','6','4','-','b','i','t',0,
-		0xaf,0x1f,0x04,0xff,0x0c,0,0,0,  0,0,0,0,0,0,0x0e,0,
-		0xaf,0x1f,0x04,0xff,0,0,0x40,0,  0,0,0,0,0x04,0x02,0x04,0x01,
-		0,0,0,0,0x02,0,0,0,  0x9f,0x21,0xfc,0x37,0,0,0,0,
-		0x01,0,0,0,0x01,0x0c,0x0c,0,
+	/* the CPU part of the page, from a Mac, at its offsets (0x4d and 0x4e are the kernel page shift and the page shift: 12) */
+	static const struct { int off; uint8_t v[8]; } head[] = {
+		{ 0x10, { 0xaf, 0x1f, 0x04, 0xff, 0x0c, 0, 0, 0 } },		/* capabilities (64 bit) */
+		{ 0x18, { 0, 0, 0, 0, 0, 0, 0x0e, 0 } },			/* the version (14) is at 0x1e */
+		{ 0x20, { 0xaf, 0x1f, 0x04, 0xff, 0, 0, 0x40, 0 } },
+		{ 0x30, { 0, 0, 0, 0, 0x04, 0x02, 0x04, 0x01 } },
+		{ 0x38, { 0, 0, 0, 0, 0x02, 0, 0, 0 } },
+		{ 0x40, { 0x9f, 0x21, 0xfc, 0x37, 0, 0, 0, 0 } },
+		{ 0x48, { 0x01, 0, 0, 0, 0x01, 0x0c, 0x0c, 0 } },
 	};
+	int hi;
 	uint64_t base = rdtsc();
 	uint32_t scale = (uint32_t)(((uint64_t)1000000000 << 32) / (tsc_freq != 0 ? tsc_freq : 2000000000ULL));
 	uint32_t gen = 1, shift = 0;
@@ -256,7 +287,9 @@ darwin_commpage_init(void)
 	uint8_t n = (uint8_t)mp_ncpus;
 
 	memset(darwin_commpage, 0, sizeof(darwin_commpage));
-	memcpy(darwin_commpage, head, sizeof(head) - 8);
+	memcpy(darwin_commpage, "commpage 64-bit", 16);
+	for (hi = 0; hi < (int)nitems(head); hi++)
+		memcpy(darwin_commpage + head[hi].off, head[hi].v, 8);
 	darwin_commpage[0x22] = n; darwin_commpage[0x34] = n; darwin_commpage[0x35] = n; darwin_commpage[0x36] = n;
 	memcpy(darwin_commpage + 0x50, &base, 8);
 	memcpy(darwin_commpage + 0x58, &scale, 4);

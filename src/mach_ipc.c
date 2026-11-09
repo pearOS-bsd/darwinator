@@ -92,7 +92,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK };
 
 struct kmsg;
 struct kport {
@@ -497,9 +497,23 @@ darwin_mach_reply_port(struct thread *td, struct darwin_args *uap __unused)
 	return (0);
 }
 
-static int darwin_self_task(struct thread *td, struct darwin_args *uap __unused) { td->td_retval[0] = NAME_TASK_SELF; (void)kt_task(td->td_proc); return (0); }
-static int darwin_self_host(struct thread *td, struct darwin_args *uap __unused) { td->td_retval[0] = NAME_HOST_SELF; (void)kt_task(td->td_proc); return (0); }
-static int darwin_self_thread(struct thread *td, struct darwin_args *uap __unused) { td->td_retval[0] = NAME_THREAD_SELF; return (0); }
+/* task_self_trap, host_self_trap, thread_self_trap: the name of the port, and (as on a Mac) one more send right to it, that the caller usually deallocates */
+static int
+self_port(struct thread *td, uint32_t name)
+{
+	struct ktask *t;
+	struct kent *e;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, name)) != NULL && e->send < 4096)
+		e->send++;
+	sx_xunlock(&km_sx);
+	td->td_retval[0] = name;
+	return (0);
+}
+static int darwin_self_task(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_TASK_SELF)); }
+static int darwin_self_host(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_HOST_SELF)); }
+static int darwin_self_thread(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_THREAD_SELF)); }
 
 
 static int
@@ -1007,6 +1021,61 @@ recv_msg(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, uin
 	return (error != 0 ? KERN_INVALID_ADDRESS : KERN_SUCCESS);
 }
 
+static int darwin_mach_msg(struct thread *td, struct darwin_args *uap);
+
+/*
+ * mach_msg2_trap (47), the trap that libsyscall uses since macOS 12: (data, options, bits | send_size << 32, remote | local << 32, voucher | id << 32,
+ * descriptor count | rcv_name << 32, rcv_size | priority << 32, timeout) (checked with the requests of dyld: bits 0x1513, send_size 40, id 200).  The header comes in registers and the message is in memory at data; here the header is written
+ * to the memory (it is the same values) and the classic path does the rest.  The vector form (options bit 32: data points to two vectors) uses the first vector.
+ */
+static int
+darwin_mach_msg2(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_args ua;
+	uint64_t data = uap->a[0], opt = uap->a[1], rcv_addr = 0;
+	uint32_t send_size = (uint32_t)(uap->a[2] >> 32), rcv_size = (uint32_t)uap->a[6];
+	uint32_t hdr[6];
+	int error;
+
+	if (opt & (1ULL << 32)) {			/* MACH64_MSG_VECTOR: { data, rcv_addr, send_size, rcv_size } x 2 */
+		uint64_t vec[3];
+
+		error = copyin((void *)data, vec, sizeof(vec));
+		if (error != 0)
+			return (kr_ret(td, KERN_INVALID_ADDRESS));
+		data = vec[0]; rcv_addr = vec[1];
+		send_size = (uint32_t)vec[2]; rcv_size = (uint32_t)(vec[2] >> 32);
+		(void)rcv_addr;
+	}
+	if (opt & 1) {					/* MACH_SEND_MSG: the header is in the registers */
+		hdr[0] = (uint32_t)uap->a[2]; hdr[1] = send_size;
+		hdr[2] = (uint32_t)uap->a[3]; hdr[3] = (uint32_t)(uap->a[3] >> 32);
+		hdr[4] = (uint32_t)uap->a[4]; hdr[5] = (uint32_t)(uap->a[4] >> 32);
+		if (send_size >= sizeof(hdr) && copyout(hdr, (void *)data, sizeof(hdr)) != 0)
+			return (kr_ret(td, KERN_INVALID_ADDRESS));
+	}
+	memset(&ua, 0, sizeof(ua));
+	ua.a[0] = data;
+	ua.a[1] = (uint32_t)opt;
+	ua.a[2] = send_size;
+	ua.a[3] = rcv_size;
+	ua.a[4] = (uint32_t)(uap->a[5] >> 32);		/* the receive name */
+	ua.a[5] = (uint32_t)uap->a[7];			/* the timeout (ms) */
+	ua.a[6] = 0;
+	error = darwin_mach_msg(td, &ua);
+	if (darwin_debug >= 2)
+		printf("darwinator: mach_msg2: options %#lx send_size %u rcv_size %u rcv_name %#x timeout %lu bits %#lx remote_local %#lx voucher_id %#lx -> kr %#lx\n", (u_long)opt, send_size, rcv_size,
+		    (uint32_t)(uap->a[5] >> 32), (u_long)uap->a[7], (u_long)(uap->a[2] & 0xffffffff), (u_long)uap->a[3], (u_long)uap->a[4], (u_long)td->td_retval[0]);
+	if (darwin_debug >= 2 && (opt & 2) && td->td_retval[0] == 0) {		/* the reply, as it is in the memory of the program */
+		uint32_t w[26];
+
+		memset(w, 0, sizeof(w));
+		if (copyin((void *)data, w, sizeof(w)) == 0)
+			printf("darwinator: reply: %08x %08x %08x %08x %08x %08x | %08x %08x %08x %08x | %08x %08x %08x %08x %08x %08x %08x\n", w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11], w[12], w[13], w[14], w[15], w[16]);
+	}
+	return (error);
+}
+
 static int
 darwin_mach_msg(struct thread *td, struct darwin_args *uap)	/* (msg, option, send_size, rcv_size, rcv_name, timeout, notify) */
 {
@@ -1014,8 +1083,12 @@ darwin_mach_msg(struct thread *td, struct darwin_args *uap)	/* (msg, option, sen
 
 	if (option & MACH_SEND_MSG)
 		kr = (uint32_t)send_msg(td, uap->a[0], (uint32_t)uap->a[2]);
+	if (darwin_debug >= 2 && kr != KERN_SUCCESS)
+		printf("darwinator: mach_msg: the send failed: %#x\n", kr);
 	if (kr == KERN_SUCCESS && (option & MACH_RCV_MSG))
 		kr = (uint32_t)recv_msg(td, uap->a[0], option, (uint32_t)uap->a[3], (uint32_t)uap->a[4], (uint32_t)uap->a[5]);
+	if (darwin_debug >= 2 && kr != KERN_SUCCESS)
+		printf("darwinator: mach_msg: failed: %#x\n", kr);
 	td->td_retval[0] = kr;
 	return (0);
 }
@@ -1193,6 +1266,8 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 	int n;
 
 	memset(out, 0, sizeof(out));
+	if (darwin_debug >= 2)
+		printf("darwinator: %s[%d]: MIG request %d to a port of kind %d\n", td->td_proc->p_comm, td->td_proc->p_pid, id, dest->kind);
 	switch (id) {
 	case 3201:					/* mach_port_type(task, name, *ptype) */
 		{
@@ -1367,6 +1442,25 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, error == 0 ? 0 : 1, NULL, 0);
 			return (true);
 		}
+	case 1000:					/* clock_get_time(clock, *cur_time): a mach_timespec_t (two 32 bit numbers); the clock port has the calendar clock (kpid 1) or the system clock (0) */
+		{
+			struct timespec ts;
+			uint32_t tv[2];
+
+			if (dest->kind != KP_CLOCK) return (false);
+			if (dest->kpid == 1) nanotime(&ts); else nanouptime(&ts);
+			tv[0] = (uint32_t)ts.tv_sec; tv[1] = (uint32_t)ts.tv_nsec;
+			mig_reply_data(m, id, 0, tv, 8);
+			return (true);
+		}
+	case 1001:					/* clock_get_attributes(clock, flavor, *attr, *count): CLOCK_GET_TIME_RES (1): 1 ns (a count of 1) */
+		{
+			uint32_t buf[2] = { 1, 1 };
+
+			if (dest->kind != KP_CLOCK) return (false);
+			mig_reply_data(m, id, 0, buf, sizeof(buf));
+			return (true);
+		}
 	case 3204:					/* mach_port_allocate(task, right, *name) */
 		{
 			uint32_t right = m->size >= 36 ? rd32(d, 32) : 99;
@@ -1426,6 +1520,7 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 	case 3210: case 3216:				/* mach_port_set_mscount, mach_port_set_seqno: accepted */
 	case 3218:					/* mach_port_set_attributes: accepted */
 	case 3229:					/* mach_port_set_context */
+	case 8000: case 8001:				/* task_restartable_ranges_register (the ranges are not used), task_restartable_ranges_synchronize: libobjc needs them to answer 0 */
 	case 3407: case 3408:				/* task_suspend, task_resume */
 	case 3406:					/* task_set_info */
 	case 3413:					/* task_set_exception_ports: the handlers are not called here */
@@ -1439,6 +1534,8 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 		return (true);
 	case 3405:					/* task_info(task, flavor, *info, *count) */
 		a = m->size >= 40 ? rd32(d, 32) : 0;
+		if (darwin_debug >= 2)
+			printf("darwinator: task_info flavor %u count %u\n", a, m->size >= 44 ? rd32(d, 36) : 0);
 		{
 			uint64_t vsz = 0, rss = 0;
 
@@ -1451,6 +1548,9 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 				uint64_t q[2] = { vsz, rss };
 
 				memcpy(out, q, 16); out[4] = out[5] = out[6] = out[7] = 0; out[8] = 1; out[9] = 0; n = 10;
+			} else if (a == 15) {					/* TASK_AUDIT_TOKEN: audit_token_t, eight 32 bit words: auid euid egid ruid rgid pid asid pidversion */
+				out[0] = 0xffffffffu; out[1] = td->td_ucred->cr_uid; out[2] = td->td_ucred->cr_gid; out[3] = td->td_ucred->cr_ruid; out[4] = td->td_ucred->cr_rgid;
+				out[5] = (uint32_t)p->p_pid; out[6] = (uint32_t)p->p_pid; out[7] = 1; n = 8;
 			} else if (a == 17) {					/* TASK_DYLD_INFO: all_image_info_addr (u64), size (u64), format (int): nothing registered */
 				n = 5;
 			} else { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
@@ -1463,20 +1563,35 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, 0, buf, (n + 1) * 4);
 		}
 		return (true);
-	case 200:					/* host_info(host, flavor, *info, *count): HOST_BASIC_INFO (1) */
+	case 200:					/* host_info(host, flavor, *info, *count): HOST_BASIC_INFO (1), HOST_SCHED_INFO (3), HOST_PRIORITY_INFO (5): the values of a Mac (tools/macprobe) */
 		a = m->size >= 40 ? rd32(d, 32) : 0;
+		if (a == 3 || a == 5 || a == 7 || a == 8) {
+			uint32_t buf[1 + 8];
+
+			memset(buf, 0, sizeof(buf));
+			if (a == 3) { buf[0] = 2; buf[1] = 10; buf[2] = 10; }					/* min_timeout, min_quantum */
+			else if (a == 5) {
+				static const uint32_t pri[8] = { 80, 80, 64, 31, 0, 0, 0, 79 };	/* kernel, system, server, user, depress, idle, minimum, maximum */
+
+				buf[0] = 8; memcpy(&buf[1], pri, sizeof(pri));
+			}							/* flavors 7 and 8: success, nothing to report (count 0) */
+			mig_reply_data(m, id, 0, buf, (buf[0] + 1) * 4);
+			return (true);
+		}
 		if (a != 1) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
 		{
 			uint32_t buf[1 + 12];
 			uint64_t mem = (uint64_t)ptoa((uint64_t)physmem);
 
 			memset(buf, 0, sizeof(buf));
-			buf[0] = 12; buf[1] = (uint32_t)mp_ncpus; buf[2] = (uint32_t)mp_ncpus; buf[3] = (uint32_t)MIN(mem, (uint64_t)UINT32_MAX);
+			buf[0] = 12; buf[1] = (uint32_t)mp_ncpus; buf[2] = (uint32_t)mp_ncpus; buf[3] = (uint32_t)MIN(mem, (uint64_t)INT32_MAX + 1);
 #if defined(__amd64__)
-			buf[4] = 0x01000007;		/* CPU_TYPE_X86_64 */
+			buf[4] = 7;			/* CPU_TYPE_X86: what host_info says on an Intel Mac (not the 64 bit type) */
+			buf[5] = 8;			/* CPU_SUBTYPE_X86_64_H (Haswell): dyld chooses the x86_64h cache when this is 8 */
 #else
 			buf[4] = 0x0100000c;		/* CPU_TYPE_ARM64 */
 #endif
+			buf[6] = 1;			/* cpu_threadtype */
 			buf[7] = (uint32_t)mp_ncpus; buf[8] = (uint32_t)mp_ncpus; buf[9] = (uint32_t)mp_ncpus; buf[10] = (uint32_t)mp_ncpus;
 			memcpy(&buf[11], &mem, 8);
 			mig_reply_data(m, id, 0, buf, sizeof(buf));
@@ -1544,7 +1659,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 
 	if (mig_info(td, t, dest, m, id))
 		return;
-	if (dest->kind != KP_TASK) {
+	if (dest->kind != KP_TASK && !(dest->kind == KP_HOST && id == 206)) {
 		mig_reply(t, m, id, 0x10000 /* MIG_BAD_ID-like */ - 303, NULL, NULL, 0, NULL, 0);
 		return;
 	}
@@ -1630,6 +1745,15 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			TAILQ_INSERT_TAIL(&rp->q, r, link);
 			rp->qn++;
 			wakeup(rp);
+		}
+		break;
+	case 206:				/* host_get_clock_service(host, clock_id (0 system, 1 calendar), *clock): the reply carries a send right to a clock port */
+		{
+			struct kport *cp = kp_new(KP_CLOCK);
+
+			cp->kpid = m->size >= 36 ? (rd32(m->data, 32) == 1 ? 1 : 0) : 0;
+			mig_reply(t, m, id, 0, cp, NULL, 0, NULL, 0);
+			kp_unref(cp);
 		}
 		break;
 	case 3402:				/* task_threads(task, *threads[], *count): a port for every thread */
@@ -1784,6 +1908,7 @@ static const struct {
 	E(28, 0, darwin_self_task,		"task_self_trap"),
 	E(29, 0, darwin_self_host,		"host_self_trap"),
 	E(31, 7, darwin_mach_msg,		"mach_msg_trap"),
+	E(47, 8, darwin_mach_msg2,		"mach_msg2_trap"),
 	E(32, 9, darwin_mach_msg,		"mach_msg_overwrite_trap"),
 #undef E
 };

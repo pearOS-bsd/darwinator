@@ -98,6 +98,17 @@ darwin_fcntl(struct thread *td, struct darwin_args *uap)
 
 		return (sys_fsync(td, &fa));
 	}
+	case 59: case 61: case 98:	/* F_ADDSIGS, F_ADDFILESIGS, F_CHECK_LV: code signatures are not checked */
+		return (0);
+	case 97: {			/* F_ADDFILESIGS_RETURN(fsignatures_t *): fs_file_start comes back as the end of the signed part of the file (where the signature starts) */
+		uint64_t sig[3];
+
+		error = copyin((void *)uap->a[2], sig, sizeof(sig));	/* fs_file_start, fs_blob_start (the offset of the blob), fs_blob_size */
+		if (error != 0)
+			return (error);
+		sig[0] = sig[1];
+		return (copyout(sig, (void *)uap->a[2], sizeof(uint64_t)));
+	}
 	case DARWIN_F_NOCACHE:		/* hints for the cache of the file system: nothing to do */
 	case DARWIN_F_RDAHEAD:
 	case DARWIN_F_GLOBAL_NOCACHE:
@@ -822,6 +833,7 @@ darwin_more_syscalls_init(void)
 	darwin_spawn_syscalls_init();		/* syscalls_spawn.c */
 	darwin_sem_syscalls_init();		/* syscalls_sem.c */
 	darwin_misc_syscalls_init();		/* syscalls_misc.c */
+	darwin_dyld_syscalls_init();		/* syscalls_dyld.c: replaces the shared_region_check_np of syscalls_posix.c */
 	darwin_proc_syscalls_init();		/* syscalls_proc.c */
 	darwin_ipc_syscalls_init();		/* mach_ipc.c */
 }

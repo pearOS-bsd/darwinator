@@ -25,6 +25,7 @@ struct darwin_args {
 #define	DARWIN_MACHDEP_BASE	1024
 #define	DARWIN_MACH_BASE	1088
 extern int darwin_debug;
+extern int darwin_stop;
 extern int darwin_dyld;			/* kern.darwinator.dyld: run a dynamic Mach-O with the dyld that the file names */
 
 /* what the stack of a program that starts in dyld has: the mach_header of the program, then argc, argv, envp, and the "apple" strings (offsets in the string area) */
@@ -65,6 +66,7 @@ int	darwin_semwait_signal(struct thread *, struct darwin_args *);	/* mach_ipc.c 
 int	darwin_fileport_makeport(struct thread *, struct darwin_args *);
 int	darwin_fileport_makefd(struct thread *, struct darwin_args *);
 void	darwin_misc_syscalls_init(void);		/* syscalls_misc.c */
+void	darwin_dyld_syscalls_init(void);		/* syscalls_dyld.c */
 void	darwin_proc_syscalls_init(void);		/* syscalls_proc.c */
 int	darwin_sysctl_proc(struct thread *, int *, u_int, void *, void *, bool);
 int	darwin_sysctl_procargs2(struct thread *, int, void *, void *);
