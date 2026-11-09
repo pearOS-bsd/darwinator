@@ -19,6 +19,9 @@
 #include <sys/ucontext.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
+#include <sys/proc.h>
+#include <sys/proc_info.h>
+#include <libproc.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -90,6 +93,24 @@ int main(void)
 	{ struct rlimit rl; getrlimit(RLIMIT_NOFILE, &rl); printf("RLIMIT_NOFILE: cur %llu max %llu\n", (unsigned long long)rl.rlim_cur, (unsigned long long)rl.rlim_max); }
 	{ int s = socket(AF_INET6, SOCK_STREAM, 0); struct sockaddr_in6 a; memset(&a, 0, sizeof(a)); a.sin6_len = sizeof(a); a.sin6_family = AF_INET6; bind(s, (struct sockaddr *)&a, sizeof(a)); socklen_t l = sizeof(a); getsockname(s, (struct sockaddr *)&a, &l); printf("AF_INET6 socket %d: sin6_len %u family %u port %u\n", s, a.sin6_len, a.sin6_family, ntohs(a.sin6_port)); }
 	{ int v = 1; int r = setsockopt(0, SOL_SOCKET, SO_NOSIGPIPE, &v, sizeof(v)); printf("setsockopt(0, SO_NOSIGPIPE): r %d errno %d\n", r, errno); }
+
+	printf("== process structures\n");
+	SZ(struct kinfo_proc); SZ(struct extern_proc); SZ(struct eproc); SZ(struct proc_bsdinfo); SZ(struct proc_taskinfo); SZ(struct proc_taskallinfo); SZ(struct proc_threadinfo); SZ(struct proc_vnodepathinfo); SZ(struct proc_fdinfo); SZ(struct vnode_fdinfowithpath);
+	OFF(struct kinfo_proc, kp_proc); OFF(struct kinfo_proc, kp_eproc);
+	OFF(struct extern_proc, p_starttime); OFF(struct extern_proc, p_flag); OFF(struct extern_proc, p_stat); OFF(struct extern_proc, p_pid); OFF(struct extern_proc, p_oppid); OFF(struct extern_proc, p_estcpu); OFF(struct extern_proc, p_pctcpu);
+	OFF(struct extern_proc, p_priority); OFF(struct extern_proc, p_nice); OFF(struct extern_proc, p_comm); OFF(struct extern_proc, p_pgrp); OFF(struct extern_proc, p_xstat);
+	OFF(struct eproc, e_paddr); OFF(struct eproc, e_sess); OFF(struct eproc, e_pcred); OFF(struct eproc, e_ucred); OFF(struct eproc, e_vm); OFF(struct eproc, e_ppid); OFF(struct eproc, e_pgid); OFF(struct eproc, e_jobc); OFF(struct eproc, e_tdev); OFF(struct eproc, e_tpgid); OFF(struct eproc, e_tsess); OFF(struct eproc, e_wmesg); OFF(struct eproc, e_xsize); OFF(struct eproc, e_xrssize); OFF(struct eproc, e_xccount); OFF(struct eproc, e_xswrss); OFF(struct eproc, e_flag); OFF(struct eproc, e_login); OFF(struct eproc, e_spare);
+	OFF(struct proc_bsdinfo, pbi_status); OFF(struct proc_bsdinfo, pbi_pid); OFF(struct proc_bsdinfo, pbi_ppid); OFF(struct proc_bsdinfo, pbi_uid); OFF(struct proc_bsdinfo, pbi_comm); OFF(struct proc_bsdinfo, pbi_name); OFF(struct proc_bsdinfo, pbi_start_tvsec); OFF(struct proc_bsdinfo, pbi_nice);
+	OFF(struct proc_taskinfo, pti_virtual_size); OFF(struct proc_taskinfo, pti_resident_size); OFF(struct proc_taskinfo, pti_threadnum); OFF(struct proc_taskinfo, pti_total_user);
+	CONST(PROC_PIDTBSDINFO); CONST(PROC_PIDTASKINFO); CONST(PROC_PIDTASKALLINFO); CONST(PROC_PIDPATHINFO); CONST(PROC_PIDVNODEPATHINFO); CONST(PROC_PIDLISTFDS); CONST(PROC_PIDTHREADINFO); CONST(PROC_ALL_PIDS); CONST(PROC_PIDPATHINFO_MAXSIZE);
+	CONST(KERN_PROC); CONST(KERN_PROC_ALL); CONST(KERN_PROC_PID); CONST(KERN_PROC_PGRP); CONST(KERN_PROC_UID); CONST(KERN_PROCARGS2); CONST(KERN_PROC_RUID); CONST(KERN_PROC_TTY); CONST(SIDL); CONST(SRUN); CONST(SSLEEP); CONST(SSTOP); CONST(SZOMB);
+	{ int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() }; struct kinfo_proc kp; size_t n = sizeof(kp); memset(&kp, 0, sizeof(kp));
+	  int r = sysctl(mib, 4, &kp, &n, NULL, 0); printf("sysctl KERN_PROC_PID: r %d size %zu pid %d ppid %d stat %d flag %#x comm %s uid %u ruid %u pgid %d tpgid %d login %s ngroups %d\n", r, n, kp.kp_proc.p_pid, kp.kp_eproc.e_ppid, kp.kp_proc.p_stat, kp.kp_proc.p_flag, kp.kp_proc.p_comm, kp.kp_eproc.e_ucred.cr_uid, kp.kp_eproc.e_pcred.p_ruid, kp.kp_eproc.e_pgid, kp.kp_eproc.e_tpgid, kp.kp_eproc.e_login, kp.kp_eproc.e_ucred.cr_ngroups); }
+	{ int mib[3] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL }; size_t n = 0; int r = sysctl(mib, 3, NULL, &n, NULL, 0); printf("sysctl KERN_PROC_ALL: r %d size %zu (%zu entries)\n", r, n, n / sizeof(struct kinfo_proc)); }
+	{ char path[PROC_PIDPATHINFO_MAXSIZE]; int r = proc_pidpath(getpid(), path, sizeof(path)); printf("proc_pidpath: %d %s\n", r, path); char nm[64]; r = proc_name(getpid(), nm, sizeof(nm)); printf("proc_name: %d %s\n", r, nm); }
+	{ struct proc_bsdinfo bi; int r = proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &bi, sizeof(bi)); printf("proc_pidinfo TBSDINFO: r %d pid %u ppid %u status %u uid %u comm %s name %s nice %d start %llu\n", r, bi.pbi_pid, bi.pbi_ppid, bi.pbi_status, bi.pbi_uid, bi.pbi_comm, bi.pbi_name, bi.pbi_nice, (unsigned long long)bi.pbi_start_tvsec); }
+	{ int pids[4096]; int r = proc_listpids(PROC_ALL_PIDS, 0, pids, sizeof(pids)); printf("proc_listpids: %d bytes (%d pids)\n", r, r / (int)sizeof(int)); }
+	{ int mib[3] = { CTL_KERN, KERN_PROCARGS2, getpid() }; char buf[4096]; size_t n = sizeof(buf); int r = sysctl(mib, 3, buf, &n, NULL, 0); printf("KERN_PROCARGS2: r %d size %zu argc %d first string %s\n", r, n, r == 0 ? *(int *)buf : -1, r == 0 ? buf + 4 : ""); }
 	printf("== done\n");
 	return 0;
 }
