@@ -845,6 +845,24 @@ fatal_handler(int sig, siginfo_t *si, void *ucv)
 	}
 	if (sp) for (i = 0; i < 200; i++) for (d = machrun_images_head(); d != NULL; d = d->next)
 		if (sp[i] >= d->min_vm + d->slide && sp[i] < d->max_vm + d->slide) { dprintf(2, "  stack[%d]: %s + %#lx\n", i, d->path, (unsigned long)(sp[i] - d->slide - d->min_vm)); break; }
+	{	/* frames by the frame pointers (the GNUstep libraries and this system's libobjc keep them): the caller of a message to a bad object */
+		void **fp =
+#if defined(__x86_64__)
+		    (void **)uc->uc_mcontext.mc_rbp;
+#else
+		    NULL;
+#endif
+		for (i = 0; i < 40 && fp != NULL && ((uintptr_t)fp & 7) == 0 && (uintptr_t)fp > 0x10000; i++) {
+			void *ra = fp[1]; Dl_info di;
+			if (ra == NULL) break;
+			for (d = machrun_images_head(); d != NULL; d = d->next) if ((uintptr_t)ra >= d->min_vm + d->slide && (uintptr_t)ra < d->max_vm + d->slide) break;
+			if (d != NULL) dprintf(2, "  frame[%d] %s + %#lx\n", i, d->path, (unsigned long)((uintptr_t)ra - d->slide - d->min_vm));
+			else if (dladdr(ra, &di) && di.dli_fname && !(di.dli_sname == NULL && strstr(di.dli_fname, ".app/"))) dprintf(2, "  frame[%d] %p %s (%s + %#lx)\n", i, ra, di.dli_fname, di.dli_sname ? di.dli_sname : "?", di.dli_sname ? (unsigned long)((uintptr_t)ra - (uintptr_t)di.dli_saddr) : 0UL);
+			else dprintf(2, "  frame[%d] %p (no image)\n", i, ra);
+			fp = (void **)fp[0];
+		}
+	}
+	if (getenv("MACHRUN_SEGV_HOLD")) { dprintf(2, "machrun: holding (pid %d) for procstat\n", (int)getpid()); sleep(90); }
 	_exit(139);
 }
 static void

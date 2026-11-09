@@ -210,6 +210,9 @@ build_class(struct o_class *c)
 			rt_addIvar(k, v->name, v->size, al, v->type);
 		}
 		rt_registerClassPair(k);
+		{	size_t (*gis)(Class) = dlsym(RTLD_DEFAULT, "class_getInstanceSize");	/* the instances must be as large as the program thinks (it keeps its ivars to the end of that size) */
+			if (gis && gis(k) < ro->instanceSize) fprintf(stderr, "machrun: class %s: instance size %zu here, %u in the program: the program's ivars would be outside the object\n", ro->name, gis(k), ro->instanceSize);
+		}
 		if (iv) for (i = 0; i < iv->count; i++) {		/* the program's ivar offset variables get the offsets of this runtime */
 			const struct o_ivar *v = (const struct o_ivar *)((const uint8_t *)(iv + 1) + (size_t)i * (iv->entsizeAndFlags & ~3u));
 			Ivar r = rt_getInstanceVariable(k, v->name);

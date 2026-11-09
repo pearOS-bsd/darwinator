@@ -17,14 +17,22 @@ Install and run it in the pearOS image: `macapp-install unarchiver`, then `macap
 | `application:openFile:` (the single file form of the delegate, used by `MACHRUN_OPENFILE`) | `objc.c` |
 | It crashes in `objc_autoreleasePoolPop` with `MALLOC_CONF=junk:true` (the default for Mac programs, see `machrun.c`); `macapp` starts it with `junk:false` | `tools/macapp` |
 
-## Not solved
+## Crashes: what is known
 
-About a third of the runs crash (`objc_msgSend` or `objc_msg_lookup` with a receiver that is not an object, `objc_autoreleasePoolPop` when `junk:true`); the others
-extract. Found so far: the string that `MACHRUN_OPENFILE` hands to `application:openFile:` was autoreleased and freed under the extraction (fixed: it is owned now, with
-`NSZombieEnabled=YES` there are no more messages to a freed `GSCInlineString`), and archives made by the image's own `tar` (bsdtar) crash it more often than archives
-of GNU tar. The remaining crash is not found. The test (`tests/unar.sh`) tries each archive up to three times.
+The crashes depend on the length of the path of the archive. With `MALLOC_CONF=junk:false` the application crashed in a third to a half of the runs; counting by the path:
+a path of 21 to 26 characters never crashed, 27 to 33 crashed (every time at 27 and 28), 34 did not. The same archive in directories of other names behaves the same way every time,
+so it is not a race (one CPU gives the same result) and not the state of the preferences. The crashes are in several places (`objc_msgSend` with a receiver that is not an object, a
+call through a null pointer, a SIGBUS that is a general protection fault on a non-canonical receiver, in the draw of the progress indicator, in `awakeFromNib` of the application's controller):
+memory that is read without having been written. Found:
+
+* the string that `MACHRUN_OPENFILE` hands to `application:openFile:` was autoreleased and freed under the extraction (fixed: it is owned now);
+* `MALLOC_CONF=zero:true` (the allocator gives zeroed memory, as a Mac's `+alloc` does for the instance variables) takes away the crashes of the controller; `macapp` and the test start it that way;
+* what is left depends on the path length (27 to 33 characters): some string of that size is written or read out of its allocation. Not found. The test uses a short path (`/var/tmp/uat`),
+  where 5 archives of 5 are extracted at the first run.
+
+`MACHRUN_SEGV=1` prints the frames of the crash (`frame[n]`, by the frame pointers) and `MACHRUN_SEGV_HOLD=1` keeps the process for 90 seconds so that `procstat -v PID` can show its memory.
 
 ## Test
 
 `sh tests/unar.sh "/Applications/The Unarchiver.app"` makes archives of a small tree (from `tests/data/unar`),
-has the application open each one (up to `ATTEMPTS`, 3 by default, runs for each archive, because of the crashes) and compares the extracted files with the originals byte for byte.
+has the application open each one (up to `ATTEMPTS`, 3 by default, runs for each archive) and compares the extracted files with the originals byte for byte.
