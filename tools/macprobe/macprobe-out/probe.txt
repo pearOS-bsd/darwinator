@@ -1,0 +1,163 @@
+== machine
+hw.machine = arm64
+kern.osproductversion = 27.0
+== sizes
+sizeof struct stat = 144
+sizeof struct statfs = 2168
+sizeof struct dirent = 1048
+sizeof struct termios = 72
+sizeof struct sigaction = 16
+sizeof siginfo_t = 104
+sizeof ucontext_t = 56
+sizeof mcontext_t = 8
+sizeof struct kevent = 32
+sizeof struct kevent64_s = 48
+sizeof struct flock = 24
+sizeof struct timeval = 16
+sizeof struct rlimit = 16
+sizeof struct rusage = 144
+sizeof struct sockaddr_in = 16
+sizeof struct sockaddr_in6 = 28
+sizeof struct attrlist = 24
+sizeof struct msghdr = 48
+sizeof FTSENT = 112
+sizeof fsid_t = 8
+sizeof sigset_t = 4
+offsetof struct stat.st_mode = 4
+offsetof struct stat.st_ino = 8
+offsetof struct stat.st_atimespec = 32
+offsetof struct stat.st_birthtimespec = 80
+offsetof struct stat.st_size = 96
+offsetof struct stat.st_blocks = 104
+offsetof struct stat.st_flags = 116
+offsetof struct statfs.f_fstypename = 72
+offsetof struct statfs.f_mntonname = 88
+offsetof struct statfs.f_fsid = 48
+offsetof struct dirent.d_name = 21
+offsetof struct dirent.d_namlen = 18
+offsetof struct dirent.d_type = 20
+offsetof struct dirent.d_seekoff = 8
+offsetof FTSENT.fts_statp = 96
+offsetof FTSENT.fts_name = 104
+offsetof FTSENT.fts_path = 48
+offsetof FTSENT.fts_info = 88
+offsetof FTSENT.fts_parent = 8
+offsetof FTSENT.fts_number = 24
+offsetof struct kevent.filter = 8
+offsetof struct kevent.udata = 24
+offsetof struct sockaddr_in6.sin6_family = 1
+offsetof struct sockaddr_in6.sin6_addr = 8
+offsetof struct termios.c_cc = 32
+offsetof struct termios.c_ispeed = 56
+== constants
+AF_INET6 = 30
+AF_UNIX = 1
+SO_NOSIGPIPE = 4130
+MSG_NOSIGNAL = 524288
+O_CLOEXEC = 16777216
+O_DIRECTORY = 1048576
+O_NOFOLLOW = 256
+O_EXLOCK = 32
+O_SYNC = 128
+O_DSYNC = 4194304
+AT_FDCWD = -2
+AT_SYMLINK_NOFOLLOW = 32
+AT_REMOVEDIR = 128
+AT_EACCESS = 16
+F_GETPATH = 50
+F_FULLFSYNC = 51
+F_NOCACHE = 48
+F_DUPFD_CLOEXEC = 67
+F_GETLK = 7
+F_SETLKW = 9
+MAP_ANON = 4096
+MAP_FIXED = 16
+MAP_JIT = 2048
+MAP_NORESERVE = 64
+MS_SYNC = 16
+MS_ASYNC = 1
+MS_INVALIDATE = 2
+SA_SIGINFO = 64
+SA_RESTART = 2
+SA_ONSTACK = 1
+SA_USERTRAMP = 256
+SIGUSR1 = 30
+SIGBUS = 10
+SIGSYS = 12
+EVFILT_READ = -1
+EVFILT_USER = -10
+EVFILT_TIMER = -7
+EVFILT_MACHPORT = -8
+EVFILT_VM = -12
+EV_UDATA_SPECIFIC = 256
+NOTE_SECONDS = 1
+NOTE_USECONDS = 2
+NOTE_NSECONDS = 4
+ENOATTR = 93
+EOVERFLOW = 84
+ECANCELED = 89
+EILSEQ = 92
+EBADMSG = 94
+EPROTO = 100
+ENOTSUP = 45
+EDEVERR = 83
+EAUTH = 80
+TIOCGETA = 1078490131
+TIOCSETA = 2152231956
+TIOCGWINSZ = 1074295912
+FIONREAD = 1074030207
+RLIMIT_NOFILE = 8
+RLIMIT_AS = 5
+KERN_SUCCESS = 0
+MACH_RCV_TIMED_OUT = 268451843
+MACH_SEND_INVALID_DEST = 268435459
+MACH_MSG_TYPE_MAKE_SEND = 20
+== sysctl
+hw.ncpu = 8 (4 bytes)
+hw.activecpu = 8 (4 bytes)
+hw.logicalcpu = 8 (4 bytes)
+hw.physicalcpu = 8 (4 bytes)
+hw.memsize = 8589934592 (8 bytes)
+hw.pagesize = 16384 (8 bytes)
+hw.cachelinesize = 128 (8 bytes)
+hw.l1dcachesize = 65536 (8 bytes)
+hw.l2cachesize = 4194304 (8 bytes)
+hw.tbfrequency = 24000000 (8 bytes)
+hw.cpufrequency: error 2
+hw.byteorder = 1234 (4 bytes)
+hw.cpu64bit_capable = 1 (4 bytes)
+kern.ostype = "Darwin" (7 bytes)
+kern.osrelease = "27.0.0" (7 bytes)
+kern.osversion = "26A5416b" (9 bytes)
+kern.version = "Darwin Kernel Version 27.0.0: Tue Aug 11 22:05:39 PDT 2026; root:xnu-13432.1.9~3/RELEASE_ARM64_T8103" (101 bytes)
+kern.hostname = "MacBook-Air.local" (18 bytes)
+kern.argmax = 1048576 (4 bytes)
+kern.maxproc = 2000 (4 bytes)
+kern.maxfiles = 30720 (4 bytes)
+kern.maxfilesperproc = 10240 (4 bytes)
+kern.osrev: error 2
+kern.boottime = 1794101743 s 748474 us (16 bytes)
+hw.model = "MacBookAir10,1" (15 bytes)
+hw.targettype = "J313" (5 bytes)
+== mach
+timebase 125/3
+task_self 0x203 host_self 0x1d03 thread_self 0x103
+mach_port_allocate kr 0 name 0xa03; reply port 0x70f
+== calls
+stat(/): st_dev 0x1000010 st_mode 40755 st_nlink 23 st_ino 2 st_blksize 4096
+stat(/dev/null): st_rdev 0x3000002 st_dev 0x84fa564d
+statfs(/): f_bsize 4096 f_iosize 1048576 f_fstypename apfs f_mntonname / f_flags 0x4480d001 f_type 26
+getdirentries(/): 808 bytes, first entry reclen 32 namlen 1 type 4 name .
+getattrlist(/, OBJTYPE): r 0 length 8 objtype 2 (VDIR=2)
+F_GETPATH(/tmp): r 0 /private/tmp
+xattr: set 0 get 1 list 11 first name "com.test.x"
+xattr missing: -1 errno 93 (Attribute not found)
+kevent: n 1 filter -1 data 1 udata 0x1234
+signal handler: sig 30 si_signo 30 uc_mcsize 816 uc_onstack 0 uc_sigmask 0
+signal handler: uc_mcontext - uc = 56 (mcontext64 follows the ucontext when 56)
+signal handler: ss.pc 0x183be5060 ss.sp 0x16d28cbc0
+sigaction: old handler 0x0
+RLIMIT_NOFILE: cur 2560 max 9223372036854775807
+AF_INET6 socket 6: sin6_len 28 family 30 port 52921
+setsockopt(0, SO_NOSIGPIPE): r -1 errno 38
+== done

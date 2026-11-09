@@ -1,5 +1,7 @@
-Undefined symbols for architecture arm64:
-  "_getdirentries_is_not_available_when_64_bit_inodes_are_in_effect", referenced from:
-      _main in probe-bb0ccc.o
-ld: symbol(s) not found for architecture arm64
-clang: error: linker command failed with exit code 1 (use -v to see invocation)
+/Users/alxb421/Desktop/darwinator/tools/macprobe/probe.c:82:83: warning: 'syscall' is deprecated: first deprecated in macOS 10.12 - syscall(2) is unsupported; please switch to a supported interface. For SYS_kdebug_trace use kdebug_signpost(). [-Wdeprecated-declarations]
+   82 |         { int fd = open("/", O_RDONLY); char buf[4096]; long long base = 0; int n = (int)syscall(344 /* getdirentries64 */, fd, buf, (unsigned long)sizeof(buf), &base); struct dirent *d = (struct dirent *)buf; printf("getdirentries(/): %d bytes, first entry reclen %u namlen %u type %u name %s\n", n, d->d_reclen, d->d_namlen, d->d_type, d->d_name); close(fd); }
+      |                                                                                          ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/unistd.h:754:6: note: 'syscall' has been explicitly marked deprecated here
+  754 | int      syscall(int, ...);
+      |          ^
+1 warning generated.
