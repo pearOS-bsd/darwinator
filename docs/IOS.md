@@ -5,9 +5,12 @@ The root file system of an iPhone X restore (iOS 16.7.16, `iPhone10,3_16.7.16_20
 | program | imports | result |
 |---|---|---|
 | `/usr/bin/vm_stat` | libSystem | **runs**: the page counts are those of the FreeBSD VM (`vm.stats.vm`) |
-| `/bin/df` | libSystem, libutil | starts, prints the table; the sizes are right for the first file system, the names of the mount points are not (`getattrlist` is `ENOTSUP`) |
-| `/bin/ps` | libSystem | starts, prints a table of the right shape; the process list is wrong (the `sysctl KERN_PROC` of `machrun` is FreeBSD's, not Darwin's layout) |
-| `/usr/bin/taskinfo` | CoreFoundation, libSystem | starts; stops at `processor_set_default` (KERN_FAILURE) |
+| `/bin/df` | libSystem, libutil | **runs**: the real mounts of the FreeBSD VM (`getmntinfo` with Darwin's `struct statfs`, and `getattrlist` for ATTR_VOL_SPACEUSED) |
+| `/bin/ps` | libSystem | **runs**: the process list through `sysctl KERN_PROC` and `KERN_PROCARGS2` in Darwin's layout (kinfo_proc of 648 bytes) |
+| `/usr/bin/taskinfo` | CoreFoundation, libSystem | starts; stops at `processor_set_default` (it needs the real task and processor set ports) |
+| `/usr/bin/ltop`, `/usr/libexec/cc_fips_test`, `/usr/sbin/aslmanager`, `/usr/libexec/tzlinkd` | libSystem | start and stop at a missing private symbol (`ledger`, `cc_clear`, `vproc_swap_integer`, `xpc_track_activity`) |
+| `/usr/sbin/rtadvd`, `/usr/libexec/dirs_cleaner`, `/sbin/mount_lifs` | libSystem | start and print their usage text |
+| `/usr/libexec/tzinit` | libc++ | crashes: Apple's libc++ objects meet FreeBSD's libc++ (not supported) |
 
 What had to be added to `machrun` for this (all in `dyld/shims.c`):
 

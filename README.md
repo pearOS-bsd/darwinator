@@ -57,7 +57,7 @@ XLD, a converter of audio files with plug-ins that are Mach-O bundles (`docs/XLD
 
 What recent applications need beyond that (AppCleaner is the test): `LC_DYLD_CHAINED_FIXUPS`, nibs in the `NIBArchive` format of Xcode 16 (converted to the keyed archive that GNUstep loads, `compat.m`), the constant literals of the compiler (`@[...]`, `@{...}`, `@1` as structures in the file), direct references to the program's own classes, `objc_alloc`, `objc_opt_new` and the other fast paths of newer compilers, libdispatch objects that the compiler retains with `objc_retain`, CoreGraphics and CoreFoundation from libopal and GNUstep corebase, and stand-ins for Sparkle, SF Symbols and asset catalogs.
 
-iOS 16 command line tools (`vm_stat`, `df`, `ps`, `taskinfo`) also start on FreeBSD arm64: see `docs/IOS.md`.
+iOS 16 command line tools (`vm_stat`, `df`, `ps` run; `taskinfo`, `ltop`, `aslmanager` start) also run on FreeBSD arm64: see `docs/IOS.md`.
 
 ## In the pearOS image
 
