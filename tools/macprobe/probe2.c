@@ -76,7 +76,7 @@ static void access_tests(void)
 		memcpy(blob, e, 32); strcpy(blob + 32, "/"); strcpy(blob + 40, "/nonexistent");
 		int res[2] = { 99, 99 };
 		errno = 0;
-		int r = (int)syscall(SYS_access_extended, blob, (size_t)64, res, (uid_t)-1);
+		int r = (int)syscall(284, blob, (size_t)64, res, (uid_t)-1);
 		printf("access_extended flags=0x%x: r=%d errno=%d res=[%d,%d]\n", flagsets[k], r, errno, res[0], res[1]);
 	}
 }
