@@ -372,6 +372,15 @@ static int dw_fsetxattr(int fd, const char *n, const void *v, size_t sz, uint32_
 static ssize_t dw_fgetxattr(int fd, const char *n, void *v, size_t sz, uint32_t pos, int opt) { errno = ENOATTR; return (-1); }
 static ssize_t dw_flistxattr(int fd, char *l, size_t sz, int opt) { return (0); }
 static int dw_fremovexattr(int fd, const char *n, int opt) { errno = ENOATTR; return (-1); }
+/* Uniform type identifiers (CoreServices): no type database here.  A file name extension has no known identifier: the program gets the one it gives for an unknown type, a "dyn." one made of the tag,
+ * and no declaration (UTTypeCopyDeclaration is NULL: the program goes on without the description and the conformance of the type). */
+void *cf_CFStringCreateWithCString(void *, const char *, uint32_t);
+static void *
+dw_UTTypeCreatePreferredIdentifierForTag(void *tagClass, void *tag, void *conforming)
+{
+	(void)tagClass; (void)conforming; (void)tag;
+	return (cf_CFStringCreateWithCString(NULL, "public.data", 0x08000100));
+}
 static int dw_copyfile(const char *from, const char *to, void *state, uint32_t flags) { if (flags & (1u << 16)) return (0); errno = ENOTSUP; return (-1); }	/* COPYFILE_CHECK: nothing to copy (no AppleDouble data) */
 static int dw_mbr_uid_to_uuid(unsigned uid, unsigned char *uu) { return (ENOENT); }
 static int dw_mbr_uuid_to_id(const unsigned char *uu, unsigned *id, int *type) { return (ENOENT); }
@@ -607,6 +616,8 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_IOServiceGetMatchingService", dw_zero }, { "_IOObjectRelease", dw_zero }, { "_IOObjectConformsTo", dw_zero }, { "_IORegistryEntryCreateCFProperties", dw_kern_failure },
 	{ "_IORegistryEntryGetParentEntry", dw_kern_failure },
 	{ "_DASessionCreate", dw_zero }, { "_DADiskCreateFromVolumePath", dw_zero }, { "_DADiskCopyDescription", dw_zero }, { "_DADiskUnmount", dw_zero },
+	{ "_UTTypeCreatePreferredIdentifierForTag", dw_UTTypeCreatePreferredIdentifierForTag }, { "_UTTypeCopyDeclaration", dw_zero }, { "_SecCodeCopySelf", dw_minus_one }, { "_SecCodeCopySigningInformation", dw_minus_one },
+	{ "_FSEventStreamCreate", dw_zero }, { "_FSEventStreamSetDispatchQueue", dw_zero }, { "_FSEventStreamStart", dw_zero }, { "_FSEventStreamStop", dw_zero }, { "_FSEventStreamInvalidate", dw_zero }, { "_FSEventStreamRelease", dw_zero },
 	{ "_proc_pidpath", dw_proc_pidpath }, { "_proc_name", dw_proc_name }, { "_GetProcessForPID", dw_minus_one }, { "_CopyProcessName", dw_minus_one },
 	{ "_MDItemCreateWithURL", dw_zero }, { "_MDItemCopyAttributes", dw_zero },
 	{ "_LSCopyAllRoleHandlersForContentType", dw_zero }, { "_LSCopyApplicationURLsForURL", dw_zero }, { "_LSCopyDefaultRoleHandlerForContentType", dw_ls_default_handler },
