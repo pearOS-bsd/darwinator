@@ -1,0 +1,37 @@
+host_info                          200   id found in the stub
+host_kernel_version                201   id found in the stub
+_host_page_size                    202   id found in the stub
+host_statistics                    216   id found in the stub
+host_statistics64                  219   id found in the stub
+mach_port_names                    3200  id found in the stub (as _kernelrpc_)
+mach_port_type                     3201  id found in the stub (as _kernelrpc_)
+mach_port_allocate                 3204  id found in the stub (as _kernelrpc_)
+mach_port_destroy                  3205  id found in the stub (as _kernelrpc_)
+mach_port_deallocate               3206  id found in the stub (as _kernelrpc_)
+mach_port_get_refs                 3207  id found in the stub
+mach_port_mod_refs                 3208  id found in the stub (as _kernelrpc_)
+mach_port_set_mscount              3210  id found in the stub (as _kernelrpc_)
+mach_port_request_notification     3213  id found in the stub (as _kernelrpc_)
+mach_port_get_attributes           3217  id found in the stub (as _kernelrpc_)
+mach_port_get_srights              3222  id found in the stub (as _kernelrpc_)
+mach_port_get_context              3228  id found in the stub
+mach_port_set_context              3229  id found in the stub
+task_threads                       3402  id found in the stub
+mach_ports_register                3403  not exported
+mach_ports_lookup                  3404  not exported
+task_info                          3405  id found in the stub
+task_set_info                      3406  id found in the stub
+task_suspend                       3407  id found in the stub
+task_resume                        3408  id found in the stub
+task_get_special_port              3409  id found in the stub
+task_set_special_port              3410  id found in the stub
+semaphore_create                   3418  id found in the stub
+thread_info                        3612  id found in the stub
+thread_get_state                   3603  id found in the stub
+thread_suspend                     3605  id found in the stub
+thread_resume                      3606  id found in the stub
+mach_vm_read                       4804  id found in the stub (as _kernelrpc_)
+mach_vm_write                      4806  id found in the stub
+mach_vm_read_overwrite             4808  id found in the stub
+mach_vm_region                     4816  id found in the stub
+2 of 36 not found
