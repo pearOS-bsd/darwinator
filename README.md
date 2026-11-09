@@ -49,7 +49,7 @@ A double click on `AppCleaner.app` on the desktop of the image starts it through
 
 (Driven with `tools/qmp-click.py`: QEMU's monitor command `mouse_move` does not move the absolute tablet, QMP `input-send-event` does.)
 
-The Unarchiver 3.11 (the original Mac application, Objective-C) shows its Preferences window and extracts zip, tar.gz, tar.bz2, tar.xz and 7z archives, and with a short path of the archive extracts them reliably in the test (a path of 27 to 33 characters makes it crash: not found yet) (`docs/UNARCHIVER.md`, `tests/unar.sh`).
+The Unarchiver 3.11 (the original Mac application, Objective-C) shows its Preferences window and extracts zip, tar.gz, tar.bz2, tar.xz and 7z archives, reliably (it is started with `NSZombieEnabled=YES`: without it a path of 27 to 33 characters makes it crash, the cause is an over-release not found yet) (`docs/UNARCHIVER.md`, `tests/unar.sh`).
 
 ![The Unarchiver 3.11 (the unmodified Mac application) running in pearOS](docs/screenshot-unarchiver.png)
 
