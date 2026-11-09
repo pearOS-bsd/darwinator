@@ -787,6 +787,46 @@ static int dw_compat_mode(const char *name, const char *mode) { (void)name; retu
 static const char *dw_mach_error_string(int kr) { return (kr == 0 ? "(os/kern) successful" : "(os/kern) failure"); }
 
 
+
+/* ---- what the command line tools of macOS ask for first (found by running 1265 of them through machrun, docs/MACCLI.md) ---- */
+static void
+dw_dispatch_once(long *pred, void *block)
+{
+	/* the block literal: isa, flags, reserved, invoke at offset 16 */
+	if (__atomic_load_n(pred, __ATOMIC_ACQUIRE) == -1) return;
+	{
+		long exp = 0;
+
+		if (__atomic_compare_exchange_n(pred, &exp, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			(*(void (**)(void *))((char *)block + 16))(block);
+			__atomic_store_n(pred, -1, __ATOMIC_RELEASE);
+		} else
+			while (__atomic_load_n(pred, __ATOMIC_ACQUIRE) != -1) sched_yield();
+	}
+}
+static void dw_dispatch_once_f(long *pred, void *ctx, void (*fn)(void *))
+{
+	if (__atomic_load_n(pred, __ATOMIC_ACQUIRE) == -1) return;
+	{
+		long exp = 0;
+
+		if (__atomic_compare_exchange_n(pred, &exp, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) { fn(ctx); __atomic_store_n(pred, -1, __ATOMIC_RELEASE); }
+		else while (__atomic_load_n(pred, __ATOMIC_ACQUIRE) != -1) sched_yield();
+	}
+}
+static void *dw_malloc_type_malloc(size_t n, uint64_t t) { (void)t; return (malloc(n)); }
+static void *dw_malloc_type_calloc(size_t c, size_t n, uint64_t t) { (void)t; return (calloc(c, n)); }
+static void *dw_malloc_type_realloc(void *p, size_t n, uint64_t t) { (void)t; return (realloc(p, n)); }
+static void *dw_malloc_type_valloc(size_t n, uint64_t t) { (void)t; return (aligned_alloc((size_t)getpagesize(), (n + getpagesize() - 1) / getpagesize() * getpagesize())); }
+static int dw_malloc_type_posix_memalign(void **p, size_t a, size_t n, uint64_t t) { (void)t; return (posix_memalign(p, a, n)); }
+static void *dw_malloc_type_aligned_alloc(size_t a, size_t n, uint64_t t) { (void)t; return (aligned_alloc(a, n)); }
+static int dw_set_user_dir_suffix(const char *s) { (void)s; return (1); }
+static size_t dw_strlcpy_chk(char *d, const char *s, size_t n, size_t dl) { if (n > dl) abort(); return (strlcpy(d, s, n)); }
+static size_t dw_strlcat_chk(char *d, const char *s, size_t n, size_t dl) { if (n > dl) abort(); return (strlcat(d, s, n)); }
+static double dw_cf_absolute_time(void) { struct timeval tv; gettimeofday(&tv, NULL); return ((double)tv.tv_sec - 978307200.0 + tv.tv_usec / 1e6); }
+static void *dw_os_transaction_create(const char *n) { (void)n; return ((void *)1); }
+static int dw_fcopyfile(int a, int b, void *st, uint32_t fl) { (void)a; (void)b; (void)st; (void)fl; errno = ENOTSUP; return (-1); }
+
 static long dw_zero(void) { return (0); }
 /* libproc: the name and the path of a process by its pid (what Sloth and the activity monitors ask) */
 static int
@@ -896,6 +936,11 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_mach_port_deallocate", dw_zero }, { "_vm_deallocate", dw_zero }, { "_mach_port_mod_refs", dw_zero },
 	{ "_getattrlist", dw_getattrlist }, { "_getmntinfo$INODE64", dw_getmntinfo }, { "_getmntinfo", dw_getmntinfo }, { "_getattrlistbulk", dw_minus1_enotsup }, { "_fgetattrlist", dw_minus1_enotsup }, { "_proc_pidinfo", dw_minus1_enotsup }, { "_proc_pid_rusage", dw_minus1_enotsup }, { "_proc_get_wakemon_params", dw_minus1_enotsup }, { "_proc_get_dirty", dw_minus1_enotsup }, { "_proc_get_cpumon_params", dw_minus1_enotsup }, { "_kpersona_pidinfo", dw_minus1_enotsup }, { "_proc_listpids", dw_minus1_enotsup },
 	{ "_mach_task_self_", &g_mach_task_self },
+	{ "_dispatch_once", dw_dispatch_once }, { "_dispatch_once_f", dw_dispatch_once_f }, { "_malloc_type_malloc", dw_malloc_type_malloc }, { "_malloc_type_calloc", dw_malloc_type_calloc }, { "_malloc_type_realloc", dw_malloc_type_realloc },
+	{ "_malloc_type_valloc", dw_malloc_type_valloc }, { "_malloc_type_posix_memalign", dw_malloc_type_posix_memalign }, { "_malloc_type_aligned_alloc", dw_malloc_type_aligned_alloc },
+	{ "__set_user_dir_suffix", dw_set_user_dir_suffix }, { "___strlcpy_chk", dw_strlcpy_chk }, { "___strlcat_chk", dw_strlcat_chk }, { "_CFAbsoluteTimeGetCurrent", dw_cf_absolute_time },
+	{ "_os_transaction_create", dw_os_transaction_create }, { "_fcopyfile", dw_fcopyfile },
+	{ "_sandbox_init", dw_zero }, { "_sandbox_check", dw_zero }, { "_sandbox_init_with_parameters", dw_zero }, { "_os_variant_has_internal_content", dw_zero }, { "_os_variant_has_internal_diagnostics", dw_zero }, { "_os_variant_allows_internal_security_policies", dw_zero }, { "__os_feature_enabled_impl", dw_zero }, { "_setiopolicy_np", dw_zero }, { "_xpc_set_event_stream_handler", dw_zero }, { "_os_transaction_needs_more_time", dw_zero }, { "_notify_set_options", dw_zero },
 	{ "_mach_host_self", dw_mach_host_self }, { "_host_page_size", dw_host_page_size }, { "_host_statistics64", dw_host_statistics64 }, { "_host_statistics", dw_host_statistics64 },
 	{ "_mach_error_string", dw_mach_error_string }, { "_compat_mode", dw_compat_mode }, { "_mach_error", dw_mach_error }, { "_vm_page_size", &g_vm_page_size }, { "_vm_kernel_page_size", &g_vm_page_size },
 	{ "_mach_absolute_time", dw_mach_absolute_time }, { "_mach_timebase_info", dw_mach_timebase_info }, { "___assert_rtn", dw_assert_rtn },

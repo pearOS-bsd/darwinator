@@ -1,0 +1,1265 @@
+bin/[	LOADERR	machrun: missing ]
+bin/bash	MISSING	_malloc_type_malloc
+bin/chmod	STARTS	
+bin/cp	STARTS	
+bin/csh	STARTS	
+bin/dash	MISSING	_malloc_type_malloc
+bin/date	STARTS	
+bin/df	MISSING	___strlcpy_chk
+bin/echo	STARTS	
+bin/ed	STARTS	
+bin/expr	LOADERR	machrun: syntax error
+bin/hostname	STARTS	
+bin/kill	STARTS	
+bin/ksh	STARTS	
+bin/link	STARTS	
+bin/ln	STARTS	
+bin/ls	STARTS	
+bin/mkdir	STARTS	
+bin/mv	STARTS	
+bin/pax	STARTS	
+bin/ps	STARTS	
+bin/pwd	STARTS	
+bin/realpath	STARTS	
+bin/rmdir	STARTS	
+bin/sh	STARTS	
+bin/sleep	STARTS	
+bin/stty	LOADERR	machrun: stdin isn't a terminal
+bin/sync	STARTS	
+bin/tcsh	STARTS	
+bin/test	STARTS	
+bin/unlink	STARTS	
+bin/wait4path	STARTS	
+bin/zsh	MISSING	_malloc_type_malloc
+sbin/apfs_unlockfv	MISSING	_fsctl
+sbin/disklabel	LOADERR	machrun: usage: One of 
+sbin/dmesg	MISSING	_proc_kmsgbuf
+sbin/dynamic_pager	STARTS	
+sbin/fibreconfig	STARTS	
+sbin/fstyp	STARTS	
+sbin/fstyp_hfs	STARTS	
+sbin/fstyp_msdos	STARTS	
+sbin/fstyp_ntfs	STARTS	
+sbin/fstyp_udf	STARTS	
+sbin/ifconfig	MISSING	_malloc_type_malloc
+sbin/kextload	MISSING	_OSKextSetLogOutputFunction
+sbin/kextunload	MISSING	_OSKextSetLogOutputFunction
+sbin/launchd	MISSING	_notify_set_options
+sbin/md5	STARTS	
+sbin/md5sum	STARTS	
+sbin/mknod	STARTS	
+sbin/mount	STARTS	
+sbin/mount_9p	STARTS	
+sbin/mount_afp	STARTS	
+sbin/mount_devfs	STARTS	
+sbin/mount_fdesc	STARTS	
+sbin/mount_nfs	MISSING	_malloc_type_malloc
+sbin/mount_smbfs	MISSING	_SMBFrameworkVersion
+sbin/mount_webdav	STARTS	
+sbin/mpioutil	MISSING	__CFRuntimeRegisterClass
+sbin/nfsd	MISSING	___strlcpy_chk
+sbin/nfsiod	LOADERR	machrun: sysctl(vfs.generic.nfs.client.nfsiod_thread_max): No such file or directory
+sbin/nologin	STARTS	
+sbin/pfctl	STARTS	
+sbin/ping	STARTS	
+sbin/ping6	STARTS	
+sbin/quotacheck	STARTS	
+sbin/route	STARTS	
+sbin/sha1	STARTS	
+sbin/sha1sum	STARTS	
+sbin/sha224	MISSING	_CC_SHA224_Init
+sbin/sha224sum	MISSING	_CC_SHA224_Init
+sbin/sha256	STARTS	
+sbin/sha256sum	STARTS	
+sbin/sha384	STARTS	
+sbin/sha384sum	STARTS	
+sbin/sha512	STARTS	
+sbin/sha512sum	STARTS	
+sbin/umount	STARTS	
+usr/bin/aa	MISSING	_AAThreadErrorContextEnter
+usr/bin/actool	MISSING	_dispatch_once
+usr/bin/aea	MISSING	_AAThreadErrorContextEnter
+usr/bin/afclip	STARTS	
+usr/bin/afconvert	MISSING	__ZnwmSt19__type_descriptor_t
+usr/bin/afhash	STARTS	
+usr/bin/afida	STARTS	
+usr/bin/afinfo	STARTS	
+usr/bin/afktool	MISSING	__ZnwmSt19__type_descriptor_t
+usr/bin/afplay	STARTS	
+usr/bin/afscexpand	STARTS	
+usr/bin/agentxtrap	MISSING	_init_snmp
+usr/bin/agvtool	MISSING	_dispatch_once
+usr/bin/app-sso	STARTS	
+usr/bin/applesingle	MISSING	_malloc_type_malloc
+usr/bin/apply	STARTS	
+usr/bin/ar	MISSING	_dispatch_once
+usr/bin/arch	MISSING	_sysdir_start_search_path_enumeration
+usr/bin/archiveutil	MISSING	_swift_task_create
+usr/bin/as	MISSING	_dispatch_once
+usr/bin/asa	MISSING	_dispatch_once
+usr/bin/AssetCacheLocatorUtil	STARTS	
+usr/bin/AssetCacheManagerUtil	MISSING	_sandbox_check
+usr/bin/AssetCacheTetheratorUtil	MISSING	_sandbox_check
+usr/bin/assetutil	LOADERR	machrun: class assetutilCUINamedSolidLayerImage: instance size 89 here, 153 in the program: the prog
+usr/bin/at	LOADERR	machrun: you do not have permission to use this program
+usr/bin/atos	MISSING	_malloc_type_malloc
+usr/bin/atq	LOADERR	machrun: you do not have permission to use this program
+usr/bin/atrm	LOADERR	machrun: you do not have permission to use this program
+usr/bin/atsutil	STARTS	
+usr/bin/automationmodetool	MISSING	_XAMIsAutomationModeEnabled
+usr/bin/automator	MISSING	_msgtracer_log_with_keys
+usr/bin/auvaltool	STARTS	
+usr/bin/avbanalyse	STARTS	
+usr/bin/avbcapture	STARTS	
+usr/bin/avbdiagnose	STARTS	
+usr/bin/avbutil	MISSING	_el_init
+usr/bin/avconvert	STARTS	
+usr/bin/avmediainfo	MISSING	_FigGetUpTime
+usr/bin/avmetareadwrite	STARTS	
+usr/bin/awk	STARTS	
+usr/bin/b64decode	STARTS	
+usr/bin/b64encode	STARTS	
+usr/bin/banner	MISSING	_malloc_type_malloc
+usr/bin/base64	STARTS	
+usr/bin/basename	STARTS	
+usr/bin/batch	LOADERR	machrun: you do not have permission to use this program
+usr/bin/bc	MISSING	_malloc_type_malloc
+usr/bin/binhex	MISSING	_malloc_type_malloc
+usr/bin/bintrans	STARTS	
+usr/bin/bioutil	STARTS	
+usr/bin/bison	MISSING	_dispatch_once
+usr/bin/bm4	MISSING	_dispatch_once
+usr/bin/bputil	STARTS	
+usr/bin/brctl	MISSING	_sandbox_check
+usr/bin/bsdtar	MISSING	_archive_match_new
+usr/bin/bspatch	STARTS	
+usr/bin/bunzip2	MISSING	_fcopyfile
+usr/bin/bzcat	MISSING	_fcopyfile
+usr/bin/bzegrep	STARTS	
+usr/bin/bzfgrep	STARTS	
+usr/bin/bzgrep	STARTS	
+usr/bin/bzip2	MISSING	_fcopyfile
+usr/bin/bzip2recover	MISSING	___strlcpy_chk
+usr/bin/c++	MISSING	_dispatch_once
+usr/bin/c++filt	MISSING	_dispatch_once
+usr/bin/c89	MISSING	_dispatch_once
+usr/bin/c99	MISSING	_dispatch_once
+usr/bin/caffeinate	MISSING	_IOPMAssertionCreateWithDescription
+usr/bin/cal	STARTS	
+usr/bin/calendar	MISSING	_malloc_type_calloc
+usr/bin/cancel	MISSING	__cupsSetLocale
+usr/bin/cap_mkdb	STARTS	
+usr/bin/cc	MISSING	_dispatch_once
+usr/bin/certtool	STARTS	
+usr/bin/chflags	STARTS	
+usr/bin/chfn	MISSING	_CFStringCreateWithCStringNoCopy
+usr/bin/chgrp	STARTS	
+usr/bin/chpass	MISSING	_CFStringCreateWithCStringNoCopy
+usr/bin/chsh	MISSING	_CFStringCreateWithCStringNoCopy
+usr/bin/cksum	STARTS	
+usr/bin/clang	MISSING	_dispatch_once
+usr/bin/clang++	MISSING	_dispatch_once
+usr/bin/clangd	MISSING	_dispatch_once
+usr/bin/clear	MISSING	_setupterm
+usr/bin/cmp	STARTS	
+usr/bin/cmpdylib	MISSING	_dispatch_once
+usr/bin/codecctl	MISSING	_IOServiceMatching
+usr/bin/codesign	MISSING	_CFDictionaryGetTypeID
+usr/bin/codesign_allocate	MISSING	_dispatch_once
+usr/bin/col	MISSING	_malloc_type_realloc
+usr/bin/colrm	STARTS	
+usr/bin/column	MISSING	_malloc_type_calloc
+usr/bin/comm	STARTS	
+usr/bin/compress	STARTS	
+usr/bin/compression_tool	STARTS	
+usr/bin/cpio	MISSING	_archive_match_new
+usr/bin/cpp	MISSING	_dispatch_once
+usr/bin/cpuctl	MISSING	_host_get_special_port
+usr/bin/crlrefresh	STARTS	
+usr/bin/crontab	LOADERR	machrun: seteuid: Operation not permitted
+usr/bin/csfdiagnose	MISSING	_swift_getSingletonMetadata
+usr/bin/csplit	STARTS	
+usr/bin/csreq	STARTS	
+usr/bin/csrutil	STARTS	
+usr/bin/ctags	MISSING	_dispatch_once
+usr/bin/ctf_insert	MISSING	_dispatch_once
+usr/bin/cu	STARTS	
+usr/bin/cupstestppd	MISSING	__cupsSetLocale
+usr/bin/curl	MISSING	_malloc_type_malloc
+usr/bin/cut	STARTS	
+usr/bin/db_archive	STARTS	
+usr/bin/db_checkpoint	STARTS	
+usr/bin/db_codegen	STARTS	
+usr/bin/db_deadlock	STARTS	
+usr/bin/db_dump	STARTS	
+usr/bin/db_hotbackup	STARTS	
+usr/bin/db_load	STARTS	
+usr/bin/db_printlog	STARTS	
+usr/bin/db_recover	STARTS	
+usr/bin/db_stat	STARTS	
+usr/bin/db_upgrade	STARTS	
+usr/bin/db_verify	STARTS	
+usr/bin/dc	MISSING	_malloc_type_malloc
+usr/bin/dddiagnose	LOADERR	machrun: class _TtC10dddiagnose20NotificationProvider: instance size 8 here, 16 in the program: the 
+usr/bin/defaults	STARTS	
+usr/bin/delv	STARTS	
+usr/bin/demandoc	MISSING	_malloc_type_calloc
+usr/bin/DeRez	MISSING	_dispatch_once
+usr/bin/derq	MISSING	_os_subcommand_main
+usr/bin/desdp	MISSING	_dispatch_once
+usr/bin/devicectl	MISSING	_dispatch_once
+usr/bin/devmodectl	MISSING	_os_subcommand_main
+usr/bin/diff	STARTS	
+usr/bin/diff3	STARTS	
+usr/bin/diffstat	STARTS	
+usr/bin/dig	MISSING	___strlcpy_chk
+usr/bin/dirname	STARTS	
+usr/bin/dist_package_tool	MISSING	_swift_getWitnessTable
+usr/bin/ditto	STARTS	
+usr/bin/dmc	STARTS	
+usr/bin/dns-sd	STARTS	
+usr/bin/drutil	STARTS	
+usr/bin/dscacheutil	STARTS	
+usr/bin/dscl	MISSING	___strlcpy_chk
+usr/bin/dserr	STARTS	
+usr/bin/dsexport	STARTS	
+usr/bin/dsimport	STARTS	
+usr/bin/dsmemberutil	STARTS	
+usr/bin/dsymutil	MISSING	_dispatch_once
+usr/bin/du	STARTS	
+usr/bin/dwarfdump	MISSING	_dispatch_once
+usr/bin/dyld_info	MISSING	_dispatch_once
+usr/bin/dyld_usage	MISSING	_ktrace_session_create
+usr/bin/egrep	STARTS	
+usr/bin/encode_keychange	MISSING	_malloc_type_malloc
+usr/bin/env	STARTS	
+usr/bin/eslogger	MISSING	_swift_getSingletonMetadata
+usr/bin/expand	STARTS	
+usr/bin/expect	MISSING	_Tcl_CreateInterp
+usr/bin/false	STARTS	
+usr/bin/fdesetup	STARTS	
+usr/bin/fgrep	STARTS	
+usr/bin/file	STARTS	
+usr/bin/fileproviderctl	MISSING	_fp_default_log
+usr/bin/filtercalltree	MISSING	_dyld_get_active_platform
+usr/bin/find	STARTS	
+usr/bin/finger	STARTS	
+usr/bin/flex	MISSING	_dispatch_once
+usr/bin/flex++	MISSING	_dispatch_once
+usr/bin/fmt	MISSING	_malloc_type_realloc
+usr/bin/fold	STARTS	
+usr/bin/footprint	MISSING	_os_variant_has_internal_content
+usr/bin/fping	STARTS	
+usr/bin/fs_usage	STARTS	
+usr/bin/funzip	STARTS	
+usr/bin/g++	MISSING	_dispatch_once
+usr/bin/gatherheaderdoc	MISSING	_dispatch_once
+usr/bin/gcc	MISSING	_dispatch_once
+usr/bin/gcore	MISSING	_err_set_exit_b
+usr/bin/gcov	MISSING	_dispatch_once
+usr/bin/gencat	STARTS	
+usr/bin/genstrings	MISSING	_dispatch_once
+usr/bin/getconf	STARTS	
+usr/bin/GetFileInfo	MISSING	_dispatch_once
+usr/bin/getopt	STARTS	
+usr/bin/git	MISSING	_dispatch_once
+usr/bin/git-receive-pack	MISSING	_dispatch_once
+usr/bin/git-shell	MISSING	_dispatch_once
+usr/bin/git-upload-archive	MISSING	_dispatch_once
+usr/bin/git-upload-pack	MISSING	_dispatch_once
+usr/bin/gktool	MISSING	_swift_getWitnessTable
+usr/bin/gm4	MISSING	_dispatch_once
+usr/bin/gnumake	MISSING	_dispatch_once
+usr/bin/gperf	MISSING	_dispatch_once
+usr/bin/grep	STARTS	
+usr/bin/groups	MISSING	_getgrouplist_2
+usr/bin/gunzip	STARTS	
+usr/bin/gzcat	STARTS	
+usr/bin/gzip	STARTS	
+usr/bin/hdid	MISSING	_malloc_type_calloc
+usr/bin/hdiutil	MISSING	_malloc_type_malloc
+usr/bin/hdxml2manxml	MISSING	_dispatch_once
+usr/bin/head	STARTS	
+usr/bin/headerdoc2html	MISSING	_dispatch_once
+usr/bin/heap	MISSING	_VMUOptionParserRegisterFlag
+usr/bin/hexdump	MISSING	_malloc_type_calloc
+usr/bin/hidutil	STARTS	
+usr/bin/hiutil	STARTS	
+usr/bin/host	STARTS	
+usr/bin/hostinfo	MISSING	_host_kernel_version
+usr/bin/hpmdiagnose	MISSING	_IOServiceMatching
+usr/bin/ibtool	MISSING	_dispatch_once
+usr/bin/ibv_devices	LOADERR	machrun: /root/macbins/usr/bin/ibv_devices: not a Mach-O executable or dynamic library for this arch
+usr/bin/ibv_devinfo	LOADERR	machrun: /root/macbins/usr/bin/ibv_devinfo: not a Mach-O executable or dynamic library for this arch
+usr/bin/ibv_uc_pingpong	LOADERR	machrun: /root/macbins/usr/bin/ibv_uc_pingpong: not a Mach-O executable or dynamic library for this 
+usr/bin/iconutil	STARTS	
+usr/bin/iconv	STARTS	
+usr/bin/ictool	MISSING	_dispatch_once
+usr/bin/id	MISSING	_getgrouplist_2
+usr/bin/indent	MISSING	_dispatch_once
+usr/bin/infocmp	MISSING	_use_extended_names
+usr/bin/install	STARTS	
+usr/bin/install_name_tool	MISSING	_dispatch_once
+usr/bin/IOAccelMemory	MISSING	_IOPMAssertionCreateWithName
+usr/bin/IOMFB_FDR_Loader	LOADERR	machrun: /root/macbins/usr/bin/IOMFB_FDR_Loader: not a Mach-O executable or dynamic library for this
+usr/bin/IOSDebug	MISSING	_IOServiceNameMatching
+usr/bin/ipcrm	STARTS	
+usr/bin/ipcs	STARTS	
+usr/bin/iperf3-darwin	MISSING	_proc_disable_wakemon
+usr/bin/ippeveprinter	MISSING	__cupsLangPuts
+usr/bin/ippfind	MISSING	__cupsSetLocale
+usr/bin/ipptool	MISSING	__cupsGlobals
+usr/bin/jar	STARTS	
+usr/bin/jarsigner	STARTS	
+usr/bin/java	STARTS	
+usr/bin/javac	STARTS	
+usr/bin/javadoc	STARTS	
+usr/bin/javap	STARTS	
+usr/bin/javaws	STARTS	
+usr/bin/jcmd	STARTS	
+usr/bin/jconsole	STARTS	
+usr/bin/jcontrol	STARTS	
+usr/bin/jdb	STARTS	
+usr/bin/jdeps	STARTS	
+usr/bin/jhsdb	STARTS	
+usr/bin/jimage	STARTS	
+usr/bin/jinfo	STARTS	
+usr/bin/jjs	STARTS	
+usr/bin/jlink	STARTS	
+usr/bin/jmap	STARTS	
+usr/bin/join	STARTS	
+usr/bin/jot	STARTS	
+usr/bin/jpackage	STARTS	
+usr/bin/jps	STARTS	
+usr/bin/jq	MISSING	_malloc_type_malloc
+usr/bin/jrunscript	STARTS	
+usr/bin/jshell	STARTS	
+usr/bin/jstack	STARTS	
+usr/bin/jstat	STARTS	
+usr/bin/jstatd	STARTS	
+usr/bin/kcc	MISSING	_krb5_init_context
+usr/bin/kdestroy	MISSING	_krb5_init_context
+usr/bin/kextutil	MISSING	_OSKextSetLogOutputFunction
+usr/bin/keytool	STARTS	
+usr/bin/kgetcred	MISSING	_krb5_init_context
+usr/bin/killall	STARTS	
+usr/bin/kinit	MISSING	_krb5_init_context
+usr/bin/kmutil	LOADERR	machrun: class _TtC6kmutil23RealBuildIdentityClient: instance size 48 here, 56 in the program: the p
+usr/bin/kpasswd	MISSING	_krb5_init_context
+usr/bin/ktrace	MISSING	_reexec_to_match_kernel
+usr/bin/lam	STARTS	
+usr/bin/last	MISSING	_xo_parse_args
+usr/bin/lastcomm	STARTS	
+usr/bin/latency	MISSING	_reexec_to_match_kernel
+usr/bin/layerutil	LOADERR	machrun: class layerutilCUINamedSolidLayerImage: instance size 89 here, 153 in the program: the prog
+usr/bin/ld	MISSING	_dispatch_once
+usr/bin/ldapcompare	MISSING	_sasl_version
+usr/bin/ldapdelete	MISSING	_sasl_version
+usr/bin/ldapexop	MISSING	_sasl_version
+usr/bin/ldapmodify	MISSING	_sasl_version
+usr/bin/ldapmodrdn	MISSING	_sasl_version
+usr/bin/ldappasswd	MISSING	_sasl_version
+usr/bin/ldapsearch	MISSING	_sasl_version
+usr/bin/ldapurl	STARTS	
+usr/bin/ldapwhoami	MISSING	_sasl_version
+usr/bin/leaks	MISSING	_VMUOptionParserRegisterFlag
+usr/bin/leave	STARTS	
+usr/bin/less	MISSING	_malloc_type_calloc
+usr/bin/lessecho	STARTS	
+usr/bin/lesskey	MISSING	_malloc_type_calloc
+usr/bin/lex	MISSING	_dispatch_once
+usr/bin/libtool	MISSING	_dispatch_once
+usr/bin/lipo	MISSING	_dispatch_once
+usr/bin/lldb	MISSING	_dispatch_once
+usr/bin/llvm-g++	MISSING	_dispatch_once
+usr/bin/llvm-gcc	MISSING	_dispatch_once
+usr/bin/locale	STARTS	
+usr/bin/localedef	STARTS	
+usr/bin/locate	STARTS	
+usr/bin/lockf	STARTS	
+usr/bin/lockstat	MISSING	_dtrace_open
+usr/bin/log	LOADERR	machrun: class OSLogStatsDumper: instance size 64 here, 88 in the program: the program's ivars would
+usr/bin/logger	STARTS	
+usr/bin/logname	STARTS	
+usr/bin/look	STARTS	
+usr/bin/lorder	MISSING	_dispatch_once
+usr/bin/lp	MISSING	__cupsSetLocale
+usr/bin/lpoptions	MISSING	__cupsSetLocale
+usr/bin/lpq	MISSING	__cupsSetLocale
+usr/bin/lpr	MISSING	__cupsSetLocale
+usr/bin/lprm	MISSING	__cupsSetLocale
+usr/bin/lpstat	MISSING	__cupsSetLocale
+usr/bin/lsappinfo	STARTS	
+usr/bin/lsbom	STARTS	
+usr/bin/lskq	STARTS	
+usr/bin/lsm	STARTS	
+usr/bin/lsmp	STARTS	
+usr/bin/lsvfs	LOADERR	machrun: sysctl(vfs.generic.maxtypenum): No such file or directory
+usr/bin/m4	MISSING	_dispatch_once
+usr/bin/macbinary	MISSING	_malloc_type_malloc
+usr/bin/machine	MISSING	_sysdir_start_search_path_enumeration
+usr/bin/macoserror	STARTS	
+usr/bin/mail	MISSING	_malloc_type_calloc
+usr/bin/mailx	MISSING	_malloc_type_calloc
+usr/bin/make	MISSING	_dispatch_once
+usr/bin/malloc_history	MISSING	_VMUOptionParserRegisterFlag
+usr/bin/mandoc	MISSING	_malloc_type_calloc
+usr/bin/mcxquery	MISSING	__ZnwmSt19__type_descriptor_t
+usr/bin/mcxrefresh	STARTS	
+usr/bin/mddiagnose	STARTS	
+usr/bin/mdfind	STARTS	
+usr/bin/mdimport	STARTS	
+usr/bin/mdls	STARTS	
+usr/bin/mdutil	STARTS	
+usr/bin/memacct	MISSING	_swift_getSingletonMetadata
+usr/bin/memory_pressure	MISSING	_memorystatus_get_level
+usr/bin/mesg	LOADERR	machrun: ttyname: Inappropriate ioctl for device
+usr/bin/mg	MISSING	_malloc_type_malloc
+usr/bin/mig	MISSING	_dispatch_once
+usr/bin/mkbom	STARTS	
+usr/bin/mkfifo	STARTS	
+usr/bin/mktemp	STARTS	
+usr/bin/mnthome	MISSING	_CFArrayCreate
+usr/bin/modelcatalogdump	MISSING	_swift_task_create
+usr/bin/modelmanagerdump	MISSING	_swift_task_create
+usr/bin/more	MISSING	_malloc_type_calloc
+usr/bin/mpsgraphtool	MISSING	_os_variant_has_internal_diagnostics
+usr/bin/nbdst	STARTS	
+usr/bin/nc	STARTS	
+usr/bin/ncal	STARTS	
+usr/bin/ncctl	LOADERR	machrun: No command specified.
+usr/bin/nettop	MISSING	_NStatManagerCreate
+usr/bin/networkQuality	MISSING	_os_variant_has_internal_content
+usr/bin/newgrp	LOADERR	machrun: need root permissions to function properly, check setuid bit
+usr/bin/nfsstat	LOADERR	machrun: nfssvc failed: Operation not permitted
+usr/bin/nice	STARTS	
+usr/bin/nl	STARTS	
+usr/bin/nm	MISSING	_dispatch_once
+usr/bin/nmedit	MISSING	_dispatch_once
+usr/bin/nohup	STARTS	
+usr/bin/notifyutil	MISSING	_dispatch_queue_create
+usr/bin/nscurl	STARTS	
+usr/bin/nslookup	MISSING	___strlcpy_chk
+usr/bin/nsupdate	MISSING	___strlcpy_chk
+usr/bin/objdump	MISSING	_dispatch_once
+usr/bin/ocspcheck	STARTS	
+usr/bin/od	MISSING	_malloc_type_calloc
+usr/bin/odutil	STARTS	
+usr/bin/open	STARTS	
+usr/bin/opendiff	MISSING	_dispatch_once
+usr/bin/openssl	MISSING	_OPENSSL_add_all_algorithms_noconf
+usr/bin/orbd	STARTS	
+usr/bin/osacompile	MISSING	_OpenDefaultComponent
+usr/bin/osadecompile	STARTS	
+usr/bin/osalang	MISSING	_NewHandle
+usr/bin/osascript	MISSING	_AECreateDesc
+usr/bin/otool	MISSING	_dispatch_once
+usr/bin/pack200	STARTS	
+usr/bin/pagestuff	MISSING	_dispatch_once
+usr/bin/parl	STARTS	
+usr/bin/parl5.34	STARTS	
+usr/bin/parldyn	MISSING	_Perl_sys_init3
+usr/bin/parldyn5.34	MISSING	_Perl_sys_init3
+usr/bin/paste	STARTS	
+usr/bin/patch	MISSING	_malloc_type_malloc
+usr/bin/pathchk	STARTS	
+usr/bin/pbcopy	MISSING	_CFStringConvertIANACharSetNameToEncoding
+usr/bin/pbpaste	MISSING	_CFStringConvertIANACharSetNameToEncoding
+usr/bin/pcsctest	MISSING	_SCardEstablishContext
+usr/bin/perl	MISSING	_Perl_sys_init3
+usr/bin/perl5.34	MISSING	_Perl_sys_init3
+usr/bin/pgrep	STARTS	
+usr/bin/pico	MISSING	_malloc_type_malloc
+usr/bin/pip3	MISSING	_dispatch_once
+usr/bin/pkgbuild	STARTS	
+usr/bin/pkill	STARTS	
+usr/bin/pl	STARTS	
+usr/bin/plockstat	STARTS	
+usr/bin/pluginkit	STARTS	
+usr/bin/plutil	MISSING	__objc_autoreleasePoolPush
+usr/bin/pmset	STARTS	
+usr/bin/policytool	STARTS	
+usr/bin/powermetrics	STARTS	
+usr/bin/ppdc	MISSING	__cupsSetLocale
+usr/bin/ppdhtml	MISSING	__cupsSetLocale
+usr/bin/ppdi	MISSING	__cupsSetLocale
+usr/bin/ppdmerge	MISSING	__cupsSetLocale
+usr/bin/ppdpo	MISSING	__cupsSetLocale
+usr/bin/pr	MISSING	_malloc_type_malloc
+usr/bin/printenv	STARTS	
+usr/bin/printf	STARTS	
+usr/bin/productbuild	STARTS	
+usr/bin/productsign	STARTS	
+usr/bin/profiles	STARTS	
+usr/bin/psm	STARTS	
+usr/bin/pwpolicy	MISSING	_SIIsOSXServerVolume
+usr/bin/python3	MISSING	_dispatch_once
+usr/bin/quota	MISSING	_malloc_type_malloc
+usr/bin/ranlib	MISSING	_dispatch_once
+usr/bin/rdma_ctl	LOADERR	machrun: /root/macbins/usr/bin/rdma_ctl: not a Mach-O executable or dynamic library for this archite
+usr/bin/readlink	MISSING	___strlcpy_chk
+usr/bin/renice	STARTS	
+usr/bin/ResMerger	MISSING	_dispatch_once
+usr/bin/resolveLinks	MISSING	_dispatch_once
+usr/bin/rev	STARTS	
+usr/bin/Rez	MISSING	_dispatch_once
+usr/bin/rmic	STARTS	
+usr/bin/rmid	STARTS	
+usr/bin/rmiregistry	STARTS	
+usr/bin/rpcgen	MISSING	_dispatch_once
+usr/bin/rs	MISSING	_malloc_type_realloc
+usr/bin/rsync	MISSING	_os_variant_has_internal_content
+usr/bin/ruby	MISSING	_ruby_sysinit
+usr/bin/SafeEjectGPU	STARTS	
+usr/bin/sample	MISSING	_VMUOptionParserRegisterFlag
+usr/bin/sandbox-exec	MISSING	_sandbox_create_params
+usr/bin/say	MISSING	__ZnwmSt19__type_descriptor_t
+usr/bin/sc_usage	STARTS	
+usr/bin/scp	MISSING	_malloc_type_calloc
+usr/bin/screen	MISSING	_malloc_type_malloc
+usr/bin/script	MISSING	_openpty
+usr/bin/sdef	MISSING	_dispatch_once
+usr/bin/sdiff	MISSING	_malloc_type_calloc
+usr/bin/sdp	MISSING	_dispatch_once
+usr/bin/searchdiagnose	LOADERR	machrun: class _TtC14searchdiagnose13StandardInput: instance size 8 here, 16 in the program: the pro
+usr/bin/security	MISSING	_os_variant_has_internal_content
+usr/bin/sed	MISSING	_malloc_type_malloc
+usr/bin/segedit	MISSING	_dispatch_once
+usr/bin/seq	STARTS	
+usr/bin/serialver	STARTS	
+usr/bin/servertool	STARTS	
+usr/bin/SetFile	MISSING	_dispatch_once
+usr/bin/setregion	MISSING	_bootstrap_check_in
+usr/bin/sfltool	MISSING	_os_variant_has_internal_diagnostics
+usr/bin/sftp	MISSING	_recallocarray
+usr/bin/shazam	MISSING	_swift_task_create
+usr/bin/shlock	STARTS	
+usr/bin/shortcuts	MISSING	_swift_task_create
+usr/bin/showmount	MISSING	__newrpclib_clnttcp_create_sa
+usr/bin/sips	STARTS	
+usr/bin/size	MISSING	_dispatch_once
+usr/bin/smbutil	STARTS	
+usr/bin/snmpbulkget	MISSING	_snmp_parse_args
+usr/bin/snmpbulkwalk	MISSING	_netsnmp_ds_register_config
+usr/bin/snmpdelta	MISSING	_snmp_parse_args
+usr/bin/snmpdf	MISSING	_snmp_parse_args
+usr/bin/snmpget	MISSING	_snmp_parse_args
+usr/bin/snmpgetnext	MISSING	_snmp_parse_args
+usr/bin/snmpnetstat	MISSING	_snmp_parse_args
+usr/bin/snmpset	MISSING	_snmp_parse_args
+usr/bin/snmpstatus	MISSING	_snmp_parse_args
+usr/bin/snmptable	MISSING	_netsnmp_set_line_buffering
+usr/bin/snmptest	MISSING	_snmp_parse_args
+usr/bin/snmptranslate	MISSING	_init_snmp
+usr/bin/snmptrap	MISSING	_snmp_parse_args
+usr/bin/snmpusm	MISSING	_snmp_parse_args
+usr/bin/snmpvacm	MISSING	_snmp_parse_args
+usr/bin/snmpwalk	MISSING	_netsnmp_ds_register_config
+usr/bin/sntp	LOADERR	machrun: Exactly one argument is required: No error: 0
+usr/bin/soelim	STARTS	
+usr/bin/sort	MISSING	_semaphore_create
+usr/bin/sourcekit-lsp	MISSING	_dispatch_once
+usr/bin/split	LOADERR	machrun: read: Inappropriate ioctl for device
+usr/bin/SplitForks	MISSING	_dispatch_once
+usr/bin/sqlite3	MISSING	_os_unfair_recursive_lock_lock_with_options
+usr/bin/ssh	MISSING	_si_destination_compare
+usr/bin/ssh-add	MISSING	___strlcpy_chk
+usr/bin/ssh-agent	MISSING	___strlcpy_chk
+usr/bin/ssh-keygen	MISSING	___strlcpy_chk
+usr/bin/ssh-keyscan	MISSING	___strlcpy_chk
+usr/bin/stapler	MISSING	_dispatch_once
+usr/bin/stat	MISSING	___strlcpy_chk
+usr/bin/stdbuf	STARTS	
+usr/bin/stringdups	MISSING	_VMUOptionParserRegisterFlag
+usr/bin/strings	MISSING	_dispatch_once
+usr/bin/strip	MISSING	_dispatch_once
+usr/bin/stz	MISSING	_swift_getWitnessTable
+usr/bin/sum	STARTS	
+usr/bin/sw_vers	MISSING	__CFCopySupplementalVersionDictionary
+usr/bin/swift	MISSING	_dispatch_once
+usr/bin/swift-inspect	LOADERR	machrun: class _TtC13swift_inspect19DarwinRemoteProcess: instance size 160 here, 168 in the program:
+usr/bin/swiftc	MISSING	_dispatch_once
+usr/bin/symbols	MISSING	__ZnwmSt19__type_descriptor_t
+usr/bin/symbolscache	STARTS	
+usr/bin/sysdiagnose	MISSING	_vproc_swap_integer
+usr/bin/syslog	MISSING	_asl_store_location
+usr/bin/syspolicy_check	MISSING	_swift_getWitnessTable
+usr/bin/system-override	MISSING	_os_variant_allows_internal_security_policies
+usr/bin/systemextensionsctl	LOADERR	machrun: usage:
+usr/bin/tab2space	MISSING	_malloc_type_calloc
+usr/bin/tabs	MISSING	_setupterm
+usr/bin/tail	MISSING	_malloc_type_calloc
+usr/bin/tailspin	STARTS	
+usr/bin/talk	STARTS	
+usr/bin/taskinfo	LOADERR	machrun: must be run as root, running as uid:65534 euid:65534
+usr/bin/tbtdiagnose	MISSING	_IOServiceMatching
+usr/bin/tccutil	MISSING	_sandbox_check
+usr/bin/tee	MISSING	_malloc_type_malloc
+usr/bin/textutil	STARTS	
+usr/bin/tftp	STARTS	
+usr/bin/thermal	STARTS	
+usr/bin/tic	MISSING	__nc_rootname
+usr/bin/tidy	MISSING	_tidyCreate
+usr/bin/tiff2icns	STARTS	
+usr/bin/tiffutil	STARTS	
+usr/bin/time	STARTS	
+usr/bin/timesyncanalyse	STARTS	
+usr/bin/tmdiagnose	MISSING	_CFRunLoopRun
+usr/bin/tmutil	MISSING	_swift_task_create
+usr/bin/tnameserv	STARTS	
+usr/bin/toe	MISSING	__nc_rootname
+usr/bin/top	MISSING	_CFDictionaryCreateMutable
+usr/bin/tops	STARTS	
+usr/bin/touch	STARTS	
+usr/bin/tput	MISSING	__nc_rootname
+usr/bin/tr	STARTS	
+usr/bin/trace	MISSING	_$ss11_StringGutsV4growyySiF
+usr/bin/trash	STARTS	
+usr/bin/trimforce	STARTS	
+usr/bin/true	STARTS	
+usr/bin/truncate	STARTS	
+usr/bin/trustcachectl	MISSING	_os_subcommand_main
+usr/bin/tset	MISSING	__nc_rootname
+usr/bin/tsort	MISSING	_malloc_type_realloc
+usr/bin/tty	STARTS	
+usr/bin/ul	MISSING	_tgetent
+usr/bin/umtool	STARTS	
+usr/bin/uname	STARTS	
+usr/bin/uncompress	LOADERR	machrun: /dev/stdin: Inappropriate file type or format
+usr/bin/unexpand	STARTS	
+usr/bin/unifdef	MISSING	_dispatch_once
+usr/bin/unifdefall	MISSING	_dispatch_once
+usr/bin/uniq	STARTS	
+usr/bin/units	LOADERR	machrun: can't find units file '/usr/share/misc/units.lib'
+usr/bin/unpack200	STARTS	
+usr/bin/unvis	STARTS	
+usr/bin/unzip	STARTS	
+usr/bin/unzipsfx	MISSING	_malloc_type_malloc
+usr/bin/update_dyld_shared_cache	STARTS	
+usr/bin/update_mcdp29xx	LOADERR	machrun: /root/macbins/usr/bin/update_mcdp29xx: not a Mach-O executable or dynamic library for this 
+usr/bin/uptime	MISSING	_xo_parse_args
+usr/bin/usbcfwflasher	LOADERR	machrun: /root/macbins/usr/bin/usbcfwflasher: not a Mach-O executable or dynamic library for this ar
+usr/bin/usbdiagnose	MISSING	_IOMasterPort
+usr/bin/usdcat	STARTS	
+usr/bin/usdchecker	STARTS	
+usr/bin/usdcrush	MISSING	__ZN32pxrInternal__aapl__pxrReserved__21AaplUtilsIsInternalOSEv
+usr/bin/usdextract	STARTS	
+usr/bin/usdrecord	MISSING	__ZN32pxrInternal__aapl__pxrReserved__26USDInitializeConfigurationC1Ev
+usr/bin/usdtree	STARTS	
+usr/bin/usdzip	MISSING	__ZN32pxrInternal__aapl__pxrReserved__26USDInitializeConfigurationC1Ev
+usr/bin/users	STARTS	
+usr/bin/uttype	MISSING	_os_variant_has_internal_content
+usr/bin/uucp	STARTS	
+usr/bin/uudecode	STARTS	
+usr/bin/uuencode	STARTS	
+usr/bin/uuidgen	MISSING	_uuid_generate
+usr/bin/uulog	MISSING	_malloc_type_malloc
+usr/bin/uuname	MISSING	_malloc_type_malloc
+usr/bin/uupick	MISSING	_malloc_type_malloc
+usr/bin/uustat	MISSING	_malloc_type_malloc
+usr/bin/uux	STARTS	
+usr/bin/viewdiagnostic	MISSING	_swift_getSingletonMetadata
+usr/bin/vim	MISSING	_malloc_type_malloc
+usr/bin/vis	STARTS	
+usr/bin/vm_stat	STARTS	
+usr/bin/vmmap	MISSING	_VMUGetFlagsForAllVMRegionStatistics
+usr/bin/vtool	MISSING	_dispatch_once
+usr/bin/w	MISSING	_xo_parse_args
+usr/bin/wall	MISSING	_malloc_type_malloc
+usr/bin/wc	MISSING	_xo_parse_args
+usr/bin/wdutil	STARTS	
+usr/bin/what	STARTS	
+usr/bin/whereis	STARTS	
+usr/bin/which	STARTS	
+usr/bin/who	STARTS	
+usr/bin/whoami	STARTS	
+usr/bin/whois	STARTS	
+usr/bin/write	STARTS	
+usr/bin/xar	STARTS	
+usr/bin/xargs	MISSING	_malloc_type_malloc
+usr/bin/xattr	STARTS	
+usr/bin/xcdebug	MISSING	_dispatch_once
+usr/bin/xcode-select	STARTS	
+usr/bin/xcodebuild	MISSING	_dispatch_once
+usr/bin/xcrun	MISSING	_xcselect_invoke_xcrun
+usr/bin/xcscontrol	MISSING	_dispatch_once
+usr/bin/xcsdiagnose	MISSING	_dispatch_once
+usr/bin/xctrace	MISSING	_dispatch_once
+usr/bin/xed	MISSING	_dispatch_once
+usr/bin/xip	MISSING	_sandbox_init_with_parameters
+usr/bin/xml2man	MISSING	_dispatch_once
+usr/bin/xmlcatalog	STARTS	
+usr/bin/xmllint	STARTS	
+usr/bin/xprotect	MISSING	_swift_getWitnessTable
+usr/bin/xsltproc	STARTS	
+usr/bin/xxd	STARTS	
+usr/bin/yacc	MISSING	_dispatch_once
+usr/bin/zcat	STARTS	
+usr/bin/zegrep	STARTS	
+usr/bin/zfgrep	STARTS	
+usr/bin/zgrep	STARTS	
+usr/bin/zip	MISSING	_malloc_type_malloc
+usr/bin/zipcloak	STARTS	
+usr/bin/zipinfo	STARTS	
+usr/bin/zipnote	STARTS	
+usr/bin/zipsplit	STARTS	
+usr/bin/zprint	MISSING	_mach_memory_info
+usr/sbin/ab	MISSING	_SSLv23_client_method
+usr/sbin/ac	MISSING	_wtmpxname
+usr/sbin/accton	LOADERR	machrun: Operation not permitted
+usr/sbin/amt	STARTS	
+usr/sbin/appleh13camerad	LOADERR	machrun: /root/macbins/usr/sbin/appleh13camerad: not a Mach-O executable or dynamic library for this
+usr/sbin/appleh16camerad	MISSING	__ZnwmSt19__type_descriptor_t
+usr/sbin/appsleepd	MISSING	_sandbox_init
+usr/sbin/arp	STARTS	
+usr/sbin/aslmanager	MISSING	_vproc_swap_integer
+usr/sbin/audit	STARTS	
+usr/sbin/auditd	MISSING	_dispatch_once
+usr/sbin/auditreduce	MISSING	_au_read_rec
+usr/sbin/automount	MISSING	__os_activity_create
+usr/sbin/avbdeviced	MISSING	_ta
+usr/sbin/bless	MISSING	___strlcpy_chk
+usr/sbin/BlueTool	MISSING	_malloc_type_calloc
+usr/sbin/bluetoothaudiod	MISSING	_CFPreferencesGetAppBooleanValue
+usr/sbin/bluetoothd	MISSING	__ZnwmSt19__type_descriptor_t
+usr/sbin/BootCacheControl	STARTS	
+usr/sbin/BTLEServer	MISSING	__set_user_dir_suffix
+usr/sbin/BTLEServerAgent	MISSING	__set_user_dir_suffix
+usr/sbin/cfprefsd	MISSING	__qtn_proc_alloc
+usr/sbin/chat	STARTS	
+usr/sbin/checkgid	STARTS	
+usr/sbin/chown	STARTS	
+usr/sbin/chroot	STARTS	
+usr/sbin/ckksctl	MISSING	_malloc_type_malloc
+usr/sbin/coreaudiod	MISSING	_pthread_mach_thread_np
+usr/sbin/createhomedir	STARTS	
+usr/sbin/cron	MISSING	_pidfile_open
+usr/sbin/cupsaccept	MISSING	__cupsSetLocale
+usr/sbin/cupsctl	MISSING	__cupsSetLocale
+usr/sbin/cupsfilter	MISSING	_cupsUser
+usr/sbin/ddns-confgen	STARTS	
+usr/sbin/dev_mkdb	STARTS	
+usr/sbin/DevToolsSecurity	MISSING	_AuthorizationRightGet
+usr/sbin/distnoted	MISSING	_sandbox_init
+usr/sbin/dnctl	STARTS	
+usr/sbin/dot_clean	STARTS	
+usr/sbin/dsconfigad	MISSING	_CFDictionaryCreateMutable
+usr/sbin/dsconfigldap	STARTS	
+usr/sbin/dseditgroup	STARTS	
+usr/sbin/dsenableroot	MISSING	_malloc_type_malloc
+usr/sbin/dtrace	STARTS	
+usr/sbin/edquota	STARTS	
+usr/sbin/fcgistarter	MISSING	_apr_app_initialize
+usr/sbin/fdisk	STARTS	
+usr/sbin/filecoordinationd	STARTS	
+usr/sbin/firmwarepasswd	STARTS	
+usr/sbin/gpt	STARTS	
+usr/sbin/graphicssession	STARTS	
+usr/sbin/gssd	MISSING	_os_log_set_client_type
+usr/sbin/hdik	LOADERR	machrun: no image specified
+usr/sbin/htcacheclean	MISSING	_apr_app_initialize
+usr/sbin/htdbm	MISSING	_apr_app_initialize
+usr/sbin/htdigest	MISSING	_apr_app_initialize
+usr/sbin/htpasswd	MISSING	_apr_app_initialize
+usr/sbin/httpd	MISSING	_apr_app_initialize
+usr/sbin/httxt2dbm	MISSING	_apr_app_initialize
+usr/sbin/installer	MISSING	_SKLogSetLogsToConsole
+usr/sbin/ioalloccount	MISSING	_IORegistryGetRootEntry
+usr/sbin/ioclasscount	MISSING	_IORegistryGetRootEntry
+usr/sbin/ioreg	MISSING	_IORegistryGetRootEntry
+usr/sbin/iostat	MISSING	_IOMainPort
+usr/sbin/ipconfig	STARTS	
+usr/sbin/kadmin	MISSING	_krb5_init_context
+usr/sbin/kcditto	STARTS	
+usr/sbin/kdcsetup	STARTS	
+usr/sbin/KernelEventAgent	STARTS	
+usr/sbin/kextcache	MISSING	_CFSetCreateMutable
+usr/sbin/kextfind	MISSING	_OSKextSetLogOutputFunction
+usr/sbin/kextlibs	MISSING	_OSKextSetLogOutputFunction
+usr/sbin/kextstat	MISSING	_OSKextSetLogOutputFunction
+usr/sbin/krbservicesetup	STARTS	
+usr/sbin/ktutil	MISSING	_krb5_init_context
+usr/sbin/languagesetup	STARTS	
+usr/sbin/localemanager	STARTS	
+usr/sbin/logresolve	MISSING	_apr_app_initialize
+usr/sbin/lpadmin	MISSING	__cupsSetLocale
+usr/sbin/lpc	MISSING	__cupsSetLocale
+usr/sbin/lpinfo	MISSING	__cupsSetLocale
+usr/sbin/lpmove	MISSING	__cupsSetLocale
+usr/sbin/lsof	MISSING	_malloc_type_malloc
+usr/sbin/mDNSResponder	MISSING	__set_user_dir_suffix
+usr/sbin/mDNSResponderHelper	MISSING	__set_user_dir_suffix
+usr/sbin/mkextunpack	MISSING	_OSKextSetLogOutputFunction
+usr/sbin/mkfile	STARTS	
+usr/sbin/mkpassdb	MISSING	_malloc_type_calloc
+usr/sbin/mtree	LOADERR	machrun: invalid root in vwalk
+usr/sbin/ndp	STARTS	
+usr/sbin/netbiosd	MISSING	_vproc_swap_integer
+usr/sbin/netstat	LOADERR	machrun: sysctl: net.local.stream.pcblist_n: No such file or directory
+usr/sbin/networksetup	STARTS	
+usr/sbin/newsyslog	MISSING	_malloc_type_malloc
+usr/sbin/nfs4mapid	LOADERR	machrun: Usage: machrun {-g gid | -u uid} | [-G] { name | guid}
+usr/sbin/nlcontrol	STARTS	
+usr/sbin/notifyd	MISSING	_notify_set_options
+usr/sbin/nvram	MISSING	_IOMainPort
+usr/sbin/ocspd	STARTS	
+usr/sbin/otctl	MISSING	_malloc_type_malloc
+usr/sbin/PasswordService	MISSING	_malloc_type_calloc
+usr/sbin/pdisk	STARTS	
+usr/sbin/pkgutil	STARTS	
+usr/sbin/postalias	MISSING	_malloc_type_malloc
+usr/sbin/postcat	MISSING	_malloc_type_malloc
+usr/sbin/postconf	MISSING	_malloc_type_malloc
+usr/sbin/postdrop	MISSING	_malloc_type_malloc
+usr/sbin/postfix	MISSING	_malloc_type_malloc
+usr/sbin/postkick	MISSING	_malloc_type_malloc
+usr/sbin/postlock	MISSING	_malloc_type_malloc
+usr/sbin/postlog	MISSING	_malloc_type_malloc
+usr/sbin/postmap	MISSING	_malloc_type_malloc
+usr/sbin/postmulti	MISSING	_malloc_type_malloc
+usr/sbin/postqueue	MISSING	_malloc_type_malloc
+usr/sbin/postsuper	MISSING	_malloc_type_malloc
+usr/sbin/pppd	MISSING	_bootstrap_look_up
+usr/sbin/praudit	MISSING	_au_read_rec
+usr/sbin/purge	MISSING	_vfs_purge
+usr/sbin/pwd_mkdb	STARTS	
+usr/sbin/quotaoff	STARTS	
+usr/sbin/quotaon	STARTS	
+usr/sbin/racoon	MISSING	_sandbox_init
+usr/sbin/rarpd	STARTS	
+usr/sbin/repairHomePermissions	STARTS	
+usr/sbin/repquota	STARTS	
+usr/sbin/rotatelogs	MISSING	_apr_app_initialize
+usr/sbin/rpc.lockd	STARTS	
+usr/sbin/rpc.statd	STARTS	
+usr/sbin/rpcbind	MISSING	_sandbox_init
+usr/sbin/rpcinfo	MISSING	__newrpclib_rpc_control
+usr/sbin/rtadvd	STARTS	
+usr/sbin/sa	LOADERR	machrun: retrieving process accounting summary: Permission denied
+usr/sbin/screencapture	LOADERR	machrun: class _TtC13screencapture14LayerKitWindow: instance size 28 here, 36 in the program: the pr
+usr/sbin/scselect	MISSING	_CFStringCreateWithFormat
+usr/sbin/scutil	MISSING	_CFDictionaryCreateMutable
+usr/sbin/securityd	MISSING	_os_unfair_lock_lock
+usr/sbin/sendmail	MISSING	_malloc_type_malloc
+usr/sbin/setkey	STARTS	
+usr/sbin/setquota	STARTS	
+usr/sbin/sharing	STARTS	
+usr/sbin/skywalkctl	STARTS	
+usr/sbin/slapconfig	STARTS	
+usr/sbin/smbd	MISSING	__ZnwmSt19__type_descriptor_t
+usr/sbin/snmptrapd	MISSING	_snmptrapd_register_configs
+usr/sbin/sntpd	LOADERR	machrun: bind: Permission denied
+usr/sbin/softwareupdate	MISSING	__SULogObject
+usr/sbin/spctl	MISSING	_CFDictionaryCreateMutable
+usr/sbin/spindump	MISSING	_CFAbsoluteTimeGetCurrent
+usr/sbin/spray	STARTS	
+usr/sbin/sshd	MISSING	_malloc_type_calloc
+usr/sbin/sso_util	STARTS	
+usr/sbin/sysadminctl	STARTS	
+usr/sbin/sysctl	STARTS	
+usr/sbin/syslogd	MISSING	_setiopolicy_np
+usr/sbin/system_profiler	STARTS	
+usr/sbin/systemkeychain	STARTS	
+usr/sbin/systemsetup	MISSING	_CFPropertyListCreateWithData
+usr/sbin/systemsoundserverd	MISSING	__os_feature_enabled_impl
+usr/sbin/systemstats	STARTS	
+usr/sbin/taskpolicy	STARTS	
+usr/sbin/tcpdump	MISSING	_malloc_type_calloc
+usr/sbin/traceroute	STARTS	
+usr/sbin/traceroute6	STARTS	
+usr/sbin/uasysdiagnose	STARTS	
+usr/sbin/universalaccessd	STARTS	
+usr/sbin/unsetpassword	STARTS	
+usr/sbin/usernoted	LOADERR	machrun: class _TtC9usernoted11Application: instance size 818 here, 826 in the program: the program'
+usr/sbin/uuchk	MISSING	_malloc_type_malloc
+usr/sbin/uucico	MISSING	_malloc_type_malloc
+usr/sbin/uuconv	STARTS	
+usr/sbin/uuxqt	MISSING	_malloc_type_malloc
+usr/sbin/vifs	LOADERR	machrun: need to run as root
+usr/sbin/vipw	LOADERR	machrun: /etc/master.passwd: Permission denied
+usr/sbin/vpnd	STARTS	
+usr/sbin/vsdbutil	STARTS	
+usr/sbin/wfsctl	STARTS	
+usr/sbin/WirelessRadioManagerd	STARTS	
+usr/sbin/xartutil	STARTS	
+usr/sbin/xscertadmin	MISSING	_UseOSSL
+usr/sbin/zdump	STARTS	
+usr/sbin/zic	STARTS	
+usr/libexec/adprivacyd	MISSING	__ADLog
+usr/libexec/AdvancedCommandsMigrator	MISSING	_DSRLogMigrator
+usr/libexec/AirPlayXPCHelper	MISSING	__set_user_dir_suffix
+usr/libexec/airportd	MISSING	_asl_init
+usr/libexec/alwaysonexclavesd	MISSING	_$s22AlwaysOnExclavesDaemon0D0CMa
+usr/libexec/amfid	MISSING	_CFDictionaryGetTypeID
+usr/libexec/amsdstat	MISSING	_CFDictionaryCreateMutable
+usr/libexec/aned	MISSING	_os_transaction_create
+usr/libexec/aneuserd	MISSING	_os_transaction_create
+usr/libexec/aonsensed	LOADERR	machrun: class _TtC9aonsensed10IPCHandler: instance size 32 here, 40 in the program: the program's i
+usr/libexec/apfsd	MISSING	_CFDictionaryCreateMutable
+usr/libexec/appleaccountd	LOADERR	machrun: class _TtC13appleaccountd14AccountService: instance size 56 here, 64 in the program: the pr
+usr/libexec/appleh13camerad	LOADERR	machrun: /root/macbins/usr/libexec/appleh13camerad: not a Mach-O executable or dynamic library for t
+usr/libexec/appleh16camerad	MISSING	__ZnwmSt19__type_descriptor_t
+usr/libexec/appleidsetupd	MISSING	_swift_getTypeByMangledNameInContext2
+usr/libexec/applekeystored	MISSING	_swift_getSingletonMetadata
+usr/libexec/AppleQEMUGuestAgent	MISSING	_xpc_set_event_stream_handler
+usr/libexec/applessdstatistics	MISSING	_vproc_swap_integer
+usr/libexec/AppleVirtualPlatformHIDBridge	LOADERR	machrun: /root/macbins/usr/libexec/AppleVirtualPlatformHIDBridge: not a Mach-O executable or dynamic
+usr/libexec/arkitd	MISSING	__set_user_dir_suffix
+usr/libexec/asktod	MISSING	_$s2os6LoggerVMa
+usr/libexec/ASPCarryLog	STARTS	
+usr/libexec/assessmentagent	LOADERR	machrun: class _TtC15assessmentagent37AEACandidateMatchingParticipantSource: instance size 24 here, 
+usr/libexec/assetsubscriptiond	MISSING	__set_user_dir_suffix
+usr/libexec/atcrtcomm	LOADERR	machrun: /root/macbins/usr/libexec/atcrtcomm: not a Mach-O executable or dynamic library for this ar
+usr/libexec/atrun	LOADERR	machrun: setegid failed: Operation not permitted
+usr/libexec/attach_automation_image	STARTS	
+usr/libexec/attentionawarenessd	MISSING	__AWStartStandaloneServer
+usr/libexec/audinstaller	MISSING	_IOServiceMatching
+usr/libexec/audioanalyticsd	LOADERR	machrun: class _TtC15audioanalyticsd20ClientServerInstance: instance size 72 here, 80 in the program
+usr/libexec/audioclocksyncd	LOADERR	machrun: class TSDgPTPNetworkPort: instance size 216 here, 224 in the program: the program's ivars w
+usr/libexec/audiomxd	MISSING	__os_feature_enabled_impl
+usr/libexec/authopen	LOADERR	machrun: no filename specified
+usr/libexec/autofsd	MISSING	_ODTriggerCreateForSearch
+usr/libexec/automation_trampoline	STARTS	
+usr/libexec/automountd	MISSING	___strlcat_chk
+usr/libexec/avconferenced	MISSING	_VCFeatureFlagManager_UseAvconferenced
+usr/libexec/backgroundassets.user	MISSING	_IOPSCopyPowerSourcesInfo
+usr/libexec/betaenrollmentagent	MISSING	__set_user_dir_suffix
+usr/libexec/betaenrollmentd	MISSING	__set_user_dir_suffix
+usr/libexec/biomesyncd	MISSING	__set_user_dir_suffix
+usr/libexec/biometrickitd	LOADERR	machrun: class MesaCoreAnalyticsEvent: instance size 432 here, 456 in the program: the program's iva
+usr/libexec/bluetoothuserd	LOADERR	machrun: class _TtC14bluetoothuserd25DarwinNotificationManager: instance size 16 here, 24 in the pro
+usr/libexec/bootinstalld	MISSING	__set_user_dir_suffix
+usr/libexec/bootpd	MISSING	_malloc_type_malloc
+usr/libexec/bubbled	STARTS	
+usr/libexec/cameracaptured	STARTS	
+usr/libexec/captiveagent	MISSING	_sandbox_init
+usr/libexec/cc_fips_test	MISSING	_cc_clear
+usr/libexec/centaurid	LOADERR	machrun: /root/macbins/usr/libexec/centaurid: not a Mach-O executable or dynamic library for this ar
+usr/libexec/chkpasswd	MISSING	_pam_start
+usr/libexec/ciphermld	MISSING	_$s8Dispatch0A13WorkItemFlagsVMa
+usr/libexec/colorsync.displayservices	MISSING	_CFPreferencesCopyValue
+usr/libexec/colorsyncd	MISSING	__CFBundleGetMainBundleIfLooksLikeBundle
+usr/libexec/companiond	LOADERR	machrun: class _TtC10companiond24OpensAppIntentDispatcher: instance size 8 here, 16 in the program: 
+usr/libexec/configd	MISSING	_CFSetCreateMutable
+usr/libexec/containermanagerd	MISSING	__containermanagerd_main
+usr/libexec/containermanagerd_system	MISSING	__containermanagerd_main
+usr/libexec/ContainerMigrationService	MISSING	_xpc_connection_create_mach_service
+usr/libexec/ContinuityCaptureAgent	MISSING	_CLIInit
+usr/libexec/corebrightnessd	MISSING	_sandbox_init
+usr/libexec/corebrightnessdiag	STARTS	
+usr/libexec/corecaptured	MISSING	_CoreCaptureStart
+usr/libexec/coredatad	MISSING	_sandbox_init
+usr/libexec/coreduetd	MISSING	_os_transaction_create
+usr/libexec/coreidvd	LOADERR	machrun: too many libraries
+usr/libexec/corercd	MISSING	_dispatch_workloop_set_scheduler_priority
+usr/libexec/corerepaird	LOADERR	machrun: /root/macbins/usr/libexec/corerepaird: not a Mach-O executable or dynamic library for this 
+usr/libexec/corestoraged	STARTS	
+usr/libexec/corestoragehelperd	MISSING	_xpc_track_activity
+usr/libexec/countryd	MISSING	__set_user_dir_suffix
+usr/libexec/create_automation_image_overlay	STARTS	
+usr/libexec/cryptexd	MISSING	_os_retain
+usr/libexec/CSCSupportd	MISSING	_os_variant_has_internal_content
+usr/libexec/dasd	MISSING	_memorystatus_control
+usr/libexec/DataDetectorsLocalSources	MISSING	__qtn_proc_alloc
+usr/libexec/DataDetectorsSourceAccess	MISSING	_sandbox_init
+usr/libexec/datastored	MISSING	_xpc_dictionary_create
+usr/libexec/devicerecoverytool	MISSING	_swift_getSingletonMetadata
+usr/libexec/dhcp6d	MISSING	__SC_LOG_DEFAULT
+usr/libexec/diagnosticd	STARTS	
+usr/libexec/diagnosticextensionsd	MISSING	__set_user_dir_suffix
+usr/libexec/diagnosticspushd	LOADERR	machrun: class _TtC16diagnosticspushd23UserNotificationManager: instance size 16 here, 24 in the pro
+usr/libexec/dirhelper	MISSING	__dyld_get_image_uuid
+usr/libexec/dirs_cleaner	STARTS	
+usr/libexec/diskarbitrationd	STARTS	
+usr/libexec/diskimagesiod	MISSING	__CFCopySystemVersionDictionaryValue
+usr/libexec/diskmanagementstartup	STARTS	
+usr/libexec/displaypolicyd	STARTS	
+usr/libexec/dmd	MISSING	__set_user_dir_suffix
+usr/libexec/dp2hdmiupdater	MISSING	_IORegistryEntryFromPath
+usr/libexec/dprivacyd	STARTS	
+usr/libexec/dspluginhelperd	MISSING	__ZnwmSt19__type_descriptor_t
+usr/libexec/dtfetchsymbolsd	MISSING	_$sSo17OS_dispatch_queueC8DispatchE20AutoreleaseFrequencyOMa
+usr/libexec/duetexpertd	MISSING	__set_user_dir_suffix
+usr/libexec/DumpPanic	MISSING	_CFAbsoluteTimeGetCurrent
+usr/libexec/DumpPanicRecoveryOS	LOADERR	machrun: /root/macbins/usr/libexec/DumpPanicRecoveryOS: not a Mach-O executable or dynamic library f
+usr/libexec/efiupdater	MISSING	_IORegistryEntryFromPath
+usr/libexec/eligibilityd	LOADERR	machrun: class _TtC12eligibilityd16FeatureFlagsMock: instance size 16 here, 24 in the program: the p
+usr/libexec/endpointsecurityd	MISSING	_sandbox_init
+usr/libexec/enhancedloggingd	MISSING	_$s15EnhancedLogging11MachServiceOMa
+usr/libexec/eoshostd	MISSING	_kdebug_trace
+usr/libexec/fairplaydeviceidentityd	MISSING	__set_user_dir_suffix
+usr/libexec/FDERecoveryAgent	MISSING	_CSFDECopyServerURL
+usr/libexec/feedbackd	MISSING	__objc_autoreleasePoolPush
+usr/libexec/filevaultd	MISSING	_sandbox_init
+usr/libexec/findmybeaconingd	MISSING	_swift_task_create
+usr/libexec/findmydevice-user-agent	STARTS	
+usr/libexec/findmydeviced	STARTS	
+usr/libexec/findmylocateagent	LOADERR	machrun: too many libraries
+usr/libexec/firmwaresyncd	STARTS	
+usr/libexec/FirmwareUpdateLauncher	STARTS	
+usr/libexec/frauddefensed	LOADERR	machrun: class _TtC13frauddefensed18AttestationManager: instance size 16 here, 24 in the program: th
+usr/libexec/fskit_agent	MISSING	__set_user_dir_suffix
+usr/libexec/fskit_helper	STARTS	
+usr/libexec/fskitd	MISSING	_getBootUUID
+usr/libexec/ftp-proxy	MISSING	_sandbox_init
+usr/libexec/gamecontrolleragentd	MISSING	_os_variant_has_internal_diagnostics
+usr/libexec/gamecontrollerd	STARTS	
+usr/libexec/gamed	LOADERR	machrun: too many libraries
+usr/libexec/GamePolicyAgent	LOADERR	machrun: class _TtC15GamePolicyAgent13ShortcutModel: instance size 60 here, 68 in the program: the p
+usr/libexec/gamepolicyd	LOADERR	machrun: class _TtC11gamepolicyd21GamePolicyMobileAsset: instance size 24 here, 32 in the program: t
+usr/libexec/gamesaved	LOADERR	machrun: class _TtC9gamesaved25GameSyncedDirectoryLoader: instance size 16 here, 24 in the program: 
+usr/libexec/getPPDVersion	STARTS	
+usr/libexec/getty	MISSING	___strlcpy_chk
+usr/libexec/gputoolsserviced	MISSING	_os_variant_allows_internal_security_policies
+usr/libexec/griddatad	MISSING	__set_user_dir_suffix
+usr/libexec/handwritingd	MISSING	_os_signpost_id_generate
+usr/libexec/hidd	MISSING	_setiopolicy_np
+usr/libexec/historicalaudiod	MISSING	_$s22CoreAudioOrchestration21OrchestratorClientUIDOMa
+usr/libexec/icloudmailagent	LOADERR	machrun: class _TtC15icloudmailagent16RCOverrideHelper: instance size 8 here, 16 in the program: the
+usr/libexec/icloudwebd	LOADERR	machrun: class _TtC10icloudwebd12AccountState: instance size 144 here, 152 in the program: the progr
+usr/libexec/ifcstart	MISSING	_setiopolicy_np
+usr/libexec/inboxupdaterd	MISSING	_CFNotificationCenterGetDarwinNotifyCenter
+usr/libexec/init_exclavekit	LOADERR	machrun: /root/macbins/usr/libexec/init_exclavekit: not a Mach-O executable or dynamic library for t
+usr/libexec/init_featureflags	MISSING	_os_variant_allows_internal_security_policies
+usr/libexec/inputanalyticsd	MISSING	__set_user_dir_suffix
+usr/libexec/installer-core	STARTS	
+usr/libexec/intelligentroutingd	MISSING	_IRSetupLogging
+usr/libexec/InternetSharing	MISSING	_SCPreferencesCreate
+usr/libexec/IOAccelMemoryInfoCollector	MISSING	_sandbox_init
+usr/libexec/IOMFB_bics_daemon	LOADERR	machrun: /root/macbins/usr/libexec/IOMFB_bics_daemon: not a Mach-O executable or dynamic library for
+usr/libexec/ioupsd	MISSING	_task_get_special_port
+usr/libexec/ippusbd	MISSING	__PMLog
+usr/libexec/java_home	STARTS	
+usr/libexec/jetsam_priority	MISSING	_os_variant_has_internal_content
+usr/libexec/kcgend	LOADERR	machrun: class _TtC6kcgend22KcgenDaemonSideEffects: instance size 16 here, 24 in the program: the pr
+usr/libexec/kcproxy	STARTS	
+usr/libexec/kdumpd	STARTS	
+usr/libexec/kernelmanager_helper	LOADERR	machrun: class _TtC20kernelmanager_helper22RealDeveloperKitClient: instance size 48 here, 56 in the 
+usr/libexec/kernelmanagerd	LOADERR	machrun: class _TtC14kernelmanagerd22RealDeveloperKitClient: instance size 48 here, 56 in the progra
+usr/libexec/keybagd	MISSING	_setiopolicy_np
+usr/libexec/keyboardservicesd	MISSING	_CFRunLoopSourceCreate
+usr/libexec/keychainsharingmessagingd	MISSING	_swift_task_create
+usr/libexec/KeychainStasher	MISSING	_secLogObjForScope
+usr/libexec/knowledge-agent	MISSING	_os_transaction_create
+usr/libexec/kuncd	MISSING	_CFBundleGetMainBundle
+usr/libexec/languageassetd	MISSING	_xpc_set_event_stream_handler
+usr/libexec/lightsoutmanagementd	MISSING	_LOMLog
+usr/libexec/linkd	LOADERR	machrun: class _TtC10LinkDaemonP33_D58D573A84F8D3FCCDFC47FE284514D618XPCEventDispatcher: instance si
+usr/libexec/locate.bigram	STARTS	
+usr/libexec/locate.code	STARTS	
+usr/libexec/locationaccessstored	STARTS	
+usr/libexec/locationd	LOADERR	machrun: too many libraries
+usr/libexec/logd	MISSING	_os_transaction_create
+usr/libexec/logd_helper	MISSING	_os_trace_set_mode
+usr/libexec/logd_reporter	MISSING	__set_user_dir_suffix
+usr/libexec/loginitemregisterd	MISSING	_xpc_connection_create_mach_service
+usr/libexec/logkextloadsd	MISSING	_CFURLCreateFromFileSystemRepresentation
+usr/libexec/lsd	MISSING	__LSServerMain
+usr/libexec/makewhatis	MISSING	_malloc_type_malloc
+usr/libexec/managedeventsd	MISSING	_$s2os6LoggerVMa
+usr/libexec/mc_notifier	STARTS	
+usr/libexec/mcxalr	MISSING	__ZnwmSt19__type_descriptor_t
+usr/libexec/mdmclient	LOADERR	machrun: too many libraries
+usr/libexec/mediacontinuityd	MISSING	_swift_getTypeByMangledNameInContext2
+usr/libexec/metrickitd	MISSING	__set_user_dir_suffix
+usr/libexec/micactivityd	MISSING	_$s22CoreAudioOrchestration21OrchestratorClientUIDOMa
+usr/libexec/microstackshot	MISSING	_xpc_activity_register
+usr/libexec/milod	MISSING	_ULEnterSandbox
+usr/libexec/misagent	MISSING	_dispatch_workloop_set_scheduler_priority
+usr/libexec/mlhostd	LOADERR	machrun: class _TtC7mlhostd20NotificationRegistry: instance size 72 here, 80 in the program: the pro
+usr/libexec/mlruntimed	MISSING	__set_user_dir_suffix
+usr/libexec/mmaintenanced	MISSING	_vproc_swap_integer
+usr/libexec/mobile_obliterator	MISSING	_os_variant_has_internal_diagnostics
+usr/libexec/mobile_storage_proxy	MISSING	__set_user_dir_suffix
+usr/libexec/mobileactivationd	MISSING	_setiopolicy_np
+usr/libexec/mobileassetd	MISSING	_CFBundleGetMainBundle
+usr/libexec/MobileAssetEarlyBootTask	MISSING	_MGGetBoolAnswer
+usr/libexec/MobileGestaltHelper	MISSING	__MGSetServer
+usr/libexec/mobilerepaird	LOADERR	machrun: /root/macbins/usr/libexec/mobilerepaird: not a Mach-O executable or dynamic library for thi
+usr/libexec/MobileStorageMounter	MISSING	__set_user_dir_suffix
+usr/libexec/modelmanagerd	LOADERR	machrun: class _TtC13modelmanagerd17RemoteXPCProvider: instance size 8 here, 16 in the program: the 
+usr/libexec/mount_url	STARTS	
+usr/libexec/MSUEarlyBootTask	STARTS	
+usr/libexec/msutil	STARTS	
+usr/libexec/MTLAssetUpgraderD	MISSING	_sandbox_init
+usr/libexec/multiversed	MISSING	_xpc_set_event_stream_handler
+usr/libexec/NANDTaskScheduler	STARTS	
+usr/libexec/natpmpd	MISSING	_sandbox_init
+usr/libexec/naturallanguaged	MISSING	__set_user_dir_suffix
+usr/libexec/neagent	MISSING	_ne_log_obj
+usr/libexec/nearbyd	MISSING	__ZnwmSt19__type_descriptor_t
+usr/libexec/nehelper	MISSING	__set_user_dir_suffix
+usr/libexec/nesessionmanager	MISSING	_sandbox_init
+usr/libexec/netbootdisk	STARTS	
+usr/libexec/networkserviceproxy	MISSING	_nplog_obj
+usr/libexec/nexusd	MISSING	__objc_autoreleasePoolPush
+usr/libexec/nfcd	MISSING	__set_user_dir_suffix
+usr/libexec/nlcd	MISSING	_sandbox_init
+usr/libexec/notification_proxy	MISSING	_xpc_remote_connection_create_remote_service_listener
+usr/libexec/NRDUpdated	STARTS	
+usr/libexec/nsurlsessiond	MISSING	__set_user_dir_suffix
+usr/libexec/ntalkd	STARTS	
+usr/libexec/NVMeAgent	MISSING	_CFRunLoopTimerCreate
+usr/libexec/od_user_homes	STARTS	
+usr/libexec/odproxyd	MISSING	_launch_data_new_string
+usr/libexec/online-auth-agent	LOADERR	machrun: class _TtC17online_auth_agent12SQLStatement: instance size 16 here, 24 in the program: the 
+usr/libexec/opendirectoryd	MISSING	__os_activity_create
+usr/libexec/osaapplet	STARTS	
+usr/libexec/ospredictiond	MISSING	_xpc_set_event_stream_handler
+usr/libexec/otherbsd	MISSING	__os_assumes_log
+usr/libexec/path_helper	MISSING	_malloc_type_calloc
+usr/libexec/pboard	MISSING	_sandbox_init
+usr/libexec/pcapd	MISSING	_CFPreferencesGetAppIntegerValue
+usr/libexec/pcsstatus	MISSING	_PCSIdentitySetCreate
+usr/libexec/peakpowermanagerd	MISSING	_IOServiceMatching
+usr/libexec/perfpowermetricd	STARTS	
+usr/libexec/PerfPowerServices	MISSING	_EnterSandbox
+usr/libexec/PerfPowerServicesExtended	MISSING	_EnterSandbox
+usr/libexec/pfd	MISSING	_sandbox_init
+usr/libexec/pkd	STARTS	
+usr/libexec/pkreporter	STARTS	
+usr/libexec/PlistBuddy	MISSING	_csops
+usr/libexec/powerdatad	MISSING	__os_feature_enabled_impl
+usr/libexec/powerexperienced	STARTS	
+usr/libexec/powerlogHelperd	STARTS	
+usr/libexec/PowerUIAgent	STARTS	
+usr/libexec/prng_seedctl	MISSING	_IOServiceMatching
+usr/libexec/proactived	MISSING	__set_user_dir_suffix
+usr/libexec/proactiveeventtrackerd	MISSING	__set_user_dir_suffix
+usr/libexec/productutil	STARTS	
+usr/libexec/promotedcontentd	LOADERR	machrun: class _TtC16promotedcontentd32PredeterminedAgeNoisingQualifier: instance size 9 here, 17 in
+usr/libexec/psfupdater	MISSING	_IORegistryEntryFromPath
+usr/libexec/ptpcamerad	MISSING	__set_user_dir_suffix
+usr/libexec/rapportd	MISSING	__LogCategory_Initialize
+usr/libexec/relatived	STARTS	
+usr/libexec/remindd	LOADERR	machrun: too many libraries
+usr/libexec/remotecompositorclientd	MISSING	_$s18CompositorServices06RemoteA0V8DefaultsVMa
+usr/libexec/remotectl	LOADERR	machrun: class _TtC15SSHPacketTunnel21TCPPacketTunnelServer: instance size 48 here, 56 in the progra
+usr/libexec/remoted	MISSING	_xpc_dictionary_create
+usr/libexec/remotesoftwareupdated	STARTS	
+usr/libexec/replayd	MISSING	__set_user_dir_suffix
+usr/libexec/ReportMemoryException	STARTS	
+usr/libexec/retimerd	LOADERR	machrun: /root/macbins/usr/libexec/retimerd: not a Mach-O executable or dynamic library for this arc
+usr/libexec/rootless-init	STARTS	
+usr/libexec/routined	STARTS	
+usr/libexec/rpc.rquotad	MISSING	_pidfile_open
+usr/libexec/rpcsvchost	MISSING	_dispatch_once
+usr/libexec/rtcreportingd	LOADERR	machrun: class _TtCC13rtcreportingd8SQLiteDBP33_C8B85249553736E44DE752D9368DC8428DBHandle: instance 
+usr/libexec/runningboardd	STARTS	
+usr/libexec/sandboxd	MISSING	_os_variant_is_recovery
+usr/libexec/scsid	MISSING	_task_get_special_port
+usr/libexec/sdfwupdater	STARTS	
+usr/libexec/searchpartyd	LOADERR	machrun: too many libraries
+usr/libexec/searchpartyuseragent	LOADERR	machrun: too many libraries
+usr/libexec/secd	MISSING	_malloc_create_zone
+usr/libexec/secinitd	MISSING	_malloc_type_malloc
+usr/libexec/security-sysdiagnose	MISSING	_SecKeychainCopyDatabasePath
+usr/libexec/securityd_system	MISSING	_malloc_create_zone
+usr/libexec/securityuploadd	MISSING	_os_unfair_lock_lock_with_options
+usr/libexec/seld	MISSING	__set_user_dir_suffix
+usr/libexec/sensingpredictd	MISSING	_swift_task_create
+usr/libexec/seputil	LOADERR	machrun: /root/macbins/usr/libexec/seputil: not a Mach-O executable or dynamic library for this arch
+usr/libexec/seserviced	LOADERR	machrun: class _TtC10seserviced13EventListener: instance size 24 here, 32 in the program: the progra
+usr/libexec/sftp-server	MISSING	_malloc_type_calloc
+usr/libexec/sharingd	LOADERR	machrun: too many libraries
+usr/libexec/SidecarDisplayAgent	LOADERR	machrun: class _TtC19SidecarDisplayAgent13DisplayMarkup: instance size 40 here, 48 in the program: t
+usr/libexec/SidecarRelay	LOADERR	machrun: class _TtC12SidecarRelay27EnhancedDiscoveryController: instance size 25 here, 33 in the pro
+usr/libexec/signpost_reporter	MISSING	_xpc_activity_register
+usr/libexec/siriknowledged	STARTS	
+usr/libexec/slapconfig-keygen	MISSING	_OPENSSL_add_all_algorithms_noconf
+usr/libexec/slapd	MISSING	_sasl_version
+usr/libexec/smb-migrate-preferences	MISSING	_malloc_type_malloc
+usr/libexec/smb-sync-preferences	MISSING	_xpc_set_event_stream_handler
+usr/libexec/smcDiagnose	MISSING	_IOMasterPort
+usr/libexec/smcupdater	MISSING	_IORegistryEntryFromPath
+usr/libexec/smd	MISSING	__os_feature_enabled_impl
+usr/libexec/snmpd	MISSING	_snmp_get_do_debugging
+usr/libexec/spindump_agent	MISSING	_CFAbsoluteTimeGetCurrent
+usr/libexec/sportsd	LOADERR	machrun: class _TtC7sportsd26SportsEnvironmentPublisher: instance size 8 here, 16 in the program: th
+usr/libexec/spotlightknowledged.graph	MISSING	_SKGGraphMain
+usr/libexec/spotlightknowledged.importer	MISSING	_SKGImporterMain
+usr/libexec/spotlightknowledged.updater	MISSING	_SKGUpdaterMain
+usr/libexec/srp-mdns-proxy	MISSING	_malloc_type_calloc
+usr/libexec/ssdupdater	MISSING	_IOServiceMatching
+usr/libexec/ssh-apple-pkcs11	MISSING	_si_destination_compare
+usr/libexec/ssh-keysign	MISSING	_malloc_type_calloc
+usr/libexec/ssh-pkcs11-helper	MISSING	___strlcpy_chk
+usr/libexec/ssh-sk-helper	MISSING	_malloc_type_calloc
+usr/libexec/sshd-auth	MISSING	_malloc_type_calloc
+usr/libexec/sshd-keygen-wrapper	MISSING	_swift_task_create
+usr/libexec/sshd-session	MISSING	_malloc_type_calloc
+usr/libexec/startupdiskhelper	STARTS	
+usr/libexec/StorageDEHelper	STARTS	
+usr/libexec/storagekitd	STARTS	
+usr/libexec/studentd	STARTS	
+usr/libexec/swcd	STARTS	
+usr/libexec/swiftuitraced	MISSING	_$s21SwiftUITracingSupport0A7UITraceCMa
+usr/libexec/swtransparency-sysdiagnose	MISSING	_swift_getSingletonMetadata
+usr/libexec/swtransparencyd	LOADERR	machrun: class _TtC15swtransparencyd19AssociatedObjectKey: instance size 9 here, 17 in the program: 
+usr/libexec/symptomsd	MISSING	_configure_symptom_logging
+usr/libexec/symptomsd-diag	MISSING	__set_user_dir_suffix
+usr/libexec/symptomsd-distributed	MISSING	_$ss11CommandLineO9argumentsSaySSGvgZ
+usr/libexec/sysdiagnose_helper	MISSING	_xpc_connection_create_mach_service
+usr/libexec/sysdiagnosed	MISSING	_vproc_swap_integer
+usr/libexec/sysmond	MISSING	_mach_port_allocate
+usr/libexec/syspolicyd	MISSING	_os_variant_allows_internal_security_policies
+usr/libexec/sysstatuscheck	STARTS	
+usr/libexec/systemstats_boot	MISSING	__systemstats_boot
+usr/libexec/tailspind	STARTS	
+usr/libexec/taskgated	MISSING	_bootstrap_check_in
+usr/libexec/taskgated-helper	MISSING	_sandbox_init
+usr/libexec/teslad	MISSING	_DEPLogObjects
+usr/libexec/testmanagerd	MISSING	_swift_getTypeByMangledNameInContext2
+usr/libexec/textcomposerd	MISSING	_$s12TextComposer30TCTextCompositionRuntimeDaemonVMa
+usr/libexec/textcontextd	MISSING	_swift_once
+usr/libexec/textunderstandingd	MISSING	__set_user_dir_suffix
+usr/libexec/tftpd	STARTS	
+usr/libexec/thermald	MISSING	_sfi_set_class_offtime
+usr/libexec/thermalmonitord	MISSING	_pthread_set_qos_class_self_np
+usr/libexec/timed	MISSING	_AnalyticsSendEventLazy
+usr/libexec/tipsd	MISSING	__objc_autoreleasePoolPush
+usr/libexec/toolkitd	MISSING	_$sSS10FoundationE36_unconditionallyBridgeFromObjectiveCySSSo8NSStringCSgFZ
+usr/libexec/TouchBarServer	LOADERR	machrun: class _TtC14TouchBarServer4Main: instance size 40 here, 48 in the program: the program's iv
+usr/libexec/tracd	MISSING	__set_user_dir_suffix
+usr/libexec/transparency-sysdiagnose	STARTS	
+usr/libexec/transparencyd	LOADERR	machrun: class _TtC13transparencyd16KTQueryCacheItem: instance size 56 here, 64 in the program: the 
+usr/libexec/transparencyStaticKey	STARTS	
+usr/libexec/triald	MISSING	__set_user_dir_suffix
+usr/libexec/triald_system	MISSING	__set_user_dir_suffix
+usr/libexec/trustd	MISSING	_os_transaction_create
+usr/libexec/trustdFileHelper	STARTS	
+usr/libexec/tzd	MISSING	_swift_once
+usr/libexec/tzinit	MISSING	_setiopolicy_np
+usr/libexec/tzlinkd	MISSING	__set_user_dir_suffix
+usr/libexec/tznotify	MISSING	_objc_opt_self
+usr/libexec/uarpassetmanagerd	STARTS	
+usr/libexec/uarpd	STARTS	
+usr/libexec/uarphidd	STARTS	
+usr/libexec/uarppersonalizationd	MISSING	__set_user_dir_suffix
+usr/libexec/ucupdate	STARTS	
+usr/libexec/undoServerAppDNSPrefs	STARTS	
+usr/libexec/usbctelemetryd	MISSING	_IOServiceMatching
+usr/libexec/usbcupdater	MISSING	_IORegistryEntryFromPath
+usr/libexec/usbnotificationagent	MISSING	__set_user_dir_suffix
+usr/libexec/usbpowerd	MISSING	__set_user_dir_suffix
+usr/libexec/UserEventAgent	MISSING	_setiopolicy_np
+usr/libexec/usermanagerd	MISSING	_objc_opt_self
+usr/libexec/usermanagerhelper	MISSING	_sandbox_init
+usr/libexec/vbiosupdater	MISSING	__Z11ValidConfigi
+usr/libexec/videosubscriptionsd	MISSING	__set_user_dir_suffix
+usr/libexec/wallpaperexportd	MISSING	_objc_opt_self
+usr/libexec/warmd	STARTS	
+usr/libexec/warmd_agent	MISSING	_xpc_track_activity
+usr/libexec/watchdogd	MISSING	_xpc_set_event_stream_handler
+usr/libexec/wifianalyticsd	LOADERR	machrun: class _TtC14wifianalyticsd11SwiftCFUtil: instance size 8 here, 16 in the program: the progr
+usr/libexec/wifiFirmwareLoader	MISSING	_xpc_set_event_stream_handler
+usr/libexec/wifip2pd	LOADERR	machrun: class _TtC7CoreP2P11AppleDevice: instance size 248 here, 256 in the program: the program's 
+usr/libexec/wifivelocityd	MISSING	_xpc_set_event_stream_handler
+usr/libexec/wspd	MISSING	__ZnwmSt19__type_descriptor_t
+usr/libexec/x11-select	STARTS	
+usr/libexec/xartstorageremoted	MISSING	_eos_device_is_supported
+usr/libexec/xpcproxy	MISSING	_kdebug_trace
+usr/libexec/xpcroleaccountd	STARTS	
+usr/libexec/xprotectd	LOADERR	machrun: class _TtC6Shared18ExponentialBackoff: instance size 32 here, 40 in the program: the progra
+usr/libexec/xscertd	STARTS	
+usr/libexec/xscertd-helper	MISSING	_sandbox_init_with_parameters
