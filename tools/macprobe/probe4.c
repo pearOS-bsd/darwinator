@@ -26,19 +26,15 @@ static void on_usr1(int sig, siginfo_t *si, void *uc)
 	printf("fs: fcw %#x mxcsr %#x  sizeof(float_state64) %zu\n", (unsigned)m->__fs.__fpu_fcw, (unsigned)m->__fs.__fpu_mxcsr, sizeof(m->__fs));
 }
 
-static unsigned long long rsp_before;
 static void signal_frame(void)
 {
 	struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_sigaction = on_usr1; sa.sa_flags = SA_SIGINFO; sigaction(SIGUSR1, &sa, NULL);
 	/* load known values into callee-saved registers, then send the signal to ourselves */
+	long pid = getpid(), sg = SIGUSR1, kr = 0x2000025;
 	__asm__ volatile("movq $0x1111111111111111, %%r12\n\tmovq $0x2222222222222222, %%r13\n\tmovq $0x3333333333333333, %%r14\n\tmovq $0x4444444444444444, %%r15\n\tmovq $0x5555555555555555, %%rbx\n\t"
-	    "call _raise_usr1\n" : : : "r12", "r13", "r14", "r15", "rbx", "rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "memory", "cc");
+	    "syscall\n" : "+a"(kr), "+D"(pid), "+S"(sg) : : "r12", "r13", "r14", "r15", "rbx", "rcx", "rdx", "r8", "r9", "r10", "r11", "memory", "cc");
 	printf("handler ran: %d\n", got);
 }
-void raise_usr1(void) { kill(getpid(), SIGUSR1); }
-__asm__(".globl _raise_usr1\n_raise_usr1:\n\tjmp _raise_usr1_c\n");
-void raise_usr1_c(void) __asm__("_raise_usr1_c");
-void raise_usr1_c(void) { kill(getpid(), SIGUSR1); }
 
 static void raw(void)
 {
