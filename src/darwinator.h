@@ -45,6 +45,7 @@ int	darwin_sigprocmask(struct thread *, struct darwin_args *);
 int	darwin_stat_out(struct thread *, const struct stat *, void *);
 int	darwin_msgflags_pub(int);
 void	darwin_event_syscalls_init(void);		/* syscalls_event.c */
+void	darwin_compat_syscalls_init(void);		/* syscalls_compat.c */
 void	darwin_sync_syscalls_init(void);		/* syscalls_sync.c: psynch, workq, the Mach traps */
 void	darwin_posix_syscalls_init(void);		/* syscalls_posix.c */
 void	darwin_more_syscalls_init(void);		/* syscalls_more.c */

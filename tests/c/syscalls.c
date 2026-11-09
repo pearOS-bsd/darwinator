@@ -135,7 +135,9 @@ enum {
 	SYS_listen = 106, SYS_getsockopt = 118, SYS_getrusage = 117, SYS_fchmod = 124, SYS_rename = 128, SYS_flock = 131, SYS_mkfifo = 132,
 	SYS_socketpair = 135, SYS_mkdir = 136, SYS_rmdir = 137, SYS_getrlimit = 194, SYS_truncate = 200, SYS_sysctl = 202,
 	SYS_poll = 230, SYS_sysctlbyname = 274, SYS_getsid = 310, SYS_getdirentries64 = 344, SYS_statfs64 = 345, SYS_read_nocancel = 396,
-	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_fgetattrlist = 228, SYS_psynch_mutexwait = 301, SYS_psynch_mutexdrop = 302, SYS_psynch_cvbroad = 303, SYS_psynch_cvsignal = 304, SYS_psynch_cvwait = 305, SYS_workq_open = 367, SYS_workq_kernreturn = 368, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
+	SYS_write_nocancel = 397, SYS_mknod = 14, SYS_getlogin_ = 49, SYS_gethostuuid = 142, SYS_stat32 = 188, SYS_fstat32 = 189, SYS_lstat32 = 190, SYS_getdirentries32 = 196, SYS_pathconf = 191, SYS_utimes = 138, SYS_fdatasync = 187,
+	SYS_stat64_extended = 341, SYS_open_extended = 277, SYS_mkdir_extended = 292, SYS_shm_open = 266, SYS_shm_unlink = 267, SYS_shmget = 265, SYS_shmat = 262, SYS_shmdt = 264, SYS_shmctl = 263, SYS_semget = 255, SYS_semop = 256, SYS_semctl = 254,
+	SYS_guarded_open = 441, SYS_guarded_close = 442, SYS_clonefileat = 462, SYS_exchangedata = 223, SYS_getattrlistbulk = 461, SYS_ptrace = 26, SYS_kdebug_trace = 180, SYS_sigwait = 330, SYS_sendfile_ = 337, SYS_fgetattrlist = 228, SYS_psynch_mutexwait = 301, SYS_psynch_mutexdrop = 302, SYS_psynch_cvbroad = 303, SYS_psynch_cvsignal = 304, SYS_psynch_cvwait = 305, SYS_workq_open = 367, SYS_workq_kernreturn = 368, SYS_mmap_ = 197, SYS_bsdthread_create = 360, SYS_bsdthread_terminate = 361, SYS_bsdthread_register = 366, SYS_csops = 169, SYS_getxattr = 234, SYS_setxattr = 236, SYS_removexattr = 238, SYS_listxattr = 240, SYS_shared_region_check_np = 294,
 	SYS_pthread_kill = 328, SYS_thread_selfid = 372, SYS_openat = 463, SYS_renameat = 465, SYS_faccessat = 466, SYS_fchmodat = 467, SYS_fstatat64 = 470, SYS_linkat = 471,
 	SYS_unlinkat = 472, SYS_readlinkat = 473, SYS_symlinkat = 474, SYS_mkdirat = 475, SYS_ulock_wait = 515, SYS_ulock_wake = 516, SYS_getattrlist = 220, SYS_getsockname = 32, SYS_kill = 37, SYS_sigaction = 46, SYS_sigpending = 52, SYS_pthread_sigmask = 329,
 	SYS_setitimer = 83, SYS_getitimer = 86, SYS_getfsstat64 = 347, SYS_kqueue = 362, SYS_kevent = 363, SYS_kevent64 = 369, SYS_open_nocancel = 398, SYS_close_nocancel = 399, SYS_fstatfs64 = 346, SYS_getentropy_ = 500
@@ -447,6 +449,35 @@ int cmain(void)
 	{ u64 ps = 0, len = 8; r = S(SYS_sysctlbyname, "hw.pagesize", 11, &ps, &len, 0, 0); check("sysctlbyname hw.pagesize is 8 bytes (as on the Mac)", r == 0 && len == 8 && ps >= 4096, ps); }
 	{ unsigned ps4 = 0; u64 len = 4; r = S(SYS_sysctlbyname, "hw.pagesize", 11, &ps4, &len, 0, 0); check("  and 4 bytes for a caller with an int", r == 0 && len == 4 && ps4 >= 4096, ps4); }
 	{ u64 f = 0, len = 8; r = S(SYS_sysctlbyname, "hw.tbfrequency", 14, &f, &len, 0, 0); check("sysctlbyname hw.tbfrequency", r == 0 && f == 1000000000UL, r); }
+
+	/* the old stat forms, getdirentries, *_extended, utimes, pathconf, guarded descriptors, shared memory, System V semaphores, the ENOTSUP answers */
+	{ struct { int dev; unsigned ino; unsigned short mode, nlink; unsigned uid, gid; int rdev; i64 t[6]; i64 size, blocks; int blksize; unsigned flags, gen; int lspare; i64 q[2]; } st32; struct dstat64 st64;
+	  r = S(SYS_stat32, "/tmp/dsc/a", &st32, 0, 0, 0, 0); S(SYS_stat64, "/tmp/dsc/a", &st64, 0, 0, 0, 0);
+	  check("stat (32 bit inodes, 120 bytes)", r == 0 && st32.size == 5 && st32.mode == st64.st_mode && st32.ino == (unsigned)st64.st_ino && st32.blksize == st64.st_blksize, r);
+	  r = S(SYS_lstat32, "/tmp/dsc/none", &st32, 0, 0, 0, 0); check("lstat of a missing file is ENOENT", r == -2, r);
+	  { int fdq = (int)S(SYS_open, "/tmp/dsc/a", 0, 0, 0, 0, 0); r = S(SYS_fstat32, fdq, &st32, 0, 0, 0, 0); check("fstat (32 bit inodes)", r == 0 && st32.size == 5, r); S(SYS_close, fdq, 0, 0, 0, 0, 0); }
+	  { u64 xs = 99; r = S(SYS_stat64_extended, "/tmp/dsc/a", &st64, 0, &xs, 0, 0); check("stat64_extended (no ACL: the size is 0)", r == 0 && xs == 0 && st64.st_size == 5, r); } }
+	{ int fdd = (int)S(SYS_open, "/tmp/dsc", 0, 0, 0, 0, 0); long bs = 0; i64 n = S(SYS_getdirentries32, fdd, buf, sizeof(buf), &bs, 0, 0), o = 0; int seen = 0, bad = 0;
+	  while (o < n) { unsigned short reclen = *(unsigned short *)(buf + o + 4); unsigned char namlen = (unsigned char)buf[o + 7]; const char *name = buf + o + 8; if (reclen < 9 || reclen % 4 || name[namlen]) bad = 1; if (seq(name, "a")) seen = 1; o += reclen; }
+	  check("getdirentries (the old entry: d_ino 4, d_reclen 2, d_type, d_namlen, name)", n > 0 && seen && !bad, n); S(SYS_close, fdd, 0, 0, 0, 0, 0); }
+	{ struct dtv tv2[2] = { { 1000000, 0, 0 }, { 2000000, 0, 0 } }; struct dstat64 st64; r = S(SYS_utimes, "/tmp/dsc/a", tv2, 0, 0, 0, 0); S(SYS_stat64, "/tmp/dsc/a", &st64, 0, 0, 0, 0);
+	  check("utimes", r == 0 && st64.mt[0] == 2000000, r); }
+	check("pathconf (_PC_NAME_MAX)", S(SYS_pathconf, "/tmp", 4, 0, 0, 0, 0) >= 255, 0);
+	{ int fdn = (int)S(SYS_open_extended, "/tmp/dsc/ox", O_WRONLY | O_CREAT, -1, -1, 0600, 0); check("open_extended", fdn >= 0, fdn); if (fdn >= 0) { S(SYS_fdatasync, fdn, 0, 0, 0, 0, 0); S(SYS_close, fdn, 0, 0, 0, 0, 0); } S(SYS_unlink, "/tmp/dsc/ox", 0, 0, 0, 0, 0); }
+	check("mkdir_extended", S(SYS_mkdir_extended, "/tmp/dsc/mx", -1, -1, 0755, 0, 0) == 0 && S(SYS_rmdir, "/tmp/dsc/mx", 0, 0, 0, 0, 0) == 0, 0);
+	{ unsigned char uu[16] = { 0 }; r = S(SYS_gethostuuid, uu, 0, 0, 0, 0, 0); check("gethostuuid", r == 0, r); }
+	{ u64 guard = 0x1234; i64 g = S(SYS_guarded_open, "/tmp/dsc/gx", &guard, 1, O_WRONLY | O_CREAT, 0600, 0); check("guarded_open_np", g >= 0, g); if (g >= 0) check("guarded_close_np", S(SYS_guarded_close, g, &guard, 0, 0, 0, 0) == 0, 0); S(SYS_unlink, "/tmp/dsc/gx", 0, 0, 0, 0, 0); }
+	check("clonefileat is ENOTSUP (45): programs go on with a copy", S(SYS_clonefileat, -2, "/tmp/dsc/a", -2, "/tmp/dsc/cl", 0, 0) == -45, 0);
+	check("exchangedata is ENOTSUP", S(SYS_exchangedata, "/tmp/dsc/a", "/tmp/dsc/a", 0, 0, 0, 0) == -45, 0);
+	check("getattrlistbulk is ENOTSUP", S(SYS_getattrlistbulk, 0, 0, 0, 0, 0, 0) == -45, 0);
+	check("ptrace PT_DENY_ATTACH is accepted", S(SYS_ptrace, 31, 0, 0, 0, 0, 0) == 0, 0);
+	check("kdebug_trace is accepted", S(SYS_kdebug_trace, 0, 0, 0, 0, 0, 0) == 0, 0);
+	{ i64 shm = S(SYS_shm_open, "/dsc_shm", 2 | O_CREAT, 0600, 0, 0, 0); check("shm_open", shm >= 0, shm); if (shm >= 0) S(SYS_close, shm, 0, 0, 0, 0, 0); check("shm_unlink", S(SYS_shm_unlink, "/dsc_shm", 0, 0, 0, 0, 0) == 0, 0); }
+	{ i64 sid = S(SYS_shmget, 0, 4096, 01000 | 0600, 0, 0, 0); check("shmget (IPC_PRIVATE)", sid >= 0, sid);
+	  if (sid >= 0) { i64 at = S(SYS_shmat, sid, 0, 0, 0, 0, 0); check("  shmat", at > 0, at); if (at > 0) { *(volatile char *)at = 7; check("  shmdt", S(SYS_shmdt, at, 0, 0, 0, 0, 0) == 0, 0); } check("  shmctl IPC_RMID", S(SYS_shmctl, sid, 0, 0, 0, 0, 0) == 0, 0); } }
+	{ i64 sm = S(SYS_semget, 0, 1, 01000 | 0600, 0, 0, 0); check("semget", sm >= 0, sm);
+	  if (sm >= 0) { struct { unsigned short n; short op, fl; } so = { 0, 1, 0 }; check("  semctl SETVAL", S(SYS_semctl, sm, 0, 8, 3, 0, 0) == 0, 0); check("  semctl GETVAL", S(SYS_semctl, sm, 0, 5, 0, 0, 0) == 3, 0);
+	    check("  semop (+1)", S(SYS_semop, sm, &so, 1, 0, 0, 0) == 0 && S(SYS_semctl, sm, 0, 5, 0, 0, 0) == 4, 0); check("  semctl IPC_RMID", S(SYS_semctl, sm, 0, 0, 0, 0, 0) == 0, 0); } }
 
 	/* AF_INET6: Darwin's family number in the address */
 	{ unsigned char a6[28] = { 28, 30 }; unsigned char b6[28] = { 0 }; unsigned bl = 28; i64 s6 = S(SYS_socket, 30, 1, 0, 0, 0, 0);
