@@ -257,6 +257,8 @@ static const struct {
 	const char	*name;
 } darwin_misc[] = {
 #define	E(num, nargs, fn, name)	{ (num), (nargs), (sy_call_t *)(fn), (name) }
+	E(430, 2, darwin_fileport_makeport,	"fileport_makeport"),
+	E(431, 1, darwin_fileport_makefd,	"fileport_makefd"),
 	E(334, 6, darwin_semwait_signal,	"__semwait_signal"),
 	E(423, 6, darwin_semwait_signal,	"__semwait_signal_nocancel"),
 	E(313, 2, darwin_aio_fsync,		"aio_fsync"),

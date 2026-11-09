@@ -294,6 +294,15 @@ int cmain(void)
 	  { void *list[2]; int op = 2; list[0] = cb; list[1] = 0; memcpy(cb + 72, &op, 4); r = S(320, 2, list, 2, 0, 0, 0); check("lio_listio (LIO_WAIT, one write)", r == 0 && S(314, cb, 0, 0, 0, 0, 0) == 11, r); }
 	  check("aio_cancel is AIO_ALLDONE (2)", S(316, afd, 0, 0, 0, 0, 0) == 2, 0);
 	  S(SYS_close, afd, 0, 0, 0, 0, 0); S(10, "/tmp/darwinator-aio", 0, 0, 0, 0, 0); }
+	/* fileport: an open file as a port, and back as a new descriptor that shares the file offset */
+	{ unsigned fport = 0; static char fb[16]; long ffd = S(SYS_open, "/tmp/darwinator-fp", 0x602, 0644, 0, 0, 0), nfd;
+	  S(SYS_write, ffd, "fileport!", 9, 0, 0, 0); S(199 /* lseek */, ffd, 0, 0, 0, 0, 0);
+	  r = S(430, ffd, &fport, 0, 0, 0, 0); check("fileport_makeport", r == 0 && fport != 0, r);
+	  nfd = S(431, fport, 0, 0, 0, 0, 0); check("fileport_makefd gives another descriptor", nfd >= 0 && nfd != ffd, nfd);
+	  r = S(SYS_read, nfd, fb, 9, 0, 0, 0); check("  it reads the same file", r == 9 && fb[0] == 'f' && fb[8] == '!', r);
+	  check("fileport_makefd on a name that is no fileport is EINVAL", S(431, 0x1234, 0, 0, 0, 0, 0) == -22, 0);
+	  S(SYS_close, nfd, 0, 0, 0, 0, 0); S(SYS_close, ffd, 0, 0, 0, 0, 0); S(10, "/tmp/darwinator-fp", 0, 0, 0, 0, 0); }
+
 	check("setprivexec ok, mount EPERM, reboot EPERM", S(152, 0, 0, 0, 0, 0, 0) == 0 && S(167, 0, 0, 0, 0, 0, 0) == -1 && S(55, 0, 0, 0, 0, 0, 0) == -1, 0);
 
 	/* signals' mask, limits, ids */
