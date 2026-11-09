@@ -1218,6 +1218,48 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 		if (dest->kind != KP_THREAD) return (false);
 		mig_reply_data(m, id, 0, NULL, 0);
 		return (true);
+	case 4816:					/* mach_vm_region(task, *address, *size, flavor, *info, *infoCnt, *object_name): VM_REGION_BASIC_INFO_64 (9) */
+		{
+			uint64_t addr, rstart = 0, rsize = 0;
+			uint32_t flavor, buf9[9];
+			vm_map_t map;
+			vm_map_entry_t ent;
+			bool found = false;
+			struct kmsg *r;
+			uint8_t *rd;
+
+			if (m->size < 48 || m->reply.port == NULL || m->reply.port->dead) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			addr = rd64(d, 32); flavor = rd32(d, 40);
+			if (flavor != 9 || p->p_vmspace == NULL) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			memset(buf9, 0, sizeof(buf9));
+			map = &p->p_vmspace->vm_map;
+			vm_map_lock_read(map);
+			VM_MAP_ENTRY_FOREACH(ent, map) {
+				if (ent->end <= addr || (ent->eflags & MAP_ENTRY_IS_SUB_MAP) != 0)
+					continue;
+				rstart = ent->start; rsize = ent->end - ent->start;
+				buf9[0] = ent->protection & 7; buf9[1] = ent->max_protection & 7; buf9[2] = ent->inheritance == VM_INHERIT_SHARE ? 0 : 1;
+				buf9[3] = (ent->eflags & MAP_ENTRY_COW) == 0 ? 1 : 0;			/* shared */
+				memcpy(&buf9[5], &ent->offset, 8);
+				found = true;
+				break;
+			}
+			vm_map_unlock_read(map);
+			if (!found) { mig_reply_data(m, id, 1 /* KERN_INVALID_ADDRESS */, NULL, 0); return (true); }
+			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->data = rd = malloc(104, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->size = 104;
+			wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+			wr32(rd, 4, 104); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+			rd[28 + 10] = MM_MOVE_SEND; rd[28 + 11] = 0;			/* object_name: the null port */
+			memcpy(rd + 48, &rstart, 8); memcpy(rd + 56, &rsize, 8);
+			wr32(rd, 64, 9);
+			memcpy(rd + 68, buf9, sizeof(buf9));
+			TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+			m->reply.port->qn++;
+			wakeup(m->reply.port);
+			return (true);
+		}
 	case 3204:					/* mach_port_allocate(task, right, *name) */
 		{
 			uint32_t right = m->size >= 36 ? rd32(d, 32) : 99;
