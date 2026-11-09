@@ -16,3 +16,14 @@ What the shims of this commit are (`dyld/shims.c`): `dispatch_once` and `dispatc
 
 The symbols that stop most programs now: `xcselect_invoke_xcrun` (95: `git`, `clang`, `make` ... are launchers of Xcode), `_cupsSetLocale` (20), a C++ operator new with a type descriptor (16), `snmp_parse_args` (12), the Swift runtime (`swift_task_create`, `swift_getSingletonMetadata` ...),
 `xpc_connection_create_mach_service` and `vproc_swap_integer` (launchd and XPC), `IOServiceMatching` (IOKit), `krb5_init_context`, `apr_app_initialize`, `sasl_version`.
+
+## The same 1262 tools through the real dyld (`kern.darwinator.dyld=1`, `tools/maccli/sweep-dyld.sh`)
+
+The tools run with the dyld and the libSystem of the Mac itself (the module of this repository, amd64), as `nobody`, with no arguments and no input, 8 seconds each.  The results are in `tools/maccli/results-dyld-macos26.7-intel.tsv`.
+
+| | machrun (shims) | the real dyld |
+|---|---|---|
+| the program ends or runs for the 8 seconds (any exit status, mostly the usage text or an error about the missing arguments) | 604 | **932** |
+| the program is killed by a signal | | 330 (267 SIGILL, 33 SIGUSR-like 127, 17 SIGABRT, 7 SIGSEGV) |
+
+How it went: 900 tools were killed at the first run, 617 after the Mach traps `thread_get_special_reply_port` and `host_create_mach_voucher_trap` and the answer of the bootstrap port, 267 after `proc_info` (flavor 17) for libdispatch.  The tools that are left die in libdispatch (the work queue: `workq_kernreturn` is not a real work queue), in libxpc (check-ins and routines of launchd other than the look-up, ids 0x324 and 0x325) or because a library of the Mac is not on the machine.
