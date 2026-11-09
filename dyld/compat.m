@@ -951,6 +951,24 @@ machobundle_init(void)
 	if ((m = class_getInstanceMethod(k, @selector(principalClass))) != NULL) o_bundlePrincipal = method_setImplementation(m, (IMP)w_bundlePrincipal);
 }
 
+
+/* -[NSView registerForDraggedTypes:] while the view is decoded from a nib and has no window yet (an NSPathControl of Sloth's window): GNUstep dereferences the window's server and ends the program.
+ * The registration is dropped then; a view that is put in a window and wants the drops registers again (the drops are not what the programs here need). */
+static IMP o_registerForDraggedTypes;
+static void
+w_registerForDraggedTypes(id self, SEL _cmd, NSArray *types)
+{
+	if (((id (*)(id, SEL))objc_msgSend)(self, @selector(window)) == nil) return;
+	((void (*)(id, SEL, id))o_registerForDraggedTypes)(self, _cmd, types);
+}
+__attribute__((constructor)) static void
+dragged_types_init(void)
+{
+	Class k = NSClassFromString(@"NSView"); Method m;
+	if (k == Nil || getenv("MACHRUN_NODRAGFIX")) return;
+	if ((m = class_getInstanceMethod(k, @selector(registerForDraggedTypes:))) != NULL) o_registerForDraggedTypes = method_setImplementation(m, (IMP)w_registerForDraggedTypes);
+}
+
 /* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
 static const char *(*class_image_path)(Class);
 static IMP o_bundleForClass;

@@ -10,6 +10,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
+#include <sys/user.h>
 #include <sys/time.h>
 #include <dlfcn.h>
 #include <dirent.h>
@@ -154,6 +155,18 @@ sfs_out(const struct statfs *f, struct dstatfs *d)
 }
 static int dw_statfs(const char *p, struct dstatfs *d) { struct statfs f; int r = statfs(p, &f); if (r == 0) sfs_out(&f, d); return (r); }
 static int dw_fstatfs(int fd, struct dstatfs *d) { struct statfs f; int r = fstatfs(fd, &f); if (r == 0) sfs_out(&f, d); return (r); }
+/* getfsstat: the program's buffer holds structures of Darwin's size; with no buffer it is the count */
+static int
+dw_getfsstat(struct dstatfs *d, int bufsize, int flags)
+{
+	int n, i, room = bufsize > 0 ? bufsize / (int)sizeof(*d) : 0; struct statfs *f;
+	if (d == NULL || room == 0) return (getfsstat(NULL, 0, flags));
+	if ((f = calloc((size_t)room, sizeof(*f))) == NULL) return (-1);
+	n = getfsstat(f, (long)(room * sizeof(*f)), flags);
+	for (i = 0; i < n && i < room; i++) sfs_out(&f[i], &d[i]);
+	free(f);
+	return (n);
+}
 
 /* utimes and lutimes: Darwin's timeval has a 32 bit tv_usec */
 struct dtimeval2 { int64_t sec; int32_t usec; int32_t pad; };
@@ -466,6 +479,24 @@ dw_dispatch_sync(void *q, void *blk)
 /* Frameworks of macOS that a program asks and that have no meaning here (code signatures, IOKit registry, DiskArbitration, login items, authorization, the Apple System Log):
  * calls that find nothing (NULL / 0) or fail with the error that "there is none" (a program that asks for a signature gets "unsigned") */
 static long dw_zero(void) { return (0); }
+/* libproc: the name and the path of a process by its pid (what Sloth and the activity monitors ask) */
+static int
+dw_proc_pidpath(int pid, char *buf, uint32_t size)
+{
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, pid }; size_t n = size;
+	if (buf == NULL || size == 0 || sysctl(mib, 4, buf, &n, NULL, 0) != 0 || n == 0) return (0);
+	buf[size - 1] = '\0';
+	return ((int)strlen(buf));
+}
+static int
+dw_proc_name(int pid, char *buf, uint32_t size)
+{
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid }; struct kinfo_proc kp; size_t n = sizeof(kp);
+	if (buf == NULL || size == 0 || sysctl(mib, 4, &kp, &n, NULL, 0) != 0 || n == 0) return (0);
+	strlcpy(buf, kp.ki_comm, size);
+	return ((int)strlen(buf));
+}
+
 
 /* LSCopyDefaultRoleHandlerForContentType: the application asks which program opens a type; the answer is itself (its bundle identifier), the only program this system knows by that name */
 static void *
@@ -534,6 +565,7 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_open", dw_open }, { "_fcntl", dw_fcntl },
 	{ "_readdir$INODE64", dw_readdir }, { "_readdir", dw_readdir }, { "_readdir_r$INODE64", dw_readdir_r }, { "_readdir_r", dw_readdir_r },
 	{ "_stat", dw_stat32 }, { "_lstat", dw_lstat32 }, { "_fstat", dw_fstat32 }, { "_stat$INODE64", dw_stat }, { "_lstat$INODE64", dw_lstat }, { "_fstat$INODE64", dw_fstat },
+	{ "_getfsstat$INODE64", dw_getfsstat }, { "_getfsstat", dw_getfsstat },
 	{ "_statfs$INODE64", dw_statfs }, { "_statfs", dw_statfs }, { "_fstatfs$INODE64", dw_fstatfs }, { "_fstatfs", dw_fstatfs },
 	{ "_utimes", dw_utimes }, { "_lutimes", dw_lutimes },
 	{ "_fstatat$INODE64", dw_fstatat }, { "_fstatat", dw_fstatat }, { "_openat", dw_openat }, { "_unlinkat", dw_unlinkat },
@@ -575,6 +607,8 @@ static const struct { const char *name; void *addr; } overrides[] = {
 	{ "_IOServiceGetMatchingService", dw_zero }, { "_IOObjectRelease", dw_zero }, { "_IOObjectConformsTo", dw_zero }, { "_IORegistryEntryCreateCFProperties", dw_kern_failure },
 	{ "_IORegistryEntryGetParentEntry", dw_kern_failure },
 	{ "_DASessionCreate", dw_zero }, { "_DADiskCreateFromVolumePath", dw_zero }, { "_DADiskCopyDescription", dw_zero }, { "_DADiskUnmount", dw_zero },
+	{ "_proc_pidpath", dw_proc_pidpath }, { "_proc_name", dw_proc_name }, { "_GetProcessForPID", dw_minus_one }, { "_CopyProcessName", dw_minus_one },
+	{ "_MDItemCreateWithURL", dw_zero }, { "_MDItemCopyAttributes", dw_zero },
 	{ "_LSCopyAllRoleHandlersForContentType", dw_zero }, { "_LSCopyApplicationURLsForURL", dw_zero }, { "_LSCopyDefaultRoleHandlerForContentType", dw_ls_default_handler },
 	{ "_LSSetDefaultRoleHandlerForContentType", dw_zero }, { "_GetCurrentKeyModifiers", dw_zero }, { "_UTTypeCopyPreferredTagWithClass", dw_zero },
 	{ "_LSSharedFileListCreate", dw_zero }, { "_LSSharedFileListCopySnapshot", dw_zero }, { "_LSSharedFileListItemRemove", dw_minus_one }, { "_LSSharedFileListItemResolve", dw_minus_one },

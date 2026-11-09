@@ -1,6 +1,6 @@
 #!/bin/sh
 # macapp-install NAME|URL ...: downloads Mac applications from their own sites into /Applications (the image cannot carry them: they are not ours to give away).
-#   macapp-install keka appcleaner xld unarchiver   the applications that are tested here
+#   macapp-install keka appcleaner xld unarchiver sloth   the applications that are tested here
 #   macapp-install https://example.com/App.dmg  any .dmg or .zip with a .app in it
 # A .dmg is read with dmgtool (HFS+ in UDIF), a .zip with unzip/tar.  Needs the network and a writable /Applications (sudo when it is not).
 DEST="${APPLICATIONS:-/Applications}"
@@ -9,12 +9,13 @@ url_of() {
 	keka) echo "https://github.com/aonez/Keka/releases/download/v1.6.8/Keka-1.6.8.zip" ;;
 	appcleaner) echo "https://freemacsoft.net/downloads/AppCleaner_3.7.zip" ;;
 	xld) echo "https://tmkk.undo.jp/xld/xld-20250302.dmg" ;;
+	sloth) echo "https://github.com/sveinbjornt/Sloth/releases/download/3.6/sloth-3.6.zip" ;;     # 3.6: Objective-C, shows the open files and ports of the processes (lsof)
 	unarchiver) echo "https://cdn.theunarchiver.com/downloads/TheUnarchiver.zip" ;;      # 3.11.1: Objective-C; the newer 4.x of MacPaw uses Swift
 	http://*|https://*) echo "$1" ;;
 	*) return 1 ;;
 	esac
 }
-[ $# -gt 0 ] || { echo "usage: macapp-install keka|appcleaner|xld|unarchiver|URL ..." >&2; exit 64; }
+[ $# -gt 0 ] || { echo "usage: macapp-install keka|appcleaner|xld|unarchiver|sloth|URL ..." >&2; exit 64; }
 T="$(mktemp -d /var/tmp/macapp.XXXXXX)" || exit 1; trap 'rm -rf "$T"' EXIT
 rc=0
 for a in "$@"; do
