@@ -1115,6 +1115,56 @@ pathext_init(void)
 	if ((m = class_getInstanceMethod(k, @selector(pathExtension))) != NULL) o_pathExt = method_setImplementation(m, (IMP)w_pathExt);
 }
 
+
+/* NSBitmapImageRep with 3 samples of 8 bits in 32 bits per pixel without alpha (a row of "xRGB" pixels that a program writes itself: GrandPerspective's treemap): GNUstep makes no representation of it (nil);
+ * the same pixels as RGBA with the alpha ignored are given instead: the same memory layout, 4 bytes a pixel.  MACHRUN_DEBUG_BMP says when it happens. */
+static IMP o_bmpinit;
+static id
+w_bmpinit(id self, SEL _cmd, unsigned char **planes, NSInteger w, NSInteger h, NSInteger bps, NSInteger spp, BOOL alpha, BOOL planar, NSString *cs, NSInteger bpr, NSInteger bpp)
+{
+	id r = ((id (*)(id, SEL, unsigned char **, NSInteger, NSInteger, NSInteger, NSInteger, BOOL, BOOL, NSString *, NSInteger, NSInteger))o_bmpinit)(self, _cmd, planes, w, h, bps, spp, alpha, planar, cs, bpr, bpp);
+	if (r == nil && bps == 8 && spp == 3 && !alpha && !planar && bpp == 32) {
+		if (getenv("MACHRUN_DEBUG_BMP")) fprintf(stderr, "machrun: NSBitmapImageRep %ldx%ld xRGB made as RGBA\n", (long)w, (long)h);
+		self = [NSClassFromString(@"NSBitmapImageRep") alloc];
+		r = ((id (*)(id, SEL, unsigned char **, NSInteger, NSInteger, NSInteger, NSInteger, BOOL, BOOL, NSString *, NSInteger, NSInteger))o_bmpinit)(self, _cmd, planes, w, h, 8, 4, YES, NO, cs, bpr, 32);
+	} else if (r == nil && getenv("MACHRUN_DEBUG_BMP")) fprintf(stderr, "machrun: NSBitmapImageRep %ldx%ld bps %ld spp %ld alpha %d planar %d bpp %ld: nil\n", (long)w, (long)h, (long)bps, (long)spp, (int)alpha, (int)planar, (long)bpp);
+	return r;
+}
+__attribute__((constructor)) static void
+bmpinit_init(void)
+{
+	Class k = NSClassFromString(@"NSBitmapImageRep"); Method m;
+	if (k == Nil || getenv("MACHRUN_NOBMPFIX")) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bytesPerRow:bitsPerPixel:))) != NULL) o_bmpinit = method_setImplementation(m, (IMP)w_bmpinit);
+}
+
+
+/* A bitmap of 32 bits a pixel with 3 samples and no alpha (the program writes R, G, B and a byte of zero): the back end of GNUstep reads the fourth byte as alpha and the image is invisible.  When such a representation is added
+ * to an image (the drawing is finished by then) the fourth byte of every pixel is made opaque. */
+static IMP o_addRep;
+static void
+w_addRep(id self, SEL _cmd, id rep)
+{
+	Class bc = NSClassFromString(@"NSBitmapImageRep");
+	if (bc != Nil && rep != nil && [rep isKindOfClass:bc]) {
+		NSInteger (*ni)(id, SEL) = (NSInteger (*)(id, SEL))objc_msgSend; BOOL (*bo)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend; unsigned char *(*bd)(id, SEL) = (unsigned char *(*)(id, SEL))objc_msgSend;
+		if (ni(rep, @selector(bitsPerPixel)) == 32 && ni(rep, @selector(samplesPerPixel)) == 3 && !bo(rep, @selector(hasAlpha)) && !bo(rep, @selector(isPlanar)) && bd(rep, @selector(bitmapData)) != NULL) {
+			unsigned char *p = bd(rep, @selector(bitmapData)); NSInteger rows = ni(rep, @selector(pixelsHigh)), bpr = ni(rep, @selector(bytesPerRow)), w = ni(rep, @selector(pixelsWide)), y, x;
+			for (y = 0; y < rows; y++) for (x = 0; x < w; x++) p[y * bpr + x * 4 + 3] = 0xFF;
+		}
+	}
+	((void (*)(id, SEL, id))o_addRep)(self, _cmd, rep);
+}
+__attribute__((constructor)) static void
+addrep_init(void)
+{
+	Class k = NSClassFromString(@"NSImage"); Method m;
+	if (k == Nil || getenv("MACHRUN_NOXRGBFIX")) return;
+	(void)[k class];
+	if ((m = class_getInstanceMethod(k, @selector(addRepresentation:))) != NULL) o_addRep = method_setImplementation(m, (IMP)w_addRep);
+}
+
 /* +[NSBundle bundleForClass:] of a class that a Mach-O image defines (a plug-in, a framework of the application): the bundle that holds the image, not a library of GNUstep */
 static const char *(*class_image_path)(Class);
 static IMP o_bundleForClass;
