@@ -98,7 +98,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT, KP_IOKIT };
 
 struct kmsg;
 struct kport {
@@ -2202,6 +2202,19 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 
 	if (mig_info(td, t, dest, m, id))
 		return;
+	if (dest->kind == KP_HOST && id == 205) {			/* host_get_io_main(host, *io_main): the port of IOKit (the programs that look for a display, a HID device or a GPU ask for it first) */
+		struct kport *ip = kp_new(KP_IOKIT);
+
+		mig_reply(t, m, id, 0, ip, NULL, 0, NULL, 0);
+		kp_unref(ip);
+		return;
+	}
+	if (dest->kind == KP_IOKIT) {				/* IOKit's routines (the subsystem 2800): there is no registry, every request fails (the program sees "no such device") */
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: IOKit request %d (no registry: it fails)\n", td->td_proc->p_comm, td->td_proc->p_pid, id);
+		mig_reply(t, m, id, 5 /* KERN_FAILURE */, NULL, NULL, 0, NULL, 0);
+		return;
+	}
 	if (dest->kind != KP_TASK && !(dest->kind == KP_HOST && id == 206)) {
 		mig_reply(t, m, id, 0x10000 /* MIG_BAD_ID-like */ - 303, NULL, NULL, 0, NULL, 0);
 		return;
