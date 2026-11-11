@@ -466,7 +466,7 @@ int cmain(void)
 	  for (i = 0; i < 400 && psy_state < 2; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
 	  check("  psynch_mutexdrop wakes it", psy_state == 2, psy_state); }
 	check("workq_open", S(SYS_workq_open, 0, 0, 0, 0, 0, 0) == 0, 0);
-	check("workq_kernreturn returns 0 (a thread back to the pool: what a Mac answers)", S(SYS_workq_kernreturn, 0, 0, 0, 0, 0, 0) == 0, 0);
+	check("workq_kernreturn of a process that has not registered with libpthread fails (EINVAL, as in XNU)", S(SYS_workq_kernreturn, 0, 0, 0, 0, 0, 0) != 0, 0);
 
 	/* Mach traps */
 	{ u64 task = dmach(28, 0, 0, 0, 0, 0, 0), host = dmach(29, 0, 0, 0, 0, 0, 0), rp = dmach(26, 0, 0, 0, 0, 0, 0), th = dmach(27, 0, 0, 0, 0, 0, 0);

@@ -215,22 +215,6 @@ darwin_psynch_rw_unlock(struct thread *td, struct darwin_args *uap)
 	return (0);
 }
 
-/* ---- the workqueue: not implemented (a program that uses it gets the answer of a kernel without it) ---- */
-
-static int
-darwin_workq_open(struct thread *td, struct darwin_args *uap __unused)
-{
-	td->td_retval[0] = 0;
-	return (0);
-}
-
-static int
-darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap __unused)
-{
-	td->td_retval[0] = 0;	/* what a Mac answers a thread that returns to the pool: 0 */
-	return (0);
-}
-
 /* ---- Mach traps: the return value is a kern_return_t in the result register, not an errno ---- */
 
 #define	KERN_SUCCESS		0
