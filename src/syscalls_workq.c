@@ -45,6 +45,8 @@
 #define	WQ_FLAG_THREAD_REUSE		0x00020000
 #define	WQ_FLAG_THREAD_NEWSPI		0x00040000
 #define	WQ_FLAG_THREAD_KEVENT		0x00080000
+#define	WQ_FLAG_THREAD_EVENT_MANAGER	0x00100000
+#define	PTHREAD_PRIORITY_EVENT_MANAGER	0x02000000
 #define	WQ_FLAG_THREAD_WORKLOOP		0x00400000
 #define	WQ_FLAG_THREAD_TSD_BASE_SET	0x00200000
 
@@ -116,19 +118,13 @@ darwin_wq_exit(struct proc *p)
 	mtx_unlock(&wq_mtx);
 }
 
-/* the pthread QoS class of the priority asked for -> the thread QoS tier of the kernel (1 maintenance .. 7 user interactive); 0 means the default */
+/* the thread QoS tier of a pthread_priority_t: the QoS is a one-hot field in bits 8..21 of the priority (maintenance 1, background 2, utility 3, legacy 4, default 5, user initiated 6, user interactive 7); the field is empty for "unspecified" */
 static int
 qos_of_priority(uint32_t pri)
 {
-	switch ((pri >> 8) & 0xff) {
-	case 0x05: return (1);
-	case 0x09: return (2);
-	case 0x11: return (3);
-	case 0x15: return (5);
-	case 0x19: return (6);
-	case 0x21: return (7);
-	default: return (5);
-	}
+	uint32_t v = (pri & 0x003fff00) >> 8;
+
+	return (v != 0 ? ffs((int)v) : 5);
 }
 
 /* the registers of a thread of the pool: where it starts (libpthread's start_wqthread) and what it gets */
@@ -136,7 +132,7 @@ static void
 wq_set_regs(struct thread *td, struct wqthr *t, uint64_t wqstart, uint64_t kevent_list, uint32_t flags, uint32_t nkevents, uint64_t stack_top)
 {
 	td->td_frame->tf_rdi = t->self;
-	td->td_frame->tf_rsi = (uint32_t)t->tid;
+	td->td_frame->tf_rsi = ((uint32_t)t->tid << 8) | 0x03;
 	td->td_frame->tf_rdx = t->stackaddr + PAGE_SIZE;
 	td->td_frame->tf_rcx = kevent_list;
 	td->td_frame->tf_r8 = flags;
@@ -152,6 +148,7 @@ struct wq_start {
 	struct wqthr	*t;
 	uint64_t	wqstart;
 	int		qos;
+	bool		mgr;			/* the event manager thread of libdispatch: it comes out with the KEVENT and EVENT_MANAGER flags and an empty list */
 };
 
 static int
@@ -166,13 +163,17 @@ wq_initthr(struct thread *td, void *thunk)
 	if (error != 0)
 		return (error);
 	ws->t->td = td; ws->t->tid = td->td_tid;
-	wq_set_regs(td, ws->t, ws->wqstart, 0, WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_TSD_BASE_SET | (uint32_t)ws->qos, 0, (ws->t->self - 64) & ~0xfULL);
+	if (ws->mgr)
+		wq_set_regs(td, ws->t, ws->wqstart, ws->t->self - (uint64_t)WQ_KEVENT_LIST_LEN * WQ_KEVENT_SIZE, WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_TSD_BASE_SET | WQ_FLAG_THREAD_KEVENT | WQ_FLAG_THREAD_EVENT_MANAGER | (uint32_t)ws->qos, 0,
+		    (ws->t->self - (uint64_t)WQ_KEVENT_LIST_LEN * WQ_KEVENT_SIZE - 16 - WQ_KEVENT_DATA_SIZE) & ~0xfULL);
+	else
+		wq_set_regs(td, ws->t, ws->wqstart, 0, WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_TSD_BASE_SET | (uint32_t)ws->qos, 0, (ws->t->self - 64) & ~0xfULL);
 	return (0);
 }
 
 /* makes a thread of the pool (the lock is held on entry and on return) */
 static int
-wq_spawn(struct thread *td, struct wqp *w, int qos)
+wq_spawn(struct thread *td, struct wqp *w, int qos, bool mgr)
 {
 	struct wq_start ws;
 	struct mmap_args ma;
@@ -194,7 +195,7 @@ wq_spawn(struct thread *td, struct wqp *w, int qos)
 		base = td->td_retval[0];
 		t->stackaddr = base;
 		t->self = base + PAGE_SIZE + WQ_STACK_SIZE;
-		ws.t = t; ws.wqstart = w->wqstart; ws.qos = qos;
+		ws.t = t; ws.wqstart = w->wqstart; ws.qos = qos; ws.mgr = mgr;
 		error = thread_create(td, NULL, wq_initthr, &ws);
 		if (error != 0) {
 			struct munmap_args ua = { .addr = (void *)base, .len = size };
@@ -358,8 +359,14 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		error = darwin_wq_kevent(td, -1, 0, 0, kevent_list, WQ_KEVENT_LIST_LEN, data_buf, &davail, &count);
 		if (error == 0 && count > 0) {
 			t->parked = 0;
+			if (darwin_debug >= 2) {
+				int16_t f0 = 0;
+
+				(void)copyin((void *)(kevent_list + 8), &f0, sizeof(f0));
+				printf("darwinator: %s[%d]: %d event(s) of the workqueue kqueue to a thread of the pool (first: filter %d)\n", td->td_proc->p_comm, td->td_proc->p_pid, count, f0);
+			}
 			top = (data_buf + davail) & ~0xfULL;
-			wq_set_regs(td, t, wqstart, kevent_list, base_flags, (uint32_t)count, top);
+			wq_set_regs(td, t, wqstart, kevent_list, base_flags | WQ_FLAG_THREAD_EVENT_MANAGER, (uint32_t)count, top);	/* the events of the workqueue's own kqueue are the event manager's */
 			return (EJUSTRETURN);
 		}
 		error = tsleep(t, PCATCH, "wqpark", WQ_POLL);
@@ -416,7 +423,20 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
 	case WQOPS_QUEUE_REQTHREADS:
 	case WQOPS_QUEUE_REQTHREADS2: {
 		int n = arg2 > 0 ? arg2 : 0;
-		int qos = qos_of_priority(options == WQOPS_QUEUE_REQTHREADS2 ? (uint32_t)uap->a[1] : arg3);
+		uint32_t pri = options == WQOPS_QUEUE_REQTHREADS2 ? (uint32_t)uap->a[1] : arg3;
+		int qos = qos_of_priority(pri);
+
+		if ((pri & PTHREAD_PRIORITY_EVENT_MANAGER) != 0) {	/* libdispatch asks for its event manager: one thread that comes out as such */
+			mtx_lock(&wq_mtx);
+			w = wq_get(td->td_proc, true);
+			if (w == NULL) { mtx_unlock(&wq_mtx); return (EAGAIN); }
+			w->wqstart = wqstart; w->pthsize = pthsize;
+			if (darwin_debug >= 2)
+				printf("darwinator: %s[%d]: the event manager thread is asked for\n", td->td_proc->p_comm, td->td_proc->p_pid);
+			error = wq_spawn(td, w, qos, true);
+			mtx_unlock(&wq_mtx);
+			return (error == EAGAIN ? 0 : error);
+		}
 
 		mtx_lock(&wq_mtx);
 		w = wq_get(td->td_proc, true);
@@ -433,7 +453,7 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
 					wakeup(&w->thr[i]), idle++;
 			while (w->want > 0 && w->nthreads < WQ_MAX_THREADS && w->nthreads >= idle) {
 				w->want--;				/* the new thread starts with this request */
-				error = wq_spawn(td, w, qos);
+				error = wq_spawn(td, w, qos, false);
 				if (error != 0) { w->want++; break; }
 			}
 		}
@@ -495,7 +515,7 @@ darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, b
 				if (w->thr[i].parked) parked++;
 			}
 		if (parked == 0 && w->nthreads < WQ_MAX_THREADS)
-			(void)wq_spawn(td, w, 5);
+			(void)wq_spawn(td, w, 5, false);
 	}
 	mtx_unlock(&wq_mtx);
 }
@@ -513,7 +533,7 @@ darwin_wq_note(struct thread *td)
 	w = wq_get(td->td_proc, true);
 	if (w != NULL && w->nthreads == 0) {
 		w->wqstart = wqstart; w->pthsize = pthsize;
-		(void)wq_spawn(td, w, 5);
+		(void)wq_spawn(td, w, 5, false);
 	} else if (w != NULL) {
 		int i;
 

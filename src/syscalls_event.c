@@ -104,6 +104,8 @@ struct dkev {
 struct dkev_arg {
 	char	*in, *out;		/* the user arrays, advanced as the kernel takes and gives events */
 	size_t	size;			/* 32 or 48 */
+	bool	errors_only;		/* KEVENT_FLAG_ERROR_EVENTS: the changes are receipted, and only the receipts that report an error come back */
+	int	nout;			/* the events that were really given in that mode */
 	uint64_t dout, davail;		/* kevent_qos: the buffer in which the events of Mach ports bring their messages, and what is left of it */
 };
 
@@ -166,6 +168,8 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		kevp[i].ident = d.ident;
 		kevp[i].filter = filter_from_darwin(d.filter);
 		kevp[i].flags = d.flags & 0xff;		/* EV_UDATA_SPECIFIC (0x100) has no counterpart; 0x100 here means something else */
+		if (a->errors_only)
+			kevp[i].flags |= EV_RECEIPT;
 		kevp[i].fflags = kevp[i].filter == EVFILT_TIMER ? timer_fflags_from_darwin(d.fflags) : d.fflags;
 		kevp[i].data = d.data;
 		kevp[i].udata = (void *)d.udata;
@@ -206,6 +210,8 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 	int i, error;
 
 	for (i = 0; i < count; i++) {
+		if (a->errors_only && (kevp[i].flags & EV_ERROR) != 0 && kevp[i].data == 0)
+			continue;		/* a change that went well: a Mac says nothing */
 		memset(&d, 0, sizeof(d));
 		d.ident = kevp[i].ident;
 		d.filter = filter_to_darwin(kevp[i].filter);
@@ -248,6 +254,7 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 		if (error != 0)
 			return (error);
 		a->out += a->size;
+		a->nout++;
 	}
 	return (0);
 }
@@ -342,6 +349,7 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	struct timespec zero = { 0, 0 };
 	struct dkev_arg a = { .in = (char *)uap->a[1], .out = (char *)uap->a[3], .size = 72 };
 	uint64_t davail0 = 0;
+	int nev;
 	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
 
 	if (darwin_debug >= 2) {
@@ -360,7 +368,14 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	if (uap->a[5] != 0 && uap->a[6] != 0 && copyin((void *)uap->a[6], &davail0, sizeof(davail0)) == 0) {
 		a.dout = uap->a[5]; a.davail = davail0;
 	}
-	error = kern_kevent(td, fd, (int)uap->a[2], (int)uap->a[4], &ops, (flags & 1) ? &zero : NULL);
+	/* KEVENT_FLAG_ERROR_EVENTS (2): the list only takes the errors of the changes, no events; and the events of the kqueue of the workqueue (fd -1) go to the threads of the pool only, never to a caller */
+	a.errors_only = (flags & 2) != 0;
+	nev = (!byid && (int)uap->a[0] == -1 && !a.errors_only) ? 0 : (int)uap->a[4];
+	if (a.errors_only)
+		nev = MAX(nev, (int)uap->a[2]);		/* room for a receipt of each change; the calls that bring only errors do not wait */
+	error = kern_kevent(td, fd, (int)uap->a[2], nev, &ops, (flags & 1) || a.errors_only ? &zero : NULL);
+	if (error == 0 && a.errors_only)
+		td->td_retval[0] = a.nout;
 	if (a.dout != 0 && a.davail != davail0)
 		(void)copyout(&a.davail, (void *)uap->a[6], sizeof(a.davail));
 	if (error == 0 && (byid || (int)uap->a[0] == -1) && (int)uap->a[2] > 0)

@@ -1,0 +1,9 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+current-version: 1351
+exports:
+  - targets:         [ x86_64-macos ]
+    symbols:         [ _write, _exit, dyld_stub_binder, _dispatch_get_global_queue, _dispatch_queue_create, _dispatch_async, _dispatch_semaphore_create, _dispatch_semaphore_wait, _dispatch_semaphore_signal, _dispatch_time, _dispatch_after, _dispatch_group_create, _dispatch_group_async, _dispatch_group_wait, __NSConcreteGlobalBlock, __NSConcreteStackBlock, __Block_object_assign, __Block_object_dispose ]
+...
