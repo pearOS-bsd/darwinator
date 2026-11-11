@@ -202,7 +202,6 @@ struct sysent darwin_sysent[DARWIN_NSYSCALLS] = {
 	ENTRY(74,  3, sys_mprotect,	AUE_MPROTECT),
 	ENTRY(90,  2, sys_dup2,		AUE_DUP2),
 	ENTRY(95,  1, sys_fsync,	AUE_FSYNC),
-	ENTRY(116, 2, sys_gettimeofday,	AUE_GETTIMEOFDAY),
 	ENTRY(120, 3, sys_readv,	AUE_READV),
 	ENTRY(121, 3, sys_writev,	AUE_WRITEV),
 	ENTRY(136, 2, sys_mkdir,	AUE_MKDIR),

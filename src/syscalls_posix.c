@@ -495,6 +495,13 @@ struct pth_create {
 	uint64_t	start, pthread, func, arg, stack, flags;
 };
 
+/* the name that stands for a thread in the TSD and in the locks: unique, and of the shape of a port name (generation 3 in the low byte), as the owner of an os_unfair_lock has its low bit set */
+uint32_t
+darwin_thread_kport(struct thread *td)
+{
+	return (((uint32_t)td->td_tid << 8) | 0x03);
+}
+
 static int
 pth_initthr(struct thread *td, void *thunk)
 {
@@ -509,7 +516,7 @@ pth_initthr(struct thread *td, void *thunk)
 		return (error);
 #if defined(__amd64__)
 	td->td_frame->tf_rdi = c->pthread;
-	td->td_frame->tf_rsi = td->td_tid;	/* the "kernel port" of the thread: its id */
+	td->td_frame->tf_rsi = darwin_thread_kport(td);	/* the "kernel port" of the thread: a name of the form of port names (the low bit is set: libplatform's locks name their owner with it) */
 	td->td_frame->tf_rdx = c->func;
 	td->td_frame->tf_rcx = c->arg;
 	td->td_frame->tf_r8 = c->stack;
@@ -518,7 +525,7 @@ pth_initthr(struct thread *td, void *thunk)
 	set_pcb_flags(td->td_pcb, PCB_FULL_IRET);
 	td->td_frame->tf_gs = _ugssel;
 	{
-		uint32_t kport = td->td_tid;
+		uint32_t kport = darwin_thread_kport(td);
 
 		(void)copyout(&kport, (void *)(uintptr_t)(c->pthread + 0xe0 + 3 * 8), sizeof(kport));	/* tsd[MACH_THREAD_SELF]: the port of the thread, which libpthread checks at the start */
 	}

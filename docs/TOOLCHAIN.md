@@ -13,3 +13,7 @@ and to stop depending on the files of a Mac.
 ## Objective-C (2026-11-11)
 
 `tests/macho-toolchain/objc/`: a root class with a class method, built on FreeBSD with `clang -fobjc-runtime=macosx` and `ld64.lld` against a text stub of libobjc, runs through the real dyld and the libobjc of the Mac and prints `objc: Hello answer = 42`.  So Objective-C code (the decompiled AppKit classes among it) can be compiled to Mach-O here; what is missing for them is the headers (Foundation, CoreFoundation) and the libraries to link against.
+
+## libdispatch (2026-11-11)
+
+`tests/macho-toolchain/dispatch/`: a program built on FreeBSD (clang `-fblocks`, ld64.lld) that runs on the real dyld and the libdispatch of the Mac against the kernel module: asynchronous blocks on the global queue (a thread of the workqueue), on a serial queue (a workloop with a thread request), `dispatch_after` (a timer on the kqueue of the workqueue, handed to the event manager), a group of two blocks.  It prints `dtest: all ok`.  What the module had to learn for it: the workqueue (`workq_kernreturn`: threads, parking, events on the stack, workloops with their thread requests), `EVFILT_MACHPORT`, `KEVENT_FLAG_ERROR_EVENTS`, the names of threads with the low bit set (the owner of an `os_unfair_lock`), `gettimeofday` with the Mach time as third argument.

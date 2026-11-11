@@ -715,6 +715,25 @@ darwin_sysctlbyname(struct thread *td, struct darwin_args *uap)
 
 /* ---- the entries ---- */
 
+/* gettimeofday(tv, tz, mach_absolute_time *): the third argument of Darwin's libsystem_kernel (__gettimeofday_with_mach), which mach_get_times needs: the time of the uptime clock at the moment of the call */
+static int
+darwin_gettimeofday(struct thread *td, struct darwin_args *uap)
+{
+	struct gettimeofday_args ga = { .tp = (struct timeval *)uap->a[0], .tzp = (struct timezone *)uap->a[1] };
+	int error = sys_gettimeofday(td, &ga);
+
+	if (error == 0 && uap->a[2] != 0) {
+		struct timespec ts;
+		uint64_t t;
+
+		nanouptime(&ts);
+		t = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+		error = copyout(&t, (void *)uap->a[2], sizeof(t));
+	}
+	td->td_retval[0] = 0;
+	return (error);
+}
+
 static const struct {
 	int		num, nargs;
 	sy_call_t	*fn;
@@ -722,6 +741,7 @@ static const struct {
 	const char	*name;
 } darwin_more[] = {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
+	E(116, 3, darwin_gettimeofday,	AUE_GETTIMEOFDAY,	"gettimeofday"),
 	/* processes and ids */
 	E(2,   0, sys_fork,		AUE_FORK,		"fork"),
 	E(7,   4, sys_wait4,		AUE_WAIT4,		"wait4"),
