@@ -428,6 +428,11 @@ darwin_shared_region_check_np(struct thread *td __unused, struct darwin_args *ua
  * (pthread, kport, func, arg, stack, flags) in the first six argument registers and the stack pointer at the stack given. */
 
 #include <sys/thr.h>
+#if defined(__amd64__)
+#include <machine/pcb.h>
+#include <machine/segments.h>
+#include <machine/md_var.h>
+#endif
 
 static struct mtx pth_mtx;
 MTX_SYSINIT(darwin_pth, &pth_mtx, "darwin pthread", MTX_DEF);
@@ -452,7 +457,7 @@ darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)
 	pth_reg[slot].start = uap->a[0];
 	pth_reg[slot].wqstart = uap->a[1];
 	mtx_unlock(&pth_mtx);
-	/* the features of the kernel side (PTHREAD_FEATURE_*): dispatch function, fine priorities, bsdthread_ctl, set self, QoS maintenance and default; libpthread keeps them and libdispatch asks for them at its start (a value of 0 means: not initialized).  No kevent and no workloop: the workqueue itself is not implemented */
+	/* the features of the kernel side (PTHREAD_FEATURE_*): dispatch function, fine priorities, bsdthread_ctl, set self, QoS maintenance and default; libpthread keeps them and libdispatch asks for them at its start (a value of 0 means: not initialized).  With the kevent and workloop bits: libdispatch asks for them; the workqueue itself is not implemented */
 	td->td_retval[0] = 0x400000ff;
 	return (0);
 }
@@ -479,7 +484,16 @@ pth_initthr(struct thread *td, void *thunk)
 	td->td_frame->tf_rdx = c->func;
 	td->td_frame->tf_rcx = c->arg;
 	td->td_frame->tf_r8 = c->stack;
-	td->td_frame->tf_r9 = c->flags;
+	/* the kernel sets the base of the TSD block (in the pthread, at 0xe0) and says so with PTHREAD_START_TSD_BASE_SET; libpthread stops if the flag is not there */
+	td->td_pcb->pcb_gsbase = c->pthread + 0xe0;
+	set_pcb_flags(td->td_pcb, PCB_FULL_IRET);
+	td->td_frame->tf_gs = _ugssel;
+	{
+		uint32_t kport = td->td_tid;
+
+		(void)copyout(&kport, (void *)(uintptr_t)(c->pthread + 0xe0 + 3 * 8), sizeof(kport));	/* tsd[MACH_THREAD_SELF]: the port of the thread, which libpthread checks at the start */
+	}
+	td->td_frame->tf_r9 = c->flags | 0x10000000;
 	td->td_frame->tf_rip = c->start;
 	td->td_frame->tf_rsp = c->stack;
 #else
