@@ -715,6 +715,21 @@ darwin_sysctlbyname(struct thread *td, struct darwin_args *uap)
 
 /* ---- the entries ---- */
 
+/* getaudit_addr(auditinfo_addr_t *, length) (357): the audit session of the process; LaunchServices and the window server name sessions with the id.  There is no audit session here: one id for each user (100000 + uid), no mask, no terminal. */
+static int
+darwin_getaudit_addr(struct thread *td, struct darwin_args *uap)
+{
+	uint8_t ai[48];
+
+	if (uap->a[1] < sizeof(ai))
+		return (EOVERFLOW);
+	memset(ai, 0, sizeof(ai));
+	*(uint32_t *)(ai + 0) = 0xffffffffu;						/* ai_auid: AU_DEFAUDITID */
+	*(uint32_t *)(ai + 36) = 100000 + td->td_ucred->cr_ruid;			/* ai_asid */
+	td->td_retval[0] = 0;
+	return (copyout(ai, (void *)uap->a[0], sizeof(ai)));
+}
+
 /* gettimeofday(tv, tz, mach_absolute_time *): the third argument of Darwin's libsystem_kernel (__gettimeofday_with_mach), which mach_get_times needs: the time of the uptime clock at the moment of the call */
 static int
 darwin_gettimeofday(struct thread *td, struct darwin_args *uap)
@@ -741,6 +756,7 @@ static const struct {
 	const char	*name;
 } darwin_more[] = {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
+	E(357, 2, darwin_getaudit_addr,	AUE_NULL,		"getaudit_addr"),
 	E(116, 3, darwin_gettimeofday,	AUE_GETTIMEOFDAY,	"gettimeofday"),
 	/* processes and ids */
 	E(2,   0, sys_fork,		AUE_FORK,		"fork"),
