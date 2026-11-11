@@ -171,6 +171,15 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		kevp[i].udata = (void *)d.udata;
 		kevp[i].ext[0] = d.ext[0];
 		kevp[i].ext[1] = d.ext[1];
+		if (d.filter == -17 && (d.fflags & 0x1) != 0)			/* NOTE_WL_THREAD_REQUEST: a thread for the workloop (or back with EV_DELETE) */
+			darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0);
+		if (d.filter == -17) {			/* EVFILT_WORKLOOP: the requests on a workloop (thread request, ownership) mean nothing here; a disabled EVFILT_USER takes their place, so that adds and deletes balance */
+			kevp[i].filter = EVFILT_USER;
+			kevp[i].ident = d.ident ^ 0x5700000000000000ULL;
+			kevp[i].flags = (d.flags & (EV_ADD | EV_DELETE)) | EV_DISABLE;
+			kevp[i].fflags = 0;
+			kevp[i].data = 0;
+		}
 		if (d.filter == -8) {			/* EVFILT_MACHPORT: the port, found now, goes with the change; the options of the receive in ext[3] */
 			kevp[i].ext[3] = d.fflags;
 			kevp[i].fflags = 0;
@@ -335,13 +344,14 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	uint64_t davail0 = 0;
 	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
 
-	if ((int)uap->a[2] > 0) {		/* EVFILT_WORKLOOP (-17) changes make or configure the workloop itself: there is no kernel workqueue here, so they succeed without events */
-		int16_t filt;
+	if (darwin_debug >= 2) {
+		int16_t f0 = 0, fl0 = 0;
 
-		if (copyin(a.in + 8, &filt, sizeof(filt)) == 0 && filt == -17) {
-			td->td_retval[0] = 0;
-			return (0);
+		if ((int)uap->a[2] > 0) {
+			(void)copyin(a.in + 8, &f0, sizeof(f0));
+			(void)copyin(a.in + 10, &fl0, sizeof(fl0));
 		}
+		printf("darwinator: %s[%d]: kevent_%s(%#lx, nchanges %d, nevents %d, flags %#x): first change filter %d flags %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", (u_long)uap->a[0], (int)uap->a[2], (int)uap->a[4], flags, f0, fl0);
 	}
 	if (byid || fd == -1) {
 		if ((error = kq_for(td, byid ? (int64_t)uap->a[0] : -1, &fd)) != 0)
@@ -353,9 +363,44 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	error = kern_kevent(td, fd, (int)uap->a[2], (int)uap->a[4], &ops, (flags & 1) ? &zero : NULL);
 	if (a.dout != 0 && a.davail != davail0)
 		(void)copyout(&a.davail, (void *)uap->a[6], sizeof(a.davail));
+	if (error == 0 && (byid || (int)uap->a[0] == -1) && (int)uap->a[2] > 0)
+		darwin_wq_note(td);		/* sources were added to the kqueue of the workqueue: a thread of the pool has to look at it */
 	if (error != 0 && darwin_debug >= 1)
 		printf("darwinator: %s[%d]: kevent_%s(%d, nchanges %d, nevents %d, flags %#x) failed: %d\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", fd, (int)uap->a[2], (int)uap->a[4], flags, error);
 	return (error);
+}
+
+/* the events of the kqueue of the workqueue for a thread of the pool: its changes (kevent list) are applied, up to nout events come back in the memory at out (on the stack of the thread), the messages of the Mach ports in the buffer at dout */
+int
+darwin_wq_kevent(struct thread *td, int64_t kqid, uint64_t in, int nin, uint64_t out, int nout, uint64_t dout, uint64_t *davail, int *count)
+{
+	struct timespec zero = { 0, 0 };
+	struct dkev_arg a = { .in = (char *)in, .out = (char *)out, .size = 72, .dout = dout, .davail = *davail };
+	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
+	int fd, error;
+
+	*count = 0;
+	if ((error = kq_for(td, kqid, &fd)) != 0)
+		return (error);
+	error = kern_kevent(td, fd, nin, nout, &ops, &zero);
+	if (error == 0)
+		*count = td->td_retval[0];
+	*davail = a.davail;
+	return (error);
+}
+
+/* the ids of the workloops (kqueues made with kevent_id) of the process, for the threads of the pool that look for events */
+int
+darwin_wq_kq_ids(struct proc *p, int64_t *ids, int max)
+{
+	int i, n = 0;
+
+	mtx_lock(&kq_mtx);
+	for (i = 0; i < (int)nitems(kq_tab) && n < max; i++)
+		if (kq_tab[i].p == p && kq_tab[i].pid == p->p_pid && kq_tab[i].id != -1)
+			ids[n++] = kq_tab[i].id;
+	mtx_unlock(&kq_mtx);
+	return (n);
 }
 
 static int darwin_kevent_qos(struct thread *td, struct darwin_args *uap) { return (darwin_kevent_qos_common(td, uap, false)); }

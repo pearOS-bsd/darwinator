@@ -28,6 +28,8 @@
 #include <sys/mman.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/signalvar.h>
 #include <sys/queue.h>
 #include <sys/sx.h>
 #include <sys/taskqueue.h>
@@ -2396,6 +2398,20 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 	struct ktask *t;
 	int i;
 
+	if (darwin_debug >= 1 && p->p_sysent == &darwin_sysvec && (p->p_xsig == SIGILL || p->p_xsig == SIGSEGV || p->p_xsig == SIGBUS || p->p_xsig == SIGABRT || p->p_xsig == SIGTRAP)) {
+		struct thread *tdp = curthread;
+
+		/* a Darwin process that dies of a signal of a fault: where (the thread that exits is the one that took it) */
+		uint64_t w[40];
+		int wi;
+
+		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax);
+		if (copyin((void *)(uintptr_t)tdp->td_frame->tf_rsp, w, sizeof(w)) == 0)
+			for (wi = 0; wi < 40; wi++)
+				if (w[wi] >= 0x7ff800000000ULL && w[wi] < 0x7fff00000000ULL)
+					printf("darwinator:   stack[%d] = %#lx\n", wi, (u_long)w[wi]);
+	}
+
 	sx_xlock(&km_sx);
 	if ((t = kt_get(p, false)) != NULL) {
 		for (i = 0; i < KE_N; i++)
@@ -2411,6 +2427,7 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 	}
 	sx_xunlock(&km_sx);
 	darwin_kq_exit(p);
+	darwin_wq_exit(p);
 	darwin_pth_exit(p);
 }
 

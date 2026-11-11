@@ -27,6 +27,14 @@ struct darwin_args {
 extern int darwin_debug;
 struct proc;
 void darwin_kq_exit(struct proc *p);
+void darwin_wq_exit(struct proc *p);
+int darwin_workq_open(struct thread *, struct darwin_args *);
+int darwin_workq_kernreturn(struct thread *, struct darwin_args *);
+int darwin_pth_info(struct proc *p, uint64_t *wqstart, uint64_t *pthsize);
+int darwin_wq_kq_ids(struct proc *p, int64_t *ids, int max);
+int darwin_wq_kevent(struct thread *td, int64_t kqid, uint64_t in, int nin, uint64_t out, int nout, uint64_t dout, uint64_t *davail, int *count);
+void darwin_wq_note(struct thread *td);
+void darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, bool add);
 void darwin_pth_exit(struct proc *p);
 struct thread;
 void *darwin_mach_port_for_event(struct thread *td, uint32_t name);

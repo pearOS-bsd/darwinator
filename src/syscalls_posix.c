@@ -436,7 +436,7 @@ darwin_shared_region_check_np(struct thread *td __unused, struct darwin_args *ua
 
 static struct mtx pth_mtx;
 MTX_SYSINIT(darwin_pth, &pth_mtx, "darwin pthread", MTX_DEF);
-static struct { struct proc *p; pid_t pid; uint64_t start, wqstart; } pth_reg[64];
+static struct { struct proc *p; pid_t pid; uint64_t start, wqstart, pthsize; } pth_reg[64];
 
 static int
 darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)
@@ -456,10 +456,26 @@ darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)
 	pth_reg[slot].pid = p->p_pid;
 	pth_reg[slot].start = uap->a[0];
 	pth_reg[slot].wqstart = uap->a[1];
+	pth_reg[slot].pthsize = uap->a[2];
 	mtx_unlock(&pth_mtx);
-	/* the features of the kernel side (PTHREAD_FEATURE_*): dispatch function, fine priorities, bsdthread_ctl, set self, QoS maintenance and default; libpthread keeps them and libdispatch asks for them at its start (a value of 0 means: not initialized).  With the kevent and workloop bits: libdispatch asks for them; the workqueue itself is not implemented */
+	/* the features of the kernel side (PTHREAD_FEATURE_*): dispatch function, fine priorities, bsdthread_ctl, set self, QoS maintenance and default; libpthread keeps them and libdispatch asks for them at its start (a value of 0 means: not initialized).  With the kevent bit (libdispatch needs one of kevent and workloop; without workloops it needs no workloop support); the workqueue is in syscalls_workq.c */
 	td->td_retval[0] = 0x400000ff;
 	return (0);
+}
+
+/* what libpthread registered: the entry of the threads of the workqueue and the size of its thread structure */
+int
+darwin_pth_info(struct proc *p, uint64_t *wqstart, uint64_t *pthsize)
+{
+	int i, found = 0;
+
+	mtx_lock(&pth_mtx);
+	for (i = 0; i < (int)nitems(pth_reg); i++)
+		if (pth_reg[i].p == p && pth_reg[i].pid == p->p_pid && pth_reg[i].wqstart != 0) {
+			*wqstart = pth_reg[i].wqstart; *pthsize = pth_reg[i].pthsize; found = 1;
+		}
+	mtx_unlock(&pth_mtx);
+	return (found);
 }
 
 /* the process is gone: its registration of libpthread is forgotten */

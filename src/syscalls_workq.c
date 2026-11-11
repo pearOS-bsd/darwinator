@@ -1,0 +1,525 @@
+/*
+ * The workqueue of libpthread: the kernel side that libdispatch's global queues stand on (workq_open, workq_kernreturn).  Modelled on the pthread workqueue of XNU (bsd/pthread/pthread_workqueue.c
+ * and libpthread/kern/kern_support.c, Apple open source), much smaller: a process asks for threads (WQOPS_QUEUE_REQTHREADS) and the kernel makes them, each with its own stack and pthread
+ * structure, and starts them at the entry that libpthread registered (start_wqthread) with (pthread, kport, stack bottom, kevent list, flags, count of kevents).  A thread that has no more
+ * work calls workq_kernreturn again (WQOPS_THREAD_RETURN and the kevent variants): it parks in the kernel, and is restarted at the same entry when there is more to do: threads asked for, or
+ * events on the kqueue of the workqueue (kevent_qos with fd -1: libdispatch's sources, Mach ports among them), which are handed out in the kevent list on the stack of the thread.  An idle
+ * thread ends after a few seconds.  No workloops, no cooperative pool, no QoS accounting: one pool, the threads asked for and one poller for the events.
+ */
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/errno.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mman.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/syscallsubr.h>
+#include <sys/sysent.h>
+#include <sys/sysproto.h>
+#include <sys/thr.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
+#include <machine/frame.h>
+#include <machine/pcb.h>
+#include <machine/md_var.h>
+#include <machine/segments.h>
+#include <bsm/audit_kevents.h>
+
+#include "darwinator.h"
+
+#define	WQOPS_THREAD_RETURN		0x004
+#define	WQOPS_QUEUE_NEWSPISUPP		0x010
+#define	WQOPS_QUEUE_REQTHREADS		0x020
+#define	WQOPS_QUEUE_REQTHREADS2		0x030
+#define	WQOPS_THREAD_KEVENT_RETURN	0x040
+#define	WQOPS_SET_EVENT_MANAGER_PRIORITY	0x080
+#define	WQOPS_THREAD_WORKLOOP_RETURN	0x100
+#define	WQOPS_SHOULD_NARROW		0x200
+#define	WQOPS_SETUP_DISPATCH		0x400
+
+#define	WQ_FLAG_THREAD_PRIO_QOS		0x00004000
+#define	WQ_FLAG_THREAD_REUSE		0x00020000
+#define	WQ_FLAG_THREAD_NEWSPI		0x00040000
+#define	WQ_FLAG_THREAD_KEVENT		0x00080000
+#define	WQ_FLAG_THREAD_WORKLOOP		0x00400000
+#define	WQ_FLAG_THREAD_TSD_BASE_SET	0x00200000
+
+#define	WQ_STACK_SIZE		(512 * 1024)		/* PTH_DEFAULT_STACKSIZE */
+#define	WQ_KEVENT_LIST_LEN	16
+#define	WQ_KEVENT_SIZE		72			/* sizeof(struct kevent_qos_s) */
+#define	WQ_KEVENT_DATA_SIZE	(32 * 1024)
+#define	WQ_MAX_THREADS		32
+#define	WQ_IDLE_LIFE		(5 * hz)
+#define	WQ_POLL			MAX(1, hz / 500)	/* 2 ms: how often a parked thread looks at its kqueue */
+#define	TSD_OFFSET		0xe0			/* the TSD block in the pthread structure */
+
+struct wqthr {
+	struct thread	*td;
+	lwpid_t		tid;
+	uint64_t	stackaddr, self;
+	int		used;
+	int		prio;			/* the QoS (thread QoS tier) of the work that it was asked for */
+	int64_t		bound;			/* the workloop that this thread is working for (0: none) */
+	int		parked;			/* in wq_park, looking for work */
+};
+
+struct wqp {
+	struct proc	*p;
+	pid_t		pid;
+	uint64_t	wqstart, pthsize;
+	int		want;			/* threads asked for and not started yet */
+	int		wantqos;
+	int		nthreads;
+	struct { int64_t id; lwpid_t tid; } wl[16];		/* the workloops that a thread works for now: one thread at a time for each */
+	struct { int64_t id; uint64_t udata; uint32_t qos; } req[16];	/* thread requests of workloops (libdispatch wakes a serial queue with one) */
+	struct wqthr	thr[WQ_MAX_THREADS];
+};
+
+static struct wqp wqs[16];
+static struct mtx wq_mtx;
+MTX_SYSINIT(darwin_wq, &wq_mtx, "darwin workqueue", MTX_DEF);
+
+static MALLOC_DEFINE(M_DARWIN_WQ, "darwin_wq", "darwinator workqueue");
+
+static struct wqp *
+wq_get(struct proc *p, bool create)
+{
+	int i, freei = -1;
+
+	for (i = 0; i < (int)nitems(wqs); i++) {
+		if (wqs[i].p == p && wqs[i].pid == p->p_pid)
+			return (&wqs[i]);
+		if (wqs[i].p == NULL && freei < 0)
+			freei = i;
+	}
+	if (!create || freei < 0)
+		return (NULL);
+	memset(&wqs[freei], 0, sizeof(wqs[freei]));
+	wqs[freei].p = p; wqs[freei].pid = p->p_pid;
+	return (&wqs[freei]);
+}
+
+void
+darwin_wq_exit(struct proc *p)
+{
+	mtx_lock(&wq_mtx);
+	{
+		struct wqp *w = wq_get(p, false);
+
+		if (w != NULL)
+			memset(w, 0, sizeof(*w));
+	}
+	mtx_unlock(&wq_mtx);
+}
+
+/* the pthread QoS class of the priority asked for -> the thread QoS tier of the kernel (1 maintenance .. 7 user interactive); 0 means the default */
+static int
+qos_of_priority(uint32_t pri)
+{
+	switch ((pri >> 8) & 0xff) {
+	case 0x05: return (1);
+	case 0x09: return (2);
+	case 0x11: return (3);
+	case 0x15: return (5);
+	case 0x19: return (6);
+	case 0x21: return (7);
+	default: return (5);
+	}
+}
+
+/* the registers of a thread of the pool: where it starts (libpthread's start_wqthread) and what it gets */
+static void
+wq_set_regs(struct thread *td, struct wqthr *t, uint64_t wqstart, uint64_t kevent_list, uint32_t flags, uint32_t nkevents, uint64_t stack_top)
+{
+	td->td_frame->tf_rdi = t->self;
+	td->td_frame->tf_rsi = (uint32_t)t->tid;
+	td->td_frame->tf_rdx = t->stackaddr + PAGE_SIZE;
+	td->td_frame->tf_rcx = kevent_list;
+	td->td_frame->tf_r8 = flags;
+	td->td_frame->tf_r9 = nkevents;
+	td->td_frame->tf_rip = wqstart;
+	td->td_frame->tf_rsp = stack_top;
+	td->td_pcb->pcb_gsbase = t->self + TSD_OFFSET;
+	set_pcb_flags(td->td_pcb, PCB_FULL_IRET);
+	td->td_frame->tf_gs = _ugssel;
+}
+
+struct wq_start {
+	struct wqthr	*t;
+	uint64_t	wqstart;
+	int		qos;
+};
+
+static int
+wq_initthr(struct thread *td, void *thunk)
+{
+	struct wq_start *ws = thunk;
+	int error;
+	stack_t st;
+
+	st.ss_sp = (void *)(uintptr_t)(ws->t->self - 16); st.ss_size = 16;
+	error = cpu_set_upcall(td, (void (*)(void *))(uintptr_t)ws->wqstart, NULL, &st);
+	if (error != 0)
+		return (error);
+	ws->t->td = td; ws->t->tid = td->td_tid;
+	wq_set_regs(td, ws->t, ws->wqstart, 0, WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_TSD_BASE_SET | (uint32_t)ws->qos, 0, (ws->t->self - 64) & ~0xfULL);
+	return (0);
+}
+
+/* makes a thread of the pool (the lock is held on entry and on return) */
+static int
+wq_spawn(struct thread *td, struct wqp *w, int qos)
+{
+	struct wq_start ws;
+	struct mmap_args ma;
+	struct wqthr *t = NULL;
+	uint64_t size, base;
+	int i, error;
+
+	for (i = 0; i < WQ_MAX_THREADS; i++)
+		if (!w->thr[i].used) { t = &w->thr[i]; break; }
+	if (t == NULL)
+		return (EAGAIN);
+	t->used = 1;
+	w->nthreads++;
+	mtx_unlock(&wq_mtx);
+	size = round_page(PAGE_SIZE + WQ_STACK_SIZE + w->pthsize);
+	ma = (struct mmap_args){ .addr = NULL, .len = size, .prot = PROT_READ | PROT_WRITE, .flags = MAP_ANON | MAP_PRIVATE, .fd = -1, .pos = 0 };
+	error = sys_mmap(td, &ma);
+	if (error == 0) {
+		base = td->td_retval[0];
+		t->stackaddr = base;
+		t->self = base + PAGE_SIZE + WQ_STACK_SIZE;
+		ws.t = t; ws.wqstart = w->wqstart; ws.qos = qos;
+		error = thread_create(td, NULL, wq_initthr, &ws);
+		if (error != 0) {
+			struct munmap_args ua = { .addr = (void *)base, .len = size };
+
+			(void)sys_munmap(td, &ua);
+		}
+	}
+	mtx_lock(&wq_mtx);
+	if (error != 0) {
+		t->used = 0;
+		w->nthreads--;
+	}
+	return (error);
+}
+
+static struct wqthr *
+wq_self(struct wqp *w, struct thread *td)
+{
+	int i;
+
+	for (i = 0; i < WQ_MAX_THREADS; i++)
+		if (w->thr[i].used && w->thr[i].tid == td->td_tid)
+			return (&w->thr[i]);
+	return (NULL);
+}
+
+static bool
+wl_busy(struct wqp *w, int64_t id)
+{
+	int i;
+
+	for (i = 0; i < 16; i++)
+		if (w->wl[i].id == id && w->wl[i].tid != 0)
+			return (true);
+	return (false);
+}
+
+static bool
+wl_claim(struct wqp *w, int64_t id, lwpid_t tid)
+{
+	int i, freei = -1;
+
+	for (i = 0; i < 16; i++) {
+		if (w->wl[i].id == id) { if (w->wl[i].tid != 0) return (false); w->wl[i].tid = tid; return (true); }
+		if (w->wl[i].id == 0 && freei < 0) freei = i;
+	}
+	if (freei < 0)
+		return (false);
+	w->wl[freei].id = id; w->wl[freei].tid = tid;
+	return (true);
+}
+
+static void
+wl_release(struct wqp *w, int64_t id)
+{
+	int i;
+
+	for (i = 0; i < 16; i++)
+		if (w->wl[i].id == id)
+			w->wl[i].tid = 0;
+}
+
+/* the thread of the pool that comes back: it parks until there is work, and then starts again at the entry (the lock is not held) */
+static int
+wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int nevents, bool kevent_return)
+{
+	uint64_t kevent_list, data_buf, davail, top;
+	int64_t ids[16], first_kq;
+	int count, error, idle = 0, n, k;
+	uint64_t wqstart;
+	const uint32_t base_flags = WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_REUSE | WQ_FLAG_THREAD_TSD_BASE_SET | WQ_FLAG_THREAD_KEVENT | 5;
+
+	kevent_list = t->self - (uint64_t)WQ_KEVENT_LIST_LEN * WQ_KEVENT_SIZE;
+	data_buf = kevent_list - 16 - WQ_KEVENT_DATA_SIZE;		/* 8 bytes before the kevent list: the id of the workloop */
+	wqstart = w->wqstart;
+	/* the changes that the thread brings go to the kqueue that it worked for (its workloop, or the one of the workqueue) */
+	first_kq = t->bound != 0 ? t->bound : -1;
+	if (kevent_return) {
+		davail = WQ_KEVENT_DATA_SIZE; count = 0;
+		error = darwin_wq_kevent(td, first_kq, item, nevents, kevent_list, 0, data_buf, &davail, &count);
+		if (darwin_debug >= 2)
+			printf("darwinator: %s[%d]: the changes of the thread (%d) for the kqueue %ld: error %d\n", td->td_proc->p_comm, td->td_proc->p_pid, nevents, (long)first_kq, error);
+	}
+	if (t->bound != 0) {
+		mtx_lock(&wq_mtx);
+		wl_release(w, t->bound);
+		mtx_unlock(&wq_mtx);
+		t->bound = 0;
+	}
+	t->parked = 1;
+	for (;;) {
+		/* work that was asked for */
+		mtx_lock(&wq_mtx);
+		if (w->want > 0) {
+			int qos = w->wantqos;
+
+			w->want--;
+			t->parked = 0;
+			mtx_unlock(&wq_mtx);
+			wq_set_regs(td, t, wqstart, 0, (base_flags & ~WQ_FLAG_THREAD_KEVENT & ~0xfu) | (uint32_t)qos, 0, (t->self - 64) & ~0xfULL);
+			return (EJUSTRETURN);
+		}
+		/* a thread request of a workloop that nobody serves */
+		for (k = 0; k < 16; k++) {
+			if (w->req[k].id != 0 && !wl_busy(w, w->req[k].id) && wl_claim(w, w->req[k].id, td->td_tid)) {
+				int64_t rid = w->req[k].id;
+				uint64_t udata = w->req[k].udata, kqid = (uint64_t)rid;
+				uint32_t rqos = w->req[k].qos;
+				uint8_t ev[WQ_KEVENT_SIZE];
+
+				w->req[k].id = 0;
+				t->parked = 0;
+				if (darwin_debug >= 2)
+					printf("darwinator: %s[%d]: a thread serves the request of the workloop %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)rid);
+				mtx_unlock(&wq_mtx);
+				memset(ev, 0, sizeof(ev));
+				memcpy(ev, &kqid, 8);					/* ident: the workloop */
+				{ int16_t flt = -17; uint16_t fl = 0x0005; memcpy(ev + 8, &flt, 2); memcpy(ev + 10, &fl, 2); }
+				memcpy(ev + 12, &rqos, 4);
+				memcpy(ev + 16, &udata, 8);
+				{ uint32_t ff = 0x1; memcpy(ev + 24, &ff, 4); }			/* NOTE_WL_THREAD_REQUEST */
+				(void)copyout(ev, (void *)kevent_list, sizeof(ev));
+				(void)copyout(&kqid, (void *)(kevent_list - 8), sizeof(kqid));
+				davail = WQ_KEVENT_DATA_SIZE; count = 0;
+				error = darwin_wq_kevent(td, rid, 0, 0, kevent_list + WQ_KEVENT_SIZE, WQ_KEVENT_LIST_LEN - 1, data_buf, &davail, &count);
+				t->bound = rid;
+				top = (data_buf + davail) & ~0xfULL;
+				wq_set_regs(td, t, wqstart, kevent_list, base_flags | WQ_FLAG_THREAD_WORKLOOP, (uint32_t)(count + 1), top);
+				return (EJUSTRETURN);
+			}
+		}
+		mtx_unlock(&wq_mtx);
+		/* events of the workloops: the thread works for the first that has some (and nobody else works for) */
+		n = darwin_wq_kq_ids(td->td_proc, ids, 16);
+		for (k = 0; k < n; k++) {
+			bool got;
+
+			mtx_lock(&wq_mtx);
+			got = !wl_busy(w, ids[k]) && wl_claim(w, ids[k], td->td_tid);
+			mtx_unlock(&wq_mtx);
+			if (!got)
+				continue;
+			davail = WQ_KEVENT_DATA_SIZE; count = 0;
+			error = darwin_wq_kevent(td, ids[k], 0, 0, kevent_list, WQ_KEVENT_LIST_LEN, data_buf, &davail, &count);
+			if (error == 0 && count > 0) {
+				uint64_t kqid = (uint64_t)ids[k];
+				t->parked = 0;
+
+				(void)copyout(&kqid, (void *)(kevent_list - 8), sizeof(kqid));
+				t->bound = ids[k];
+				top = (data_buf + davail) & ~0xfULL;
+				wq_set_regs(td, t, wqstart, kevent_list, base_flags | WQ_FLAG_THREAD_WORKLOOP, (uint32_t)count, top);
+				return (EJUSTRETURN);
+			}
+			mtx_lock(&wq_mtx);
+			wl_release(w, ids[k]);
+			mtx_unlock(&wq_mtx);
+		}
+		/* events of the kqueue of the workqueue */
+		davail = WQ_KEVENT_DATA_SIZE; count = 0;
+		error = darwin_wq_kevent(td, -1, 0, 0, kevent_list, WQ_KEVENT_LIST_LEN, data_buf, &davail, &count);
+		if (error == 0 && count > 0) {
+			t->parked = 0;
+			top = (data_buf + davail) & ~0xfULL;
+			wq_set_regs(td, t, wqstart, kevent_list, base_flags, (uint32_t)count, top);
+			return (EJUSTRETURN);
+		}
+		error = tsleep(t, PCATCH, "wqpark", WQ_POLL);
+		if (error != 0 && error != EWOULDBLOCK)
+			break;
+		idle += WQ_POLL;
+		if (idle > WQ_IDLE_LIFE && w->nthreads > 2) {		/* idle for long: the thread ends, and takes its stack with it (two threads stay to look at the kqueues) */
+			struct munmap_args ua;
+
+			mtx_lock(&wq_mtx);
+			t->used = 0; w->nthreads--;
+			mtx_unlock(&wq_mtx);
+			ua.addr = (void *)t->stackaddr; ua.len = round_page(PAGE_SIZE + WQ_STACK_SIZE + w->pthsize);
+			(void)sys_munmap(td, &ua);
+			if (kern_thr_exit(td) == 0) {
+				struct exit_args ea = { .rval = 0 };
+
+				return (sys_exit(td, &ea));
+			}
+			return (0);
+		}
+	}
+	return (error == ERESTART ? EINTR : error);
+}
+
+int
+darwin_workq_open(struct thread *td, struct darwin_args *uap __unused)
+{
+	td->td_retval[0] = 0;
+	return (0);
+}
+
+int
+darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
+{
+	struct wqp *w;
+	uint64_t wqstart, pthsize;
+	int options = (int)uap->a[0], arg2 = (int)uap->a[2], error = 0;
+	uint32_t arg3 = (uint32_t)uap->a[3];
+
+	td->td_retval[0] = 0;
+	if (darwin_debug >= 2)
+		printf("darwinator: %s[%d]: workq_kernreturn(options %#x, item %#lx, arg2 %d, arg3 %#x)\n", td->td_proc->p_comm, td->td_proc->p_pid, options, (u_long)uap->a[1], arg2, arg3);
+	if (!darwin_pth_info(td->td_proc, &wqstart, &pthsize))
+		return (EINVAL);
+	switch (options) {
+	case WQOPS_QUEUE_NEWSPISUPP:
+	case WQOPS_SET_EVENT_MANAGER_PRIORITY:
+	case WQOPS_SETUP_DISPATCH:
+		return (0);
+	case WQOPS_SHOULD_NARROW:
+		td->td_retval[0] = 0;
+		return (0);
+	case WQOPS_QUEUE_REQTHREADS:
+	case WQOPS_QUEUE_REQTHREADS2: {
+		int n = arg2 > 0 ? arg2 : 0;
+		int qos = qos_of_priority(options == WQOPS_QUEUE_REQTHREADS2 ? (uint32_t)uap->a[1] : arg3);
+
+		mtx_lock(&wq_mtx);
+		w = wq_get(td->td_proc, true);
+		if (w == NULL) { mtx_unlock(&wq_mtx); return (EAGAIN); }
+		w->wqstart = wqstart; w->pthsize = pthsize;
+		w->want += n; w->wantqos = qos;
+		if (w->want > WQ_MAX_THREADS)
+			w->want = WQ_MAX_THREADS;
+		{
+			int i, idle = 0;
+
+			for (i = 0; i < WQ_MAX_THREADS; i++)		/* wake the parked threads first: they take the work */
+				if (w->thr[i].used && w->thr[i].td != NULL)
+					wakeup(&w->thr[i]), idle++;
+			while (w->want > 0 && w->nthreads < WQ_MAX_THREADS && w->nthreads >= idle) {
+				w->want--;				/* the new thread starts with this request */
+				error = wq_spawn(td, w, qos);
+				if (error != 0) { w->want++; break; }
+			}
+		}
+		mtx_unlock(&wq_mtx);
+		return (error == EAGAIN ? 0 : error);
+	}
+	case WQOPS_THREAD_RETURN:
+	case WQOPS_THREAD_KEVENT_RETURN:
+	case WQOPS_THREAD_WORKLOOP_RETURN: {
+		struct wqthr *t;
+
+		mtx_lock(&wq_mtx);
+		w = wq_get(td->td_proc, false);
+		t = w != NULL ? wq_self(w, td) : NULL;
+		mtx_unlock(&wq_mtx);
+		if (t == NULL)
+			return (EINVAL);
+		return (wq_park(td, w, t, uap->a[1], arg2, options != WQOPS_THREAD_RETURN));
+	}
+	default:
+		return (EINVAL);
+	}
+}
+
+
+/*
+ * EVFILT_WORKLOOP with NOTE_WL_THREAD_REQUEST: libdispatch asks the kernel for a thread to run the serial queue that is a workloop (the change is made in kevent_id; with EV_DELETE the request is
+ * taken back).  The request stays until a thread of the pool takes it: it is then handed out as the first event of the list (the same change, as XNU does), with the other events of the
+ * workloop after it.  The check of the queue state (ext[0..2]) that XNU makes is not made: a thread may come for a queue that has no more work, which dispatch accepts.
+ */
+void
+darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, bool add)
+{
+	struct wqp *w;
+	uint64_t wqstart, pthsize;
+	int i, freei = -1, parked = 0;
+
+	if (darwin_debug >= 2)
+		printf("darwinator: %s[%d]: thread request for the workloop %#lx: %s\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)id, add ? "add" : "delete");
+	if (!darwin_pth_info(td->td_proc, &wqstart, &pthsize))
+		return;
+	mtx_lock(&wq_mtx);
+	w = wq_get(td->td_proc, true);
+	if (w == NULL) { mtx_unlock(&wq_mtx); return; }
+	w->wqstart = wqstart; w->pthsize = pthsize;
+	for (i = 0; i < 16; i++) {
+		if (w->req[i].id == id) {
+			if (add) { w->req[i].udata = udata; w->req[i].qos = qos; } else w->req[i].id = 0;
+			freei = -2;
+			break;
+		}
+		if (w->req[i].id == 0 && freei == -1) freei = i;
+	}
+	if (add && freei >= 0) { w->req[freei].id = id; w->req[freei].udata = udata; w->req[freei].qos = qos; }
+	if (add) {
+		for (i = 0; i < WQ_MAX_THREADS; i++)
+			if (w->thr[i].used && w->thr[i].td != NULL) {
+				wakeup(&w->thr[i]);
+				if (w->thr[i].parked) parked++;
+			}
+		if (parked == 0 && w->nthreads < WQ_MAX_THREADS)
+			(void)wq_spawn(td, w, 5);
+	}
+	mtx_unlock(&wq_mtx);
+}
+
+/* a change in the kqueue of the workqueue: make sure that one thread of the pool looks at it (the events of the sources of libdispatch are handed out only to a thread of the pool) */
+void
+darwin_wq_note(struct thread *td)
+{
+	struct wqp *w;
+	uint64_t wqstart, pthsize;
+
+	if (!darwin_pth_info(td->td_proc, &wqstart, &pthsize))
+		return;
+	mtx_lock(&wq_mtx);
+	w = wq_get(td->td_proc, true);
+	if (w != NULL && w->nthreads == 0) {
+		w->wqstart = wqstart; w->pthsize = pthsize;
+		(void)wq_spawn(td, w, 5);
+	} else if (w != NULL) {
+		int i;
+
+		for (i = 0; i < WQ_MAX_THREADS; i++)
+			if (w->thr[i].used && w->thr[i].td != NULL)
+				wakeup(&w->thr[i]);
+	}
+	mtx_unlock(&wq_mtx);
+}
