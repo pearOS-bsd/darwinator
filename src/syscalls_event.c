@@ -185,7 +185,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		kevp[i].udata = (void *)d.udata;
 		kevp[i].ext[0] = d.ext[0];
 		kevp[i].ext[1] = d.ext[1];
-		if (d.filter == -17 && (d.fflags & 0x1) != 0)			/* NOTE_WL_THREAD_REQUEST: a thread for the workloop (or back with EV_DELETE) */
+		if (d.filter == -17 && (d.fflags & 0x1) != 0 && ((d.flags & EV_DELETE) != 0 || (d.flags & EV_DISABLE) == 0))			/* NOTE_WL_THREAD_REQUEST: a thread for the workloop (or back with EV_DELETE); with EV_DISABLE (and NOTE_WL_UPDATE_QOS) it is only an update of the QoS of a request that exists */
 			darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0);
 		if (d.filter == -17) {			/* EVFILT_WORKLOOP: the requests on a workloop (thread request, ownership) mean nothing here; a disabled EVFILT_USER takes their place, so that adds and deletes balance */
 			kevp[i].filter = EVFILT_USER;
