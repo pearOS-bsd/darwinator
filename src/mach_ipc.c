@@ -2047,7 +2047,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 	case 3410:				/* task_set_special_port(task, which, port): the request carries the right */
 		which = m->size >= 52 ? rd32(d, 48) : 99;
 		if (m->ncarry != 1 || which < 1 || which > 7) { mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0); break; }
-		if (which == 4 && m->carry[0].port->kind == KP_PORT && td->td_ucred->cr_uid == 0 && (boot_global == NULL || boot_global->dead)) {
+		if (which == 4 && m->carry[0].port != NULL && m->carry[0].port->kind == KP_PORT && td->td_ucred->cr_uid == 0 && (boot_global == NULL || boot_global->dead)) {
 			if (boot_global != NULL) kp_unref(boot_global);
 			boot_global = m->carry[0].port; boot_global->refs++;
 			launchd_pid = td->td_proc->p_pid;
@@ -2063,7 +2063,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			uint32_t variant = m->size >= 60 ? rd32(m->data, 52) : 0;
 
 			if (e == NULL) { mig_reply(t, m, id, KERN_INVALID_NAME, NULL, NULL, 0, NULL, 0); break; }
-			if (variant == 70 && m->ncarry == 1 && e->port->ns_port == NULL && !e->port->dead) {
+			if (variant == 70 && m->ncarry == 1 && m->carry[0].port != NULL && e->port->ns_port == NULL && !e->port->dead) {
 				int k;
 
 				for (k = 0; k < NS_N; k++)
@@ -2074,7 +2074,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 					}
 				ns_check();			/* no sender yet: it is sent now */
 			}
-			if (variant == 72 && m->ncarry == 1) {
+			if (variant == 72 && m->ncarry == 1 && m->carry[0].port != NULL) {
 				struct kport *tp = e->port;
 
 				if (tp->dead && !e->recv)
