@@ -122,6 +122,7 @@ struct kmsg {
 	TAILQ_ENTRY(kmsg)	link;
 	uint32_t		size;
 	uint8_t			*data;
+	int32_t			spid, suid, sgid;	/* the sender (0: the kernel), for the trailer of the receiver */
 	struct kcarry		reply;		/* the local port of the header: the reply right */
 	int			ncarry;
 	struct kcarry		carry[8];
@@ -146,6 +147,7 @@ static uint32_t rd32(const uint8_t *b, size_t off) { uint32_t v; memcpy(&v, b + 
 static void wr32(uint8_t *b, size_t off, uint32_t v) { memcpy(b + off, &v, 4); }
 /* the bootstrap port of the system: the receive right that the task which acts as launchd sets with task_set_special_port(TASK_BOOTSTRAP_PORT); every task without one gets a send right to it (like the inheritance of the bootstrap port in a Mac).  While nobody serves it, the kernel answers as a launchd without services (KP_BOOTSTRAP). */
 static struct kport *boot_global;
+static pid_t launchd_pid;			/* the process of the launchd: its messages say that the sender is the process 1, which libxpc checks ("bootstrap port must lead to PID 1") */
 static struct sx km_sx;
 SX_SYSINIT(darwin_mach, &km_sx, "darwin mach ipc");
 
@@ -1075,6 +1077,8 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 	m = malloc(sizeof(*m), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 	m->data = malloc(size, M_DARWIN_IPC, M_WAITOK);
 	m->size = size;
+	m->spid = td->td_proc->p_pid == launchd_pid ? 1 : td->td_proc->p_pid;
+	m->suid = td->td_ucred->cr_uid; m->sgid = td->td_ucred->cr_gid;
 	d = m->data;
 	if (copyin((void *)(uintptr_t)uaddr, d, size) != 0) {
 		kmsg_free(m);
@@ -1303,6 +1307,17 @@ recv_msg(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, uin
 		if (o->type == 2) d[o->off + 10] = o->disp == MM_MOVE_SEND_ONCE || o->disp == MM_MAKE_SEND_ONCE ? 18 : 17;
 	}
 	error = copyout(d, (void *)(uintptr_t)uaddr, m->size);
+	if (error == 0) {		/* the trailer: the elements that the receiver asked for (the type and the size; the sequence number; the sender; the audit token), as far as the buffer goes */
+		uint32_t el = (option >> 24) & 0xf, tsize = el == 0 ? 8 : el == 1 ? 12 : el == 2 ? 20 : 52, at = (m->size + 3) & ~3u, tr[13] = { 0 };
+
+		if (el > 3) el = 3;
+		tr[0] = 0; tr[1] = tsize; tr[2] = 0;
+		tr[3] = m->suid; tr[4] = m->sgid;				/* the security token */
+		tr[5] = m->suid; tr[6] = m->suid; tr[7] = m->sgid; tr[8] = m->suid; tr[9] = m->sgid;	/* auid euid egid ruid rgid */
+		tr[10] = m->spid; tr[11] = 0; tr[12] = 0;			/* pid asid pidversion */
+		if (at + tsize <= rsize)
+			(void)copyout(tr, (void *)(uintptr_t)(uaddr + at), tsize);
+	}
 	sx_xlock(&km_sx);
 	m->nool = 0;					/* the ports of the arrays were handed out */
 	kmsg_free(m);
@@ -2033,6 +2048,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 		if (which == 4 && m->carry[0].port->kind == KP_PORT && td->td_ucred->cr_uid == 0 && (boot_global == NULL || boot_global->dead)) {
 			if (boot_global != NULL) kp_unref(boot_global);
 			boot_global = m->carry[0].port; boot_global->refs++;
+			launchd_pid = td->td_proc->p_pid;
 			if (darwin_debug >= 1) printf("darwinator: %s[%d] is now the launchd (bootstrap port)\n", td->td_proc->p_comm, td->td_proc->p_pid);
 		}
 		if (t->special[which] != NULL) kp_unref(t->special[which]);

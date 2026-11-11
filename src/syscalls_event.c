@@ -280,10 +280,10 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	struct dkev_arg a = { .in = (char *)uap->a[1], .out = (char *)uap->a[3], .size = 72 };
 	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
 
-	if ((int)uap->a[2] > 0) {		/* EVFILT_WORKLOOP (-10) changes make or configure the workloop itself: there is no kernel workqueue here, so they succeed without events */
+	if ((int)uap->a[2] > 0) {		/* EVFILT_WORKLOOP (-17) changes make or configure the workloop itself: there is no kernel workqueue here, so they succeed without events */
 		int16_t filt;
 
-		if (copyin(a.in + 8, &filt, sizeof(filt)) == 0 && filt == -10) {
+		if (copyin(a.in + 8, &filt, sizeof(filt)) == 0 && filt == -17) {
 			td->td_retval[0] = 0;
 			return (0);
 		}
@@ -292,7 +292,10 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 		if ((error = kq_for(td, byid ? (int64_t)uap->a[0] : -1, &fd)) != 0)
 			return (error);
 	}
-	return (kern_kevent(td, fd, (int)uap->a[2], (int)uap->a[4], &ops, (flags & 1) ? &zero : NULL));
+	error = kern_kevent(td, fd, (int)uap->a[2], (int)uap->a[4], &ops, (flags & 1) ? &zero : NULL);
+	if (error != 0 && darwin_debug >= 1)
+		printf("darwinator: %s[%d]: kevent_%s(%d, nchanges %d, nevents %d, flags %#x) failed: %d\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", fd, (int)uap->a[2], (int)uap->a[4], flags, error);
+	return (error);
 }
 
 static int darwin_kevent_qos(struct thread *td, struct darwin_args *uap) { return (darwin_kevent_qos_common(td, uap, false)); }
