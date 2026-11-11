@@ -144,6 +144,8 @@ struct ktask {
 static struct ktask *kt_tab[KT_N];
 static uint32_t rd32(const uint8_t *b, size_t off) { uint32_t v; memcpy(&v, b + off, 4); return (v); }
 static void wr32(uint8_t *b, size_t off, uint32_t v) { memcpy(b + off, &v, 4); }
+/* the bootstrap port of the system: the receive right that the task which acts as launchd sets with task_set_special_port(TASK_BOOTSTRAP_PORT); every task without one gets a send right to it (like the inheritance of the bootstrap port in a Mac).  While nobody serves it, the kernel answers as a launchd without services (KP_BOOTSTRAP). */
+static struct kport *boot_global;
 static struct sx km_sx;
 SX_SYSINIT(darwin_mach, &km_sx, "darwin mach ipc");
 
@@ -2001,6 +2003,10 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 	switch (id) {
 	case 3409:				/* task_get_special_port(task, which): the reply carries a send right */
 		which = m->size >= 36 ? rd32(d, 32) : 99;
+		if (which == 4 && boot_global != NULL && !boot_global->dead && (t->special[4] == NULL || t->special[4]->kind == KP_BOOTSTRAP || t->special[4]->dead)) {
+			if (t->special[4] != NULL) kp_unref(t->special[4]);
+			t->special[4] = boot_global; boot_global->refs++;
+		}
 		if (which == 4 && t->special[4] == NULL)		/* the bootstrap port: nobody serves it, but libxpc needs one to exist (a real launchd is a program of user space) */
 			t->special[4] = kp_new(KP_BOOTSTRAP);
 		if (which >= 1 && which <= 15 && (which > 7 || t->special[which] == NULL)) {	/* a valid special port that is not set: success, with a null port */
@@ -2024,6 +2030,11 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 	case 3410:				/* task_set_special_port(task, which, port): the request carries the right */
 		which = m->size >= 52 ? rd32(d, 48) : 99;
 		if (m->ncarry != 1 || which < 1 || which > 7) { mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0); break; }
+		if (which == 4 && m->carry[0].port->kind == KP_PORT && td->td_ucred->cr_uid == 0 && (boot_global == NULL || boot_global->dead)) {
+			if (boot_global != NULL) kp_unref(boot_global);
+			boot_global = m->carry[0].port; boot_global->refs++;
+			if (darwin_debug >= 1) printf("darwinator: %s[%d] is now the launchd (bootstrap port)\n", td->td_proc->p_comm, td->td_proc->p_pid);
+		}
 		if (t->special[which] != NULL) kp_unref(t->special[which]);
 		t->special[which] = m->carry[0].port; m->carry[0].port = NULL; m->ncarry = 0;	/* the right moves into the slot */
 		mig_reply(t, m, id, 0, NULL, NULL, 0, NULL, 0);
