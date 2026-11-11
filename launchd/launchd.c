@@ -63,6 +63,35 @@ xpc_start(const struct hdr *h)
 	return (0);
 }
 
+/* debugging: the keys of the dictionary with the types and the small values */
+static void
+xpc_dump(const struct hdr *h, u32 start)
+{
+	const u32 *w = (const u32 *)h;
+	u32 count = w[start / 4 + 4], p = start / 4 + 5, i, n, t;
+	const char *k;
+
+	for (i = 0; i < count && p * 4 < h->size; i++) {
+		k = (const char *)&w[p];
+		for (n = 0; k[n]; n++)
+			;
+		out("launchd:     "); out(k); out(" type "); outx(w[p + (n + 4) / 4]);
+		p += (n + 4) / 4;
+		t = w[p] >> 12;
+		if (t == 3 || t == 4 || t == 2) { out(" = "); outx(w[p + 2]); out("/"); outx(w[p + 1]); }
+		if (t == 9) { out(" = "); out((const char *)&w[p + 2]); }
+		out("\n");
+		switch (t) {
+		case 0x2: p += 2; break;
+		case 0x3: case 0x4: case 0x5: case 0x6: p += 3; break;
+		case 0xa: p += 5; break;
+		case 0x9: case 0x8: p += 2 + (w[p + 1] + 3) / 4; break;
+		case 0xd: p += 1; break;
+		default: return;
+		}
+	}
+}
+
 static int
 same(const char *a, const char *b)
 {
@@ -128,6 +157,34 @@ reply(const struct hdr *q, int with_error, int code)
 	mach_msg(&rp.h, MACH_SEND_MSG, n, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
 }
 
+/* the answer with a port: {"port": <send right>}; the right is made from the receive right of the service in this task */
+static void
+reply_port(const struct hdr *q, u32 svc)
+{
+	u32 *w = (u32 *)&rp.h;
+
+	if (q->remote == 0)
+		return;
+	rp.h.bits = 0x80000012u;
+	rp.h.remote = q->remote;
+	rp.h.local = 0;
+	rp.h.voucher = 0;
+	rp.h.id = q->id;
+	w[6] = 1;					/* one descriptor: the port */
+	w[7] = svc; w[8] = 0;
+	w[9] = (20u << 16) | 0;				/* MAKE_SEND (20), type 0 = port */
+	w[10] = 0x40585043;
+	w[11] = 5;
+	w[12] = 0xf000;
+	w[13] = 16; w[14] = 1;				/* a dictionary of 16 bytes with one entry: */
+	w[15] = 0x74726f70; w[16] = 0;			/* "port" */
+	w[17] = 0xd000;
+	rp.h.size = 72;
+	mach_msg(&rp.h, MACH_SEND_MSG, 72, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
+}
+
+static u32 svc_port;
+
 int
 main(void)
 {
@@ -150,6 +207,24 @@ main(void)
 		out("launchd: request "); outx(rq.h.id); out("\n");
 		if (xpc_start(&rq.h) == 0)
 			continue;
+		xpc_dump(&rq.h, xpc_start(&rq.h));
+		{
+			const u32 *v = xpc_find(&rq.h, xpc_start(&rq.h), "name");
+
+			if (v != 0 && (*v >> 12) == 9) {
+				out("launchd:   name "); out((const char *)(v + 2)); out("\n");
+			}
+		}
+		{
+			const u32 *v = xpc_find(&rq.h, xpc_start(&rq.h), "name");
+
+			if (v != 0 && (rq.h.id & 0xfff) >= 0x320 && same((const char *)(v + 2), "com.apple.cfprefsd.daemon")) {
+				if (svc_port == 0)
+					mach_port_allocate(mach_task_self_, 1, &svc_port);
+				reply_port(&rq.h, svc_port);
+				continue;
+			}
+		}
 		reply(&rq.h, (rq.h.id & 0xfff) >= 0x320, 3);
 	}
 }
