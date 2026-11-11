@@ -1227,9 +1227,9 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 	if (rd32(d, 4) > size) { kmsg_free(m); return (MACH_SEND_INVALID_HEADER); }
 	sx_xlock(&km_sx);
 	if ((t = kt_task(td->td_proc)) == NULL) { sx_xunlock(&km_sx); kmsg_free(m); return (KERN_NO_SPACE); }
-	if ((de = ent_by_name(t, rname)) == NULL) { sx_xunlock(&km_sx); kmsg_free(m); return (MACH_SEND_INVALID_DEST); }
+	if ((de = ent_by_name(t, rname)) == NULL) { if (darwin_debug >= 1) printf("darwinator: %s[%d]: send to the name %#x: no such name\n", td->td_proc->p_comm, td->td_proc->p_pid, rname); sx_xunlock(&km_sx); kmsg_free(m); return (MACH_SEND_INVALID_DEST); }
 	dp = de->port;
-	if (dp->dead) { sx_xunlock(&km_sx); kmsg_free(m); return (MACH_SEND_INVALID_DEST); }
+	if (dp->dead) { if (darwin_debug >= 1) printf("darwinator: %s[%d]: send to the name %#x: the port is dead\n", td->td_proc->p_comm, td->td_proc->p_pid, rname); sx_xunlock(&km_sx); kmsg_free(m); return (MACH_SEND_INVALID_DEST); }
 	/* the destination right is used up (or only looked at) */
 	switch (rdisp) {
 	case MM_COPY_SEND: if (de->send < 1 && !de->recv) goto bad_right; break;
@@ -1549,6 +1549,8 @@ darwin_mach_msg2(struct thread *td, struct darwin_args *uap)
 	ua.a[5] = (uint32_t)uap->a[7];			/* the timeout (ms) */
 	ua.a[6] = 0;
 	error = darwin_mach_msg(td, &ua);
+	if (darwin_debug >= 1 && td->td_retval[0] != 0 && (opt & 1) != 0)
+		printf("darwinator: %s[%d]: mach_msg send failed: kr %#lx, options %#lx, remote name %#x, id %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)td->td_retval[0], (u_long)opt, hdr[3], hdr[5]);
 	if (darwin_debug >= 2)
 		printf("darwinator: mach_msg2: options %#lx send_size %u rcv_size %u rcv_name %#x timeout %lu bits %#lx remote_local %#lx voucher_id %#lx -> kr %#lx\n", (u_long)opt, send_size, rcv_size,
 		    (uint32_t)(uap->a[5] >> 32), (u_long)uap->a[7], (u_long)(uap->a[2] & 0xffffffff), (u_long)uap->a[3], (u_long)uap->a[4], (u_long)td->td_retval[0]);
@@ -2508,6 +2510,14 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 		int wi;
 
 		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax);
+		if (tdp == curthread) {			/* a few words of the stack: the return addresses show who called */
+			uint64_t sw[12];
+			int k;
+
+			if (copyin((void *)tdp->td_frame->tf_rsp, sw, sizeof(sw)) == 0)
+				for (k = 0; k < 12; k++)
+					printf("darwinator:   [rsp+%d] %#lx\n", k * 8, (u_long)sw[k]);
+		}
 		if (copyin((void *)(uintptr_t)tdp->td_frame->tf_rsp, w, sizeof(w)) == 0)
 			for (wi = 0; wi < 40; wi++)
 				if (w[wi] >= 0x7ff800000000ULL && w[wi] < 0x7fff00000000ULL)
