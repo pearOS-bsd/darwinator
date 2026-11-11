@@ -41,6 +41,8 @@
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_extern.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <bsm/audit_kevents.h>
@@ -96,7 +98,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT };
 
 struct kmsg;
 struct kport {
@@ -114,6 +116,9 @@ struct kport {
 	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
 	struct timeout_task *timer;		/* KP_PORT made by mk_timer_create: the expiry sends a message to the port itself */
+	struct vm_object *mobj;			/* KP_MEMENT: a memory entry, the pages of an object of the VM that can be mapped into other tasks (mach_make_memory_entry, mach_vm_map) */
+	uint64_t	moff, msize;		/* ... where it starts in the object and how long it is */
+	int		mprot;
 	bool		armed;			/* the timer holds a reference on the port while armed */
 	uint64_t	deadline;		/* the uptime of the expiry, in nanoseconds */
 	struct knlist	kl;			/* the kqueue events of Darwin's EVFILT_MACHPORT: the notes of the kqueues that watch this port (or port set) */
@@ -193,6 +198,8 @@ kp_unref(struct kport *p)
 		(void)fdrop(p->fp, curthread);
 	if (p->timer != NULL)
 		free(p->timer, M_DARWIN_IPC);
+	if (p->mobj != NULL)
+		vm_object_deallocate(p->mobj);
 	knlist_delete(&p->kl, curthread, 0);
 	knlist_destroy(&p->kl);
 	free(p, M_DARWIN_IPC);
@@ -2187,6 +2194,90 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 		return;
 	}
 	switch (id) {
+	case 3825:				/* mach_make_memory_entry_64(task, *size, offset, permission, *object_handle, parent): a port for the pages of the task from the address `offset` */
+	case 4817:				/* mach_make_memory_entry (the same, in mach_vm.defs) */
+		{
+			struct proc *tp = dest->kind == KP_TASK && dest->kp != NULL ? dest->kp : td->td_proc;
+			uint64_t size = m->size >= 56 ? *(uint64_t *)(d + 48) : 0, off = m->size >= 64 ? *(uint64_t *)(d + 56) : 0;
+			int perm = m->size >= 68 ? (int)rd32(d, 64) : 0;
+			struct kport *ep;
+			struct vm_map *map;
+			vm_map_entry_t e;
+			struct kmsg *r;
+			uint8_t *rd;
+
+			if (m->size < 68 || size == 0 || m->reply.port == NULL || m->reply.port->dead) {
+				mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
+				break;
+			}
+			if (tp->p_vmspace == NULL) { mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0); break; }
+			map = &tp->p_vmspace->vm_map;
+			vm_map_lock_read(map);
+			if (!vm_map_lookup_entry(map, (vm_offset_t)off, &e) || (e->eflags & MAP_ENTRY_IS_SUB_MAP) != 0 || e->object.vm_object == NULL ||
+			    off + size > e->end) {
+				vm_map_unlock_read(map);
+				mig_reply(t, m, id, KERN_INVALID_ADDRESS, NULL, NULL, 0, NULL, 0);
+				break;
+			}
+			ep = kp_new(KP_MEMENT);
+			ep->mobj = e->object.vm_object;
+			vm_object_reference(ep->mobj);
+			ep->moff = e->offset + (off - e->start);
+			ep->msize = size;
+			ep->mprot = (int)(e->protection & VM_PROT_ALL);
+			vm_map_unlock_read(map);
+			(void)perm;
+			/* the reply: a complex message with the port (a send right) and the size */
+			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->data = rd = malloc(56, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->size = 56;
+			wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+			wr32(rd, 4, 56); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+			r->carry[0].port = ep; r->carry[0].disp = MM_MOVE_SEND; r->carry[0].nameoff = 28;
+			r->ncarry = 1;
+			rd[28 + 10] = MM_MOVE_SEND; rd[28 + 11] = 0;
+			wr32(rd, 44, 1);					/* NDR */
+			*(uint64_t *)(rd + 48) = size;
+			TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+			m->reply.port->qn++; kq_post(m->reply.port);
+			wakeup(m->reply.port);
+		}
+		break;
+	case 4811:				/* mach_vm_map(task, *address, size, mask, flags, object, offset, copy, cur, max, inherit) with an object: the pages of a memory entry mapped into the task */
+		{
+			struct proc *tp = dest->kind == KP_TASK && dest->kp != NULL ? dest->kp : td->td_proc;
+			struct kport *op = m->ncarry == 1 ? m->carry[0].port : NULL;
+			uint64_t addr = m->size >= 56 ? *(uint64_t *)(d + 48) : 0, size = m->size >= 64 ? *(uint64_t *)(d + 56) : 0;
+			uint32_t flags = m->size >= 76 ? rd32(d, 72) : 0;
+			uint64_t offset = m->size >= 84 ? *(uint64_t *)(d + 76) : 0;
+			int copy = m->size >= 88 ? (int)rd32(d, 84) : 0;
+			int cur = m->size >= 92 ? (int)rd32(d, 88) : 0, max = m->size >= 96 ? (int)rd32(d, 92) : 0;
+			vm_offset_t va = (vm_offset_t)addr;
+			struct vm_map *map;
+			int rv;
+
+			if (m->size < 100 || op == NULL || op->kind != KP_MEMENT || op->mobj == NULL || size == 0 || offset + size > op->msize || tp->p_vmspace == NULL) {
+				mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
+				break;
+			}
+			map = &tp->p_vmspace->vm_map;
+			vm_object_reference(op->mobj);				/* the mapping keeps its own reference */
+			if ((flags & 1) != 0)					/* VM_FLAGS_ANYWHERE */
+				va = 0;
+			rv = vm_map_find(map, op->mobj, op->moff + offset, &va, round_page(size), 0, (flags & 1) != 0 ? VMFS_ANY_SPACE : VMFS_NO_SPACE,
+			    (vm_prot_t)(cur & VM_PROT_ALL), (vm_prot_t)((max | cur) & VM_PROT_ALL), copy ? MAP_COPY_ON_WRITE : MAP_INHERIT_SHARE);
+			if (rv != KERN_SUCCESS) {
+				vm_object_deallocate(op->mobj);
+				mig_reply(t, m, id, rv == KERN_NO_SPACE ? 3 : KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
+				break;
+			}
+			{
+				uint64_t out64 = va;
+
+				mig_reply_data(m, id, 0, &out64, 8);
+			}
+		}
+		break;
 	case 3409:				/* task_get_special_port(task, which): the reply carries a send right */
 		which = m->size >= 36 ? rd32(d, 32) : 99;
 		if (which == 4 && boot_global != NULL && !boot_global->dead && (t->special[4] == NULL || t->special[4]->kind == KP_BOOTSTRAP || t->special[4]->dead)) {
