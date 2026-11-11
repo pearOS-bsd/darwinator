@@ -140,7 +140,7 @@ struct kmsg {
 };
 
 struct kent { bool used, recv; int send, sonce; uint32_t name; struct kport *port; };
-#define	KE_N	96
+#define	KE_N	1024
 #define	KT_N	256
 struct ktask {
 	bool		used;
@@ -1482,7 +1482,11 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 			(void)copyout(tr, (void *)(uintptr_t)(uaddr + at), tsize);
 	}
 	sx_xlock(&km_sx);
-	m->nool = 0;					/* the ports of the arrays were handed out */
+	for (i = 0; i < m->nool; i++) {			/* the memory was copied out; the ports of the arrays were handed out (o->ports[j] = NULL above), their array and the data go */
+		if (m->ool[i].data != NULL) { free(m->ool[i].data, M_DARWIN_IPC); m->ool[i].data = NULL; }
+		if (m->ool[i].ports != NULL) { free(m->ool[i].ports, M_DARWIN_IPC); m->ool[i].ports = NULL; }
+	}
+	m->nool = 0;
 	kmsg_free(m);
 	sx_xunlock(&km_sx);
 	return (error != 0 ? KERN_INVALID_ADDRESS : KERN_SUCCESS);
@@ -1956,6 +1960,13 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			if (ne == NULL) { kp_unref(np); mig_reply_data(m, id, KERN_NO_SPACE, NULL, 0); return (true); }
 			a = ne->name;
 			mig_reply_data(m, id, 0, &a, 4);
+			return (true);
+		}
+	case 3240:					/* mach_port_is_connection_for_service(task, connection_port, service_port, *filter_policy_id): libxpc asks it for every connection that comes to a service; here every connection is for the service, with no filter */
+		{
+			uint64_t fid = 0;
+
+			mig_reply_data(m, id, 0, &fid, 8);
 			return (true);
 		}
 	case 3205: case 3232:				/* mach_port_destroy(task, name), mach_port_destruct(task, name, srdelta, guard): every right of the name goes */
@@ -2546,6 +2557,51 @@ darwin_mach_fini(void)
 		if (kt_tab[i] != NULL) { free(kt_tab[i], M_DARWIN_IPC); kt_tab[i] = NULL; }
 }
 
+/* _kernelrpc_mach_port_request_notification_trap (77): (task, name, variant, sync, notify, notifyPoly, *previous): the same as the MIG routine 3213 (the dead-name and no-senders variants), with the notify port given by name */
+static int
+darwin_port_request_notification_trap(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kent *e, *ne;
+	uint32_t variant = (uint32_t)uap->a[2];
+	int kr = KERN_SUCCESS;
+	uint32_t prev = 0;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) == NULL || (e = ent_by_name(t, (uint32_t)uap->a[1])) == NULL) {
+		sx_xunlock(&km_sx);
+		return (kr_ret(td, KERN_INVALID_NAME));
+	}
+	ne = ent_by_name(t, (uint32_t)uap->a[4]);
+	if (ne != NULL) {
+		if (variant == 70 && e->port->ns_port == NULL && !e->port->dead) {
+			int k;
+
+			for (k = 0; k < NS_N; k++)
+				if (ns_list[k] == NULL) {
+					ns_list[k] = e->port; e->port->refs++;
+					e->port->ns_port = ne->port; ne->port->refs++;
+					break;
+				}
+			ns_check();
+		}
+		if (variant == 72) {
+			struct kport *tp = e->port;
+
+			if (tp->dead && !e->recv)
+				notify_dead_name(ne->port, e->name);
+			else if (tp->dn_port == NULL) {
+				tp->dn_port = ne->port; ne->port->refs++;
+				tp->dn_name = e->name;
+			}
+		}
+	}
+	sx_xunlock(&km_sx);
+	if (uap->a[6] != 0 && copyout(&prev, (void *)uap->a[6], 4) != 0)
+		kr = KERN_INVALID_ADDRESS;
+	return (kr_ret(td, kr));
+}
+
 static const struct {
 	int		num, nargs;
 	sy_call_t	*fn;
@@ -2562,6 +2618,7 @@ static const struct {
 	E(42, 3, darwin_port_guard,		"_kernelrpc_mach_port_unguard_trap"),
 	E(43, 3, darwin_generate_activity_id,	"mach_generate_activity_id"),
 	E(76, 3, darwin_port_type_trap,		"_kernelrpc_mach_port_type_trap"),
+	E(77, 7, darwin_port_request_notification_trap,	"_kernelrpc_mach_port_request_notification_trap"),
 	E(91, 0, darwin_mk_timer_create,	"mk_timer_create_trap"),
 	E(92, 1, darwin_mk_timer_destroy,	"mk_timer_destroy_trap"),
 	E(93, 2, darwin_mk_timer_arm,		"mk_timer_arm_trap"),

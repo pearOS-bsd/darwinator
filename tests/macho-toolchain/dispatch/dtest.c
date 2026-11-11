@@ -12,6 +12,14 @@ extern void dispatch_after(u64 when, dq q, void (^blk)(void));
 extern void *dispatch_group_create(void);
 extern void dispatch_group_async(void *g, dq q, void (^blk)(void));
 extern long dispatch_group_wait(void *g, u64 t);
+extern unsigned mach_task_self_;
+extern int mach_port_allocate(unsigned task, unsigned right, unsigned *name);
+extern int mach_port_insert_right(unsigned task, unsigned name, unsigned poly, unsigned how);
+extern int mach_msg(void *msg, int opt, unsigned ssz, unsigned rsz, unsigned rname, unsigned to, unsigned notify);
+extern const char _dispatch_source_type_mach_recv[];
+extern void *dispatch_source_create(const void *type, unsigned long handle, unsigned long mask, dq q);
+extern void dispatch_source_set_event_handler(void *s, void (^blk)(void));
+extern void dispatch_resume(void *o);
 extern long write(int fd, const void *buf, unsigned long n);
 static void out(const char *s) { unsigned long n = 0; while (s[n]) n++; write(1, s, n); }
 static int fails;
@@ -35,6 +43,28 @@ main(void)
 	dispatch_group_async(grp, g, ^{ ran4 = 1; });
 	dispatch_group_async(grp, serial, ^{ ran4 += 1; });
 	check("a group of two blocks finishes", dispatch_group_wait(grp, dispatch_time(0, 3000000000L)) == 0 && ran4 == 2);
+	{
+		static volatile int got;
+		unsigned port = 0;
+		struct { unsigned bits, size, remote, local, voucher, id; } m;
+		void *src;
+		int i;
+
+		mach_port_allocate(mach_task_self_, 1, &port);
+		mach_port_insert_right(mach_task_self_, port, port, 20);
+		src = dispatch_source_create(_dispatch_source_type_mach_recv, port, 0, g);
+		dispatch_source_set_event_handler(src, ^{
+			struct { unsigned bits, size, remote, local, voucher, id; char pad[64]; } r;
+			if (mach_msg(&r, 2 | 0x100, 0, sizeof(r), port, 0, 0) == 0) { got++; dispatch_semaphore_signal(sem); }
+		});
+		dispatch_resume(src);
+		for (i = 0; i < 3; i++) {
+			m.bits = 0x13; m.size = 24; m.remote = port; m.local = 0; m.voucher = 0; m.id = 100 + i;
+			mach_msg(&m, 1, 24, 0, 0, 0, 0);
+			dispatch_semaphore_wait(sem, dispatch_time(0, 2000000000L));
+		}
+		check("a Mach receive source gets three messages one after the other", got == 3);
+	}
 	out(fails ? "dtest: FAILED\n" : "dtest: all ok\n");
 	return (fails != 0);
 }
