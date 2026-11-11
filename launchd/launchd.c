@@ -218,7 +218,7 @@ main(void)
 		{
 			const u32 *v = xpc_find(&rq.h, xpc_start(&rq.h), "name");
 
-			if (v != 0 && (rq.h.id & 0xfff) >= 0x320 && same((const char *)(v + 2), "com.apple.cfprefsd.daemon")) {
+			if (v != 0 && (rq.h.id & 0xfff) >= 0x320 && same((const char *)(v + 2), "com.apple.test.nothing")) {
 				if (svc_port == 0)
 					mach_port_allocate(mach_task_self_, 1, &svc_port);
 				reply_port(&rq.h, svc_port);

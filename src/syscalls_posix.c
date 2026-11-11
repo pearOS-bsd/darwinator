@@ -462,6 +462,19 @@ darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)
 	return (0);
 }
 
+/* the process is gone: its registration of libpthread is forgotten */
+void
+darwin_pth_exit(struct proc *p)
+{
+	int i;
+
+	mtx_lock(&pth_mtx);
+	for (i = 0; i < (int)nitems(pth_reg); i++)
+		if (pth_reg[i].p == p)
+			memset(&pth_reg[i], 0, sizeof(pth_reg[i]));
+	mtx_unlock(&pth_mtx);
+}
+
 struct pth_create {
 	uint64_t	start, pthread, func, arg, stack, flags;
 };

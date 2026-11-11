@@ -2241,6 +2241,8 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 		ns_check();
 	}
 	sx_xunlock(&km_sx);
+	darwin_kq_exit(p);
+	darwin_pth_exit(p);
 }
 
 static eventhandler_tag fork_tag, exit_tag;

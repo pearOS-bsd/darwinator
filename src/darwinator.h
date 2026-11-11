@@ -25,6 +25,9 @@ struct darwin_args {
 #define	DARWIN_MACHDEP_BASE	1024
 #define	DARWIN_MACH_BASE	1088
 extern int darwin_debug;
+struct proc;
+void darwin_kq_exit(struct proc *p);
+void darwin_pth_exit(struct proc *p);
 extern int darwin_stop;
 extern int darwin_dyld;			/* kern.darwinator.dyld: run a dynamic Mach-O with the dyld that the file names */
 
