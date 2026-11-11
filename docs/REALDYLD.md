@@ -32,3 +32,12 @@ initializes the real libSystem, libdispatch and libobjc.  Nothing of Apple's is 
 `kern.darwinator.debug=1` logs what is not implemented; `=2` logs every system call (with the paths, the `fcntl` commands, the names of `sysctl`), every MIG request and every mach_msg2.  `kern.darwinator.stop=1` stops a Mach-O program before its first
 instruction so that `lldb -p PID` can attach (`process handle SIGSTOP -p false -s false -n false`, `continue`).  The addresses of the cache are looked up with `ipsw dyld a2s` (the slide is the one that dyld logs).
 `tools/maccli/sweep-dyld.sh` runs every tool of a list through it.
+
+## Update: libdispatch start-up on the real dyld
+
+- `bsdthread_register` now returns `0x400000ff` (adds the KEVENT and WORKLOOP features): libdispatch aborted in `_dispatch_root_queues_init_once` without them.
+- Mach traps added: 22/23 (port insert/extract member), 43 (`mach_generate_activity_id`), 76 (`mach_port_type`), 91-95 (`mk_timer_*`, a port that receives a message at its time, through a timeout task).
+- `kevent_id` with an `EVFILT_WORKLOOP` change succeeds without events (there is no kernel workqueue).
+- `task_get_special_port` of a valid port that is not set answers success with a null port.
+- The bootstrap routines 0x320-0x325 answer `{"error": ESRCH}`.
+- Result: `archiveutil` runs to the end. The other tools that died with SIGILL now stop in libxpc (`_xpc_connection_init_failed`) when a service such as cfprefsd is needed: this is the launchd work (a real bootstrap with services), not the kernel.

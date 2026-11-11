@@ -29,6 +29,7 @@
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sx.h>
+#include <sys/taskqueue.h>
 #include <sys/syscallsubr.h>
 #include <sys/smp.h>
 #include <sys/pcpu.h>
@@ -109,6 +110,9 @@ struct kport {
 	struct file	*fp;			/* KP_FILE: a fileport holds the open file */
 	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
+	struct timeout_task *timer;		/* KP_PORT made by mk_timer_create: the expiry sends a message to the port itself */
+	bool		armed;			/* the timer holds a reference on the port while armed */
+	uint64_t	deadline;		/* the uptime of the expiry, in nanoseconds */
 };
 
 struct kcarry { struct kport *port; int disp; uint32_t nameoff; };	/* a right in a message; nameoff: where its name goes in the data */
@@ -138,6 +142,8 @@ struct ktask {
 	struct kport	*reg[3];
 };
 static struct ktask *kt_tab[KT_N];
+static uint32_t rd32(const uint8_t *b, size_t off) { uint32_t v; memcpy(&v, b + off, 4); return (v); }
+static void wr32(uint8_t *b, size_t off, uint32_t v) { memcpy(b + off, &v, 4); }
 static struct sx km_sx;
 SX_SYSINIT(darwin_mach, &km_sx, "darwin mach ipc");
 
@@ -171,6 +177,8 @@ kp_unref(struct kport *p)
 	}
 	if (p->fp != NULL)
 		(void)fdrop(p->fp, curthread);
+	if (p->timer != NULL)
+		free(p->timer, M_DARWIN_IPC);
 	free(p, M_DARWIN_IPC);
 }
 
@@ -599,6 +607,213 @@ darwin_port_move_member(struct thread *td, struct darwin_args *uap)	/* (target, 
 	return (kr_ret(td, kr));
 }
 
+static uint32_t entry_type(const struct kent *e);
+
+static int
+darwin_port_extract_member(struct thread *td, struct darwin_args *uap)	/* (target, member, set) */
+{
+	struct ktask *t;
+	struct kent *m, *a;
+	int kr = KERN_INVALID_NAME;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (m = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
+		kr = KERN_INVALID_RIGHT;
+		if ((a = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && m->port->set == a->port) { m->port->set = NULL; kr = KERN_SUCCESS; }
+	}
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int
+darwin_port_type_trap(struct thread *td, struct darwin_args *uap)	/* (target, name, *type) */
+{
+	struct ktask *t;
+	struct kent *e;
+	int kr = KERN_INVALID_NAME;
+	uint32_t ty = 0;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
+		ty = entry_type(e);
+		kr = KERN_SUCCESS;
+	}
+	sx_xunlock(&km_sx);
+	if (kr == KERN_SUCCESS && copyout(&ty, (void *)uap->a[2], 4) != 0)
+		kr = KERN_INVALID_ADDRESS;
+	return (kr_ret(td, kr));
+}
+
+static int
+darwin_generate_activity_id(struct thread *td, struct darwin_args *uap)	/* (target, count, *id) */
+{
+	static volatile uint64_t next = 1;
+	uint64_t id = atomic_fetchadd_64(&next, MAX(1, (uint32_t)uap->a[1]));
+
+	if (copyout(&id, (void *)uap->a[2], 8) != 0)
+		return (kr_ret(td, KERN_INVALID_ADDRESS));
+	return (kr_ret(td, KERN_SUCCESS));
+}
+
+/* ---- mk_timer: a port that receives a message when its time comes (traps 91-95) ---- */
+
+static void
+mk_timer_fire(void *arg, int pending __unused)
+{
+	struct kport *p = arg;
+	struct kmsg *r;
+	uint8_t *d;
+
+	sx_xlock(&km_sx);
+	if (p->armed) {
+		p->armed = false;
+		if (!p->dead) {
+			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->data = d = malloc(40, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->size = 40;
+			wr32(d, 0, MM_MOVE_SEND_ONCE);
+			wr32(d, 4, 40);
+			TAILQ_INSERT_TAIL(&p->q, r, link);
+			p->qn++;
+			wakeup(p);
+			if (p->set != NULL) wakeup(p->set);
+		}
+		kp_unref(p);
+	}
+	sx_xunlock(&km_sx);
+}
+
+static uint64_t
+uptime_ns(void)
+{
+	struct timespec ts;
+
+	nanouptime(&ts);
+	return ((uint64_t)ts.tv_sec * 1000000000 + ts.tv_nsec);
+}
+
+static int
+darwin_mk_timer_create(struct thread *td, struct darwin_args *uap __unused)
+{
+	struct ktask *t;
+	struct kport *p;
+	struct kent *e;
+	uint32_t name = 0;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL) {
+		p = kp_new(KP_PORT);
+		p->timer = malloc(sizeof(*p->timer), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		TIMEOUT_TASK_INIT(taskqueue_thread, p->timer, 0, mk_timer_fire, p);
+		e = ent_add(t, p, MM_MOVE_RECEIVE);
+		p->refs--;
+		if (e == NULL) kp_unref(p); else name = e->name;
+	}
+	sx_xunlock(&km_sx);
+	td->td_retval[0] = name;
+	return (0);
+}
+
+static struct kport *
+timer_of(struct thread *td, uint32_t name)
+{
+	struct ktask *t = kt_task(td->td_proc);
+	struct kent *e = t != NULL ? ent_by_name(t, name) : NULL;
+
+	return (e != NULL && e->recv && e->port->timer != NULL ? e->port : NULL);
+}
+
+static int
+timer_stop(struct kport *p)		/* the lock is held: the time that was left, or 0 */
+{
+	uint64_t now = uptime_ns();
+	int left = 0;
+
+	if (p->armed) {
+		left = p->deadline > now ? p->deadline - now : 0;
+		if (taskqueue_cancel_timeout(taskqueue_thread, p->timer, NULL) == 0) {
+			p->armed = false;
+			p->refs--;
+		}
+	}
+	return (left);
+}
+
+static int
+darwin_mk_timer_destroy(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kent *e;
+	struct kport *p;
+	int kr = KERN_INVALID_NAME;
+
+	sx_xlock(&km_sx);
+	if ((p = timer_of(td, (uint32_t)uap->a[0])) != NULL && (t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[0])) != NULL) {
+		(void)timer_stop(p);
+		e->recv = false;
+		port_die(p);
+		ent_drop_if_empty(e);
+		ns_check();
+		kr = KERN_SUCCESS;
+	}
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int
+timer_arm(struct thread *td, uint32_t name, uint64_t deadline)
+{
+	struct kport *p;
+	int kr = KERN_INVALID_NAME;
+	uint64_t now = uptime_ns();
+
+	sx_xlock(&km_sx);
+	if ((p = timer_of(td, name)) != NULL) {
+		(void)timer_stop(p);
+		p->deadline = deadline;
+		p->armed = true;
+		p->refs++;
+		taskqueue_enqueue_timeout(taskqueue_thread, p->timer, deadline > now ? (int)MIN((deadline - now) / (1000000000 / hz), INT_MAX) : 0);
+		kr = KERN_SUCCESS;
+	}
+	sx_xunlock(&km_sx);
+	return (kr);
+}
+
+static int
+darwin_mk_timer_arm(struct thread *td, struct darwin_args *uap)		/* (name, expire_time) */
+{
+	return (kr_ret(td, timer_arm(td, (uint32_t)uap->a[0], uap->a[1])));
+}
+
+static int
+darwin_mk_timer_arm_leeway(struct thread *td, struct darwin_args *uap)	/* (name, mk_timer_flags, mk_timer_expire_time, mk_timer_leeway): the time is absolute or relative */
+{
+	uint64_t t = uap->a[2];
+
+	if ((uap->a[1] & 1) == 0)
+		t += uptime_ns();
+	return (kr_ret(td, timer_arm(td, (uint32_t)uap->a[0], t)));
+}
+
+static int
+darwin_mk_timer_cancel(struct thread *td, struct darwin_args *uap)	/* (name, *result_time) */
+{
+	struct kport *p;
+	uint64_t left = 0;
+	int kr = KERN_INVALID_NAME;
+
+	sx_xlock(&km_sx);
+	if ((p = timer_of(td, (uint32_t)uap->a[0])) != NULL) {
+		left = timer_stop(p);
+		kr = KERN_SUCCESS;
+	}
+	sx_xunlock(&km_sx);
+	if (kr == KERN_SUCCESS && uap->a[1] != 0 && copyout(&left, (void *)uap->a[1], 8) != 0)
+		kr = KERN_INVALID_ADDRESS;
+	return (kr_ret(td, kr));
+}
+
 /* ---- Mach semaphores: a port whose kind is a semaphore; created with the MIG routine of the task port, used with the traps ---- */
 
 static struct kport *
@@ -792,8 +1007,6 @@ darwin_fileport_makefd(struct thread *td, struct darwin_args *uap)
 
 /* ---- messages ---- */
 
-static uint32_t rd32(const uint8_t *b, size_t off) { uint32_t v; memcpy(&v, b + off, 4); return (v); }
-static void wr32(uint8_t *b, size_t off, uint32_t v) { memcpy(b + off, &v, 4); }
 static uint64_t rd64(const uint8_t *b, size_t off) { uint64_t v; memcpy(&v, b + off, 8); return (v); }
 
 /* the sender gives up a right (the lock is held): the kmsg carries it; name 0 is nothing */
@@ -1746,17 +1959,27 @@ bootstrap_server(struct thread *td, struct ktask *t, struct kport *dest, struct 
 	}
 	if (rp == NULL || rp->dead)
 		return;
+	/* an empty dictionary for the look-up (0xcf); the routines 0x320-0x325 (check-in and registration) get {"error": ESRCH}, which libxpc reports to the caller instead of aborting */
 	r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
-	r->data = rd = malloc(44, M_DARWIN_IPC, M_WAITOK | M_ZERO);
-	r->size = 44;
+	r->data = rd = malloc(64, M_DARWIN_IPC, M_WAITOK | M_ZERO);
 	wr32(rd, 0, MM_MOVE_SEND_ONCE);
-	wr32(rd, 4, 44);
 	wr32(rd, 20, rd32(m->data, 20));			/* the id of the request */
 	wr32(rd, 24, 0x40585043);				/* "CPX@" */
 	wr32(rd, 28, 5);					/* version */
 	wr32(rd, 32, 0xf000);					/* a dictionary ... */
-	wr32(rd, 36, 4);					/* ... of 4 bytes (the count) ... */
-	wr32(rd, 40, 0);					/* ... with no entry */
+	if ((rd32(m->data, 20) & 0xfff) >= 0x320) {
+		r->size = 64;
+		wr32(rd, 36, 24);				/* ... of 24 bytes ... */
+		wr32(rd, 40, 1);				/* ... with one entry: */
+		memcpy(rd + 44, "error", 6);			/* the key, padded to 8 */
+		wr32(rd, 52, 0x3000);				/* int64 */
+		wr32(rd, 56, 3);				/* ESRCH */
+	} else {
+		r->size = 44;
+		wr32(rd, 36, 4);
+		wr32(rd, 40, 0);
+	}
+	wr32(rd, 4, r->size);
 	TAILQ_INSERT_TAIL(&rp->q, r, link);
 	rp->qn++;
 	wakeup(rp);
@@ -1780,6 +2003,21 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 		which = m->size >= 36 ? rd32(d, 32) : 99;
 		if (which == 4 && t->special[4] == NULL)		/* the bootstrap port: nobody serves it, but libxpc needs one to exist (a real launchd is a program of user space) */
 			t->special[4] = kp_new(KP_BOOTSTRAP);
+		if (which >= 1 && which <= 15 && (which > 7 || t->special[which] == NULL)) {	/* a valid special port that is not set: success, with a null port */
+			if (m->reply.port != NULL && !m->reply.port->dead) {
+				struct kmsg *r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+				uint8_t *rd = r->data = malloc(40, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+
+				r->size = 40;
+				wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+				wr32(rd, 4, 40); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+				rd[28 + 10] = MM_MOVE_SEND; rd[28 + 11] = 0;
+				TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+				m->reply.port->qn++;
+				wakeup(m->reply.port);
+			}
+			break;
+		}
 		if (which < 1 || which > 7 || t->special[which] == NULL) { mig_reply(t, m, id, which > 7 || which < 1 ? KERN_INVALID_ARGUMENT : KERN_FAILURE, NULL, NULL, 0, NULL, 0); break; }
 		mig_reply(t, m, id, 0, t->special[which], NULL, 0, NULL, 0);
 		break;
@@ -2008,6 +2246,15 @@ static const struct {
 	E(18, 2, darwin_port_deallocate,	"_kernelrpc_mach_port_deallocate_trap"),
 	E(19, 4, darwin_port_mod_refs,		"_kernelrpc_mach_port_mod_refs_trap"),
 	E(20, 3, darwin_port_move_member,	"_kernelrpc_mach_port_move_member_trap"),
+	E(22, 3, darwin_port_move_member,	"_kernelrpc_mach_port_insert_member_trap"),
+	E(23, 3, darwin_port_extract_member,	"_kernelrpc_mach_port_extract_member_trap"),
+	E(43, 3, darwin_generate_activity_id,	"mach_generate_activity_id"),
+	E(76, 3, darwin_port_type_trap,		"_kernelrpc_mach_port_type_trap"),
+	E(91, 0, darwin_mk_timer_create,	"mk_timer_create_trap"),
+	E(92, 1, darwin_mk_timer_destroy,	"mk_timer_destroy_trap"),
+	E(93, 2, darwin_mk_timer_arm,		"mk_timer_arm_trap"),
+	E(94, 2, darwin_mk_timer_cancel,	"mk_timer_cancel_trap"),
+	E(95, 4, darwin_mk_timer_arm_leeway,	"mk_timer_arm_leeway_trap"),
 	E(21, 4, darwin_port_insert_right,	"_kernelrpc_mach_port_insert_right_trap"),
 	E(33, 1, darwin_sem_signal,		"semaphore_signal_trap"),
 	E(34, 1, darwin_sem_signal_all,		"semaphore_signal_all_trap"),

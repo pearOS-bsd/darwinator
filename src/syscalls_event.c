@@ -280,6 +280,14 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	struct dkev_arg a = { .in = (char *)uap->a[1], .out = (char *)uap->a[3], .size = 72 };
 	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
 
+	if (byid && (int)uap->a[2] > 0) {		/* EVFILT_WORKLOOP (-10) changes make or configure the workloop itself: there is no kernel workqueue here, so they succeed without events */
+		int16_t filt;
+
+		if (copyin(a.in + 8, &filt, sizeof(filt)) == 0 && filt == -10) {
+			td->td_retval[0] = 0;
+			return (0);
+		}
+	}
 	if (byid || fd == -1) {
 		if ((error = kq_for(td, byid ? (int64_t)uap->a[0] : -1, &fd)) != 0)
 			return (error);
