@@ -712,8 +712,8 @@ int cmain(void)
 
 	/* kevent_qos (events of 72 bytes) on the kqueue of the process (fd -1) and on a workloop id (kevent_id) */
 	{ struct { u64 ident; short filter; unsigned short flags; int qos; u64 udata; unsigned fflags, xflags; i64 data; u64 ext[4]; } q = { 7, -10, 0x21, 0, 0xfeed, 0, 0, 0, { 0, 0, 0, 0 } }, ev;
-	  r = dsys8(374, -1, (i64)&q, 1, 0, 0, 0, 0, 1); check("kevent_qos (fd -1): EVFILT_USER added", r == 0, r);
-	  q.flags = 0; q.fflags = 0x01000000; r = dsys8(374, -1, (i64)&q, 1, (i64)&ev, 1, 0, 0, 1); check("  triggered: the event comes back (72 bytes: ident, filter -10, udata)", r == 1 && ev.ident == 7 && ev.filter == -10 && ev.udata == 0xfeed, r);
+	  r = dsys8(375, 0x7007, (i64)&q, 1, 0, 0, 0, 0, 1); check("kevent_id (a workloop kqueue): EVFILT_USER added", r == 0, r);
+	  q.flags = 0; q.fflags = 0x01000000; r = dsys8(375, 0x7007, (i64)&q, 1, (i64)&ev, 1, 0, 0, 1); check("  triggered: the event comes back (72 bytes: ident, filter -10, udata)", r == 1 && ev.ident == 7 && ev.filter == -10 && ev.udata == 0xfeed, r);
 	  q.flags = 0x21; q.ident = 8; r = dsys8(375, 0x7b5911, (i64)&q, 1, 0, 0, 0, 0, 1); check("kevent_id (a workloop id): EVFILT_USER added", r == 0, r); }
 
 	/* AF_INET6: Darwin's family number in the address */
