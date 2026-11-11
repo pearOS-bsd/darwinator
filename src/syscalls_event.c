@@ -271,6 +271,19 @@ kq_for(struct thread *td, int64_t id, int *fdp)
 	return (0);
 }
 
+/* the process is gone: its kqueues (closed by the exit) are forgotten; without this the 64 slots fill up after 64 processes and kevent_qos fails with EMFILE */
+void
+darwin_kq_exit(struct proc *p)
+{
+	int i;
+
+	mtx_lock(&kq_mtx);
+	for (i = 0; i < (int)nitems(kq_tab); i++)
+		if (kq_tab[i].p == p)
+			memset(&kq_tab[i], 0, sizeof(kq_tab[i]));
+	mtx_unlock(&kq_mtx);
+}
+
 static int
 darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 {
