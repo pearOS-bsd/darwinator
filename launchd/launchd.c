@@ -181,6 +181,19 @@ xkey(const char *k)
 
 static void xu64(const char *k, u64 v) { xkey(k); xw[xn++] = 0x4000; xw[xn++] = (u32)v; xw[xn++] = (u32)(v >> 32); }
 static void xi64(const char *k, i64 v) { xkey(k); xw[xn++] = 0x3000; xw[xn++] = (u32)v; xw[xn++] = (u32)((u64)v >> 32); }
+static void
+xstr(const char *k, const char *v)
+{
+	u32 n = 0, i;
+
+	while (v[n]) n++;
+	n++;
+	xkey(k);
+	xw[xn++] = 0x9000; xw[xn++] = n;
+	for (i = 0; i < ((n + 3) & ~3u); i++) ((char *)&xw[xn])[i] = i < n ? v[i] : 0;
+	xn += (n + 3) / 4;
+}
+
 static void xport(const char *k, u32 type) { xkey(k); xw[xn++] = type; }
 
 static void
@@ -238,6 +251,19 @@ reply_port(const struct hdr *q, u32 svc, u32 disp)
 }
 
 /* the services: the ones that this task serves (the dirhelper) and the ones that a program checked in (this task keeps a send right for the look-ups) */
+/* the domain (the name of the manager: "System", "Aqua" for a user session) of the jobs that this launchd started, by pid; a program that was not started here is in "System" */
+static struct { int pid; char domain[16]; } jobs[32];
+
+static const char *
+domain_of(u32 pid)
+{
+	int i;
+
+	for (i = 0; i < 32; i++)
+		if (jobs[i].pid == (int)pid) return (jobs[i].domain);
+	return ("System");
+}
+
 struct svc { int used, own; char name[96]; u32 port; };
 static struct svc svcs[64];
 
@@ -393,6 +419,7 @@ mig_reply_code(const struct hdr *q, u32 code)
 
 static u32 svc_port;
 static u32 dir_port;
+static int debug_dump = 1;
 
 static u32
 tr_uid(const struct hdr *h)
@@ -430,10 +457,31 @@ main(int argc, char **argv, char **envp)
 			given[i] = 0; progs = given;
 		}
 		for (i = 0; i < n && progs[i]; i++) {
-			int pid = 0;
-			char *av[2] = { (char *)progs[i], 0 };
+			int pid = 0, na = 0, k;
+			char buf[256], *av[8];
 
-			if (posix_spawn(&pid, progs[i], 0, 0, av, envp) == 0) { out("launchd: started "); out(progs[i]); out("\n"); }
+			for (k = 0; progs[i][k] && k < 255; k++) buf[k] = progs[i][k];
+			buf[k] = 0;
+			for (k = 0; buf[k] && na < 7; ) {		/* "path arg arg": the words are separated by spaces */
+				av[na++] = &buf[k];
+				while (buf[k] && buf[k] != ' ') k++;
+				if (buf[k] == ' ') buf[k++] = 0;
+			}
+			av[na] = 0;
+			if (posix_spawn(&pid, av[0], 0, 0, av, envp) == 0) {
+				int j;
+
+				for (j = 0; j < 32 && jobs[j].pid; j++) ;
+				if (j < 32) {
+					const char *dm = na > 1 && same(av[na - 1], "agent") ? "Aqua" : "System";
+					int q;
+
+					jobs[j].pid = pid;
+					for (q = 0; dm[q]; q++) jobs[j].domain[q] = dm[q];
+					jobs[j].domain[q] = 0;
+				}
+				out("launchd: started "); out(progs[i]); out("\n");
+			}
 			else { out("launchd: cannot start "); out(progs[i]); out("\n"); }
 		}
 	}
@@ -486,9 +534,19 @@ main(int argc, char **argv, char **envp)
 				mig_reply_code(&rq.h, 0x47);	/* MIG_BAD_ID-like */
 			continue;
 		}
-		out("launchd: request "); outx(rq.h.id); out("\n");
+		out("launchd: request "); outx(rq.h.id); out(" from pid "); outx(trailer_of(&rq.h)[10]); out("\n");
 		if (xpc_start(&rq.h) == 0)
 			continue;
+		if (debug_dump) xpc_dump(&rq.h, xpc_start(&rq.h));
+		if ((rq.h.id & 0xfff) == 0x12d) {		/* vproc_swap_*: a property of the job or of the manager (VPROC_GSK_*) */
+			const u32 *g = xpc_find(&rq.h, xpc_start(&rq.h), "outgsk");
+
+			if (g && (*g >> 12) == 4 && g[1] == 6 && g[2] == 0 /* VPROC_GSK_MGR_NAME */) {
+				xbegin(&rq.h, 0); xdict(); xstr("out", domain_of(trailer_of(&rq.h)[10])); vouch(&rq.h); xsend();
+			} else
+				reply(&rq.h, 1, 45);	/* not supported */
+			continue;
+		}
 		{
 			const u32 *v = xpc_find(&rq.h, xpc_start(&rq.h), "name");
 
@@ -498,7 +556,7 @@ main(int argc, char **argv, char **envp)
 					u32 rt = rq.h.id & 0xfff;
 					struct svc *sv = svc_find((const char *)(v + 2));
 
-					if (rt == 0xce) {		/* check-in: the service gets the receive right of its port */
+					if (rt == 0xce || rt == 0x325) {		/* check-in (bootstrap_check_in: 0xce; the listener of an XPC connection: 0x325): the service gets the receive right of its port */
 						if (sv == 0 && tr_uid(&rq.h) == 0) {
 							u32 p = 0;
 

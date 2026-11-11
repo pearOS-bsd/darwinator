@@ -502,9 +502,9 @@ int cmain(void)
 	    /* the reply is in req (the same buffer was used for both: send then receive) */
 	    check("  reply id 3510, return code 0", req[5] == 3510 && req[8] == 0, req[5]);
 	    { i64 ch = S(SYS_fork, 0, 0, 0, 0, 0, 0);
-	      if (ch == 0) { unsigned crp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0), q[10]; for (k = 0; k < 10; k++) q[k] = 0;
+	      if (ch == 0) { unsigned crp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0), q[16]; for (k = 0; k < 16; k++) q[k] = 0;
 		      q[0] = 19 | (21 << 8); q[1] = 36; q[2] = 0x203; q[3] = crp; q[5] = 3409; q[8] = 4;
-		      if (dmach7(31, (i64)q, 3, 36, 40, crp, 3000, 0) == 0 && q[5] == 3509 && q[7] != 0) { unsigned msg2[7] = { 19, 28, q[7], 0, 0, 99, 0xdead }; dmach7(31, (i64)msg2, 1, 28, 0, 0, 0, 0); S(SYS_exit, 0, 0, 0, 0, 0, 0); }
+		      if (dmach7(31, (i64)q, 3, 36, 64, crp, 3000, 0) == 0 && q[5] == 3509 && q[7] != 0) { unsigned msg2[7] = { 19, 28, q[7], 0, 0, 99, 0xdead }; dmach7(31, (i64)msg2, 1, 28, 0, 0, 0, 0); S(SYS_exit, 0, 0, 0, 0, 0, 0); }
 		      S(SYS_exit, 1, 0, 0, 0, 0, 0); }
 	      kr2 = dmach7(31, (i64)rcv2, 2 | 0x100, 0, 64, P, 4000, 0);
 	      check("a message from the child, through the bootstrap port it inherited, arrives (id 99, data 0xdead)", kr2 == 0 && rcv2[5] == 99 && rcv2[6] == 0xdead, kr2);
