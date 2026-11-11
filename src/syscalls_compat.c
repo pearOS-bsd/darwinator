@@ -392,8 +392,35 @@ static int
 darwin_shm_open(struct thread *td, struct darwin_args *uap)	/* (name, oflag, mode) */
 {
 	struct shm_open2_args sa = { .path = (const char *)uap->a[0], .flags = darwin_oflags((int)uap->a[1]), .mode = (mode_t)uap->a[2], .shmflags = 0, .name = NULL };
+	char kp[256];
+	size_t len;
+	int error, fd;
 
-	return (sys_shm_open2(td, &sa));
+	if ((error = copyinstr((const void *)uap->a[0], kp, sizeof(kp) - 1, &len)) != 0)
+		return (error);
+	if (kp[0] == '/')
+		return (sys_shm_open2(td, &sa));
+	/* Darwin takes names without the first slash (notifyd's "apple.shm.notification_center"); FreeBSD wants it: the name is made again, with the slash, in a page of the process */
+	{
+		struct mmap_args ma = { .addr = NULL, .len = PAGE_SIZE, .prot = PROT_READ | PROT_WRITE, .flags = MAP_ANON | MAP_PRIVATE, .fd = -1, .pos = 0 };
+		struct munmap_args ua;
+		char np[260];
+
+		if ((error = sys_mmap(td, &ma)) != 0)
+			return (error);
+		ua.addr = (void *)td->td_retval[0]; ua.len = PAGE_SIZE;
+		np[0] = '/';
+		memcpy(np + 1, kp, len);
+		error = copyout(np, ua.addr, len + 1);
+		if (error == 0) {
+			sa.path = (const char *)ua.addr;
+			error = sys_shm_open2(td, &sa);
+		}
+		fd = td->td_retval[0];
+		(void)sys_munmap(td, &ua);
+		td->td_retval[0] = fd;
+	}
+	return (error);
 }
 
 static int

@@ -17,6 +17,7 @@ extern int mach_port_insert_right(u32 task, u32 name, u32 poly, u32 poly_poly);
 extern int task_set_special_port(u32 task, int which, u32 port);
 extern long write(int fd, const void *buf, unsigned long n);
 extern int getpid(void);
+extern int posix_spawn(int *pid, const char *path, const void *fa, const void *attr, char *const argv[], char *const envp[]);
 extern int mach_port_move_member(u32 task, u32 member, u32 after);
 extern int mkdir(const char *path, unsigned short mode);
 extern int chown(const char *path, unsigned int uid, unsigned int gid);
@@ -180,7 +181,7 @@ xkey(const char *k)
 
 static void xu64(const char *k, u64 v) { xkey(k); xw[xn++] = 0x4000; xw[xn++] = (u32)v; xw[xn++] = (u32)(v >> 32); }
 static void xi64(const char *k, i64 v) { xkey(k); xw[xn++] = 0x3000; xw[xn++] = (u32)v; xw[xn++] = (u32)((u64)v >> 32); }
-static void xport(const char *k) { xkey(k); xw[xn++] = 0xd000; }
+static void xport(const char *k, u32 type) { xkey(k); xw[xn++] = type; }
 
 static void
 xsend(void)
@@ -221,18 +222,47 @@ reply(const struct hdr *q, int with_error, int code)
 	xsend();
 }
 
-/* the answer with a port: {"port": <send right>}; the right is made from the receive right of the service in this task */
+/* the answer with a port: {"port": <right>}.  disp: 20 makes a send right from the receive right that this task holds, 19 copies a send right that it holds, 16 moves the receive right to
+ * the requester (the check-in of a service; the type word of a receive right in the XPC data is 0x15000, of a send right 0xd000) */
 static void
-reply_port(const struct hdr *q, u32 svc)
+reply_port(const struct hdr *q, u32 svc, u32 disp)
 {
 	if (q->remote == 0)
 		return;
 	xbegin(q, 1);
-	xw[xn++] = svc; xw[xn++] = 0; xw[xn++] = (20u << 16) | 0;	/* the descriptor: MAKE_SEND (20), type 0 = port */
+	xw[xn++] = svc; xw[xn++] = 0; xw[xn++] = (disp << 16) | 0;	/* the descriptor: the right, type 0 = port */
 	xdict();
-	xport("port");
+	xport("port", disp == 16 ? 0x15000 : 0xd000);
 	vouch(q);
 	xsend();
+}
+
+/* the services: the ones that this task serves (the dirhelper) and the ones that a program checked in (this task keeps a send right for the look-ups) */
+struct svc { int used, own; char name[96]; u32 port; };
+static struct svc svcs[64];
+
+static struct svc *
+svc_find(const char *n)
+{
+	int i;
+
+	for (i = 0; i < 64; i++)
+		if (svcs[i].used && same(n, svcs[i].name)) return (&svcs[i]);
+	return (0);
+}
+
+static struct svc *
+svc_add(const char *n, u32 port, int own)
+{
+	int i, k;
+
+	for (i = 0; i < 64; i++)
+		if (!svcs[i].used) {
+			for (k = 0; k < 95 && n[k]; k++) svcs[i].name[k] = n[k];
+			svcs[i].name[k] = 0; svcs[i].used = 1; svcs[i].port = port; svcs[i].own = own;
+			return (&svcs[i]);
+		}
+	return (0);
 }
 
 /*
@@ -364,8 +394,14 @@ mig_reply_code(const struct hdr *q, u32 code)
 static u32 svc_port;
 static u32 dir_port;
 
+static u32
+tr_uid(const struct hdr *h)
+{
+	return (trailer_of(h)[6]);
+}
+
 int
-main(void)
+main(int argc, char **argv, char **envp)
 {
 	u32 port = 0, set = 0;
 	int kr;
@@ -380,7 +416,27 @@ main(void)
 		out("launchd: no bootstrap port, error "); outx((u32)kr); out("\n");
 		return (1);
 	}
+	svc_add("com.apple.bsd.dirhelper", dir_port, 1);
 	out("launchd: serving the bootstrap port\n");
+	{
+		/* the services of the system that are started with the launchd (on a Mac the plists of /System/Library/LaunchDaemons say which): the programs on the command line, or notifyd */
+		static const char *dflt[] = { "/usr/sbin/notifyd", 0 };
+		const char **progs = dflt;
+		int i, n = argc > 1 ? argc - 1 : 1;
+		static const char *given[16];
+
+		if (argc > 1) {
+			for (i = 0; i < argc - 1 && i < 15; i++) given[i] = argv[i + 1];
+			given[i] = 0; progs = given;
+		}
+		for (i = 0; i < n && progs[i]; i++) {
+			int pid = 0;
+			char *av[2] = { (char *)progs[i], 0 };
+
+			if (posix_spawn(&pid, progs[i], 0, 0, av, envp) == 0) { out("launchd: started "); out(progs[i]); out("\n"); }
+			else { out("launchd: cannot start "); out(progs[i]); out("\n"); }
+		}
+	}
 	for (;;) {
 		const u32 *tr;
 
@@ -438,9 +494,23 @@ main(void)
 
 			if (v != 0 && (*v >> 12) == 9) {
 				out("launchd:   name "); out((const char *)(v + 2)); out("\n");
-				if ((rq.h.id & 0xfff) >= 0x320 || (rq.h.id & 0xfff) == 0xcf) {
-					if (same((const char *)(v + 2), "com.apple.bsd.dirhelper")) {
-						reply_port(&rq.h, dir_port);
+				{
+					u32 rt = rq.h.id & 0xfff;
+					struct svc *sv = svc_find((const char *)(v + 2));
+
+					if (rt == 0xce) {		/* check-in: the service gets the receive right of its port */
+						if (sv == 0 && tr_uid(&rq.h) == 0) {
+							u32 p = 0;
+
+							if (mach_port_allocate(mach_task_self_, 1, &p) == 0 && mach_port_insert_right(mach_task_self_, p, p, 20) == 0)
+								sv = svc_add((const char *)(v + 2), p, 0);
+							if (sv) { reply_port(&rq.h, sv->port, 16); continue; }
+						}
+						reply(&rq.h, 1, 1);		/* known already, or not allowed: BOOTSTRAP_NOT_PRIVILEGED-like */
+						continue;
+					}
+					if ((rt >= 0x320 || rt == 0xcf) && sv) {	/* look-up */
+						reply_port(&rq.h, sv->port, sv->own ? 20 : 19);
 						continue;
 					}
 				}
