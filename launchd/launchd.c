@@ -17,6 +17,10 @@ extern int mach_port_insert_right(u32 task, u32 name, u32 poly, u32 poly_poly);
 extern int task_set_special_port(u32 task, int which, u32 port);
 extern long write(int fd, const void *buf, unsigned long n);
 extern int getpid(void);
+extern int mach_port_move_member(u32 task, u32 member, u32 after);
+extern int mkdir(const char *path, unsigned short mode);
+extern int chown(const char *path, unsigned int uid, unsigned int gid);
+extern int chmod(const char *path, unsigned short mode);
 extern void exit(int);
 
 #define	MACH_SEND_MSG	1
@@ -127,102 +131,319 @@ xpc_find(const struct hdr *h, u32 start, const char *key)
 	return (0);
 }
 
+/*
+ * The answers.  Every answer is a dictionary; the ones for a requester that the launchd must vouch for carry "req_pid" and "rec_execcnt" (the pid and the exec count of the
+ * requester, from the audit token of the request): libxpc checks them when the answer comes from a user 0 (_xpc_domain_routine_authenticate).
+ */
+static u32 *xw;			/* the message that is being built */
+static u32 xn;			/* its size in words */
+static u32 xcount, xsizeat, xcountat;
+
+static void
+xbegin(const struct hdr *q, int ndesc)
+{
+	xw = (u32 *)&rp.h;
+	rp.h.bits = ndesc ? 0x80000012u : 0x12;		/* MACH_MSG_TYPE_MOVE_SEND_ONCE for the remote port; complex if there are descriptors */
+	rp.h.remote = q->remote;
+	rp.h.local = 0;
+	rp.h.voucher = 0;
+	rp.h.id = 0x20000000;				/* the id of an XPC reply: libxpc checks it */
+	xn = 6;
+	if (ndesc) { xw[xn++] = ndesc; }
+}
+
+static void
+xdict(void)
+{
+	xw[xn++] = 0x40585043; xw[xn++] = 5; xw[xn++] = 0xf000;
+	xsizeat = xn; xw[xn++] = 0;
+	xcountat = xn; xw[xn++] = 0;
+	xcount = 0;
+}
+
+static void
+xkey(const char *k)
+{
+	u32 n = 0;
+
+	while (k[n]) n++;
+	n++;						/* the NUL */
+	{
+		char *d = (char *)&xw[xn];
+		u32 i;
+
+		for (i = 0; i < ((n + 3) & ~3u); i++) d[i] = i < n ? k[i] : 0;
+	}
+	xn += (n + 3) / 4;
+	xcount++;
+}
+
+static void xu64(const char *k, u64 v) { xkey(k); xw[xn++] = 0x4000; xw[xn++] = (u32)v; xw[xn++] = (u32)(v >> 32); }
+static void xi64(const char *k, i64 v) { xkey(k); xw[xn++] = 0x3000; xw[xn++] = (u32)v; xw[xn++] = (u32)((u64)v >> 32); }
+static void xport(const char *k) { xkey(k); xw[xn++] = 0xd000; }
+
+static void
+xsend(void)
+{
+	xw[xsizeat] = (xn - xsizeat - 1) * 4;
+	xw[xcountat] = xcount;
+	rp.h.size = xn * 4;
+	mach_msg(&rp.h, MACH_SEND_MSG, xn * 4, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
+}
+
+/* the audit token of the request, in the trailer */
+static const u32 *
+trailer_of(const struct hdr *h)
+{
+	return ((const u32 *)((const char *)h + ((h->size + 3) & ~3u)));
+}
+
+static void
+vouch(const struct hdr *q)
+{
+	const u32 *tr = trailer_of(q);
+
+	xu64("req_pid", tr[10]);
+	xu64("rec_execcnt", tr[12]);
+}
+
 /* the answer: a dictionary with no entry, or with {"error": code} */
 static void
 reply(const struct hdr *q, int with_error, int code)
 {
-	u32 *w = (u32 *)&rp.h, n = 0;
-
 	if (q->remote == 0)
 		return;
-	rp.h.bits = 0x12;				/* MACH_MSG_TYPE_MOVE_SEND_ONCE for the remote port */
-	rp.h.remote = q->remote;
-	rp.h.local = 0;
-	rp.h.voucher = 0;
-	rp.h.id = q->id;
-	w[6] = 0x40585043;
-	w[7] = 5;
-	w[8] = 0xf000;
-	if (with_error) {
-		w[9] = 24; w[10] = 1;
-		w[11] = 0x6f727265; w[12] = 0x72;	/* "error" and the NUL, padded to 8 */
-		w[13] = 0x3000;				/* int64 */
-		w[14] = (u32)code; w[15] = 0;
-		n = 64;
-	} else {
-		w[9] = 4; w[10] = 0;
-		n = 44;
-	}
-	rp.h.size = n;
-	mach_msg(&rp.h, MACH_SEND_MSG, n, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
+	xbegin(q, 0);
+	xdict();
+	if (with_error)
+		xi64("error", code);
+	vouch(q);
+	xsend();
 }
 
 /* the answer with a port: {"port": <send right>}; the right is made from the receive right of the service in this task */
 static void
 reply_port(const struct hdr *q, u32 svc)
 {
+	if (q->remote == 0)
+		return;
+	xbegin(q, 1);
+	xw[xn++] = svc; xw[xn++] = 0; xw[xn++] = (20u << 16) | 0;	/* the descriptor: MAKE_SEND (20), type 0 = port */
+	xdict();
+	xport("port");
+	vouch(q);
+	xsend();
+}
+
+/*
+ * The service com.apple.bsd.dirhelper: the per-user directories of libsystem_coreservices (confstr(_CS_DARWIN_USER_DIR, _TEMP_DIR, _CACHE_DIR)) live in
+ * /var/folders/<2 characters>/<30 characters>/{0,T,C}.  The name is the UUID of the user (16 bytes: the compatibility prefix FFFFEEEE-DDDD-CCCC-BBBB-AAAA and the uid, as
+ * membership gives it without a directory service) and the uid again (4 bytes, big endian), 20 bytes in all, written in base 32 with the alphabet below (5 bits at a
+ * time, the most significant first).  Found by reading libsystem_coreservices and checked against the names that it asks for (root: zz/zyxvpxvq6csfxvn_n0000000000000).
+ * The client asks the service to make the directories when they are missing: the message 0xb86d (no body); the answer is a MIG reply, id 0xb8d1, with the return code.
+ */
+static const char b32[] = "0123456789_bcdfghjklmnpqrstvwxyz";
+
+static void
+user_dir_name(u32 uid, char out[33])
+{
+	unsigned char b[20] = { 0xff, 0xff, 0xee, 0xee, 0xdd, 0xdd, 0xcc, 0xcc, 0xbb, 0xbb, 0xaa, 0xaa };
+	int i, bit;
+
+	for (i = 0; i < 4; i++)
+		b[12 + i] = b[16 + i] = (unsigned char)(uid >> (24 - 8 * i));
+	for (i = 0; i < 32; i++) {
+		u32 v = 0;
+
+		for (bit = 0; bit < 5; bit++) {
+			int p = i * 5 + bit;
+
+			v = (v << 1) | ((b[p / 8] >> (7 - p % 8)) & 1);
+		}
+		out[i] = b32[v];
+	}
+	out[32] = 0;
+}
+
+static void
+make_user_dirs(u32 uid, u32 gid)
+{
+	char n[33], top[24], dir[64], sub[72];
+	int i;
+	const char *pre = "/var/folders/", *names[] = { "/0", "/T", "/C" };
+
+	user_dir_name(uid, n);
+	for (i = 0; pre[i]; i++) top[i] = pre[i];
+	top[i++] = n[0]; top[i++] = n[1]; top[i] = 0;
+	mkdir("/var/folders", 0755);
+	mkdir(top, 0755);
+	for (i = 0; top[i]; i++) dir[i] = top[i];
+	dir[i++] = '/';
+	{
+		int k;
+
+		for (k = 2; k < 32; k++) dir[i++] = n[k];
+		dir[i] = 0;
+	}
+	mkdir(dir, 0700);
+	chown(dir, uid, gid);
+	chmod(dir, 0700);
+	for (i = 0; i < 3; i++) {
+		int j = 0, k;
+
+		for (k = 0; dir[k]; k++) sub[j++] = dir[k];
+		for (k = 0; names[i][k]; k++) sub[j++] = names[i][k];
+		sub[j] = 0;
+		mkdir(sub, 0700);
+		chown(sub, uid, gid);
+		chmod(sub, 0700);
+	}
+}
+
+/* "/var/folders/XX/<30>/" + the subdirectory of which (0: "0", 1: "T", 2: "C") + "/" + the suffix + "/" -> out; the directories are made (mode 0700, owned by the user) when make is set */
+static int
+suffix_dir(u32 uid, u32 gid, u32 which, const char *suffix, u32 slen, int make, char *out, u32 outsz)
+{
+	char n[33];
+	const char *sub = which == 1 ? "T" : which == 2 ? "C" : "0";
+	u32 i, p = 0;
+
+	if (which > 2 || slen == 0 || slen > 200)
+		return (22);
+	for (i = 0; i < slen; i++) {			/* the suffix is a relative path of plain components */
+		char c = suffix[i];
+
+		if (c == 0 && i == slen - 1) break;
+		if (c == 0 || c == '\\' || c < 32) return (22);
+		if (c == '/' && (i == 0 || suffix[i + 1] == '/')) return (22);
+		if (c == '.' && (i == 0 || suffix[i - 1] == '/') && (suffix[i + 1] == '.' || suffix[i + 1] == '/' || suffix[i + 1] == 0)) return (22);
+	}
+	user_dir_name(uid, n);
+	{
+		const char *pre = "/var/folders/";
+
+		for (i = 0; pre[i]; i++) out[p++] = pre[i];
+	}
+	out[p++] = n[0]; out[p++] = n[1]; out[p++] = '/';
+	for (i = 2; i < 32; i++) out[p++] = n[i];
+	out[p++] = '/'; out[p++] = sub[0]; out[p++] = '/';
+	if (make)
+		make_user_dirs(uid, gid);
+	for (i = 0; i < slen && suffix[i]; i++) {
+		if (p + 3 >= outsz) return (63);
+		out[p++] = suffix[i];
+		if (make && suffix[i + 1] == '/') {
+			out[p] = 0; mkdir(out, 0700); chown(out, uid, gid); chmod(out, 0700);
+		}
+	}
+	if (make) { out[p] = 0; mkdir(out, 0700); chown(out, uid, gid); chmod(out, 0700); }
+	if (out[p - 1] != '/') out[p++] = '/';
+	out[p] = 0;
+	return (0);
+}
+
+/* the answer of a MIG routine: the return code only */
+static void
+mig_reply_code(const struct hdr *q, u32 code)
+{
 	u32 *w = (u32 *)&rp.h;
 
 	if (q->remote == 0)
 		return;
-	rp.h.bits = 0x80000012u;
+	rp.h.bits = 0x12;
 	rp.h.remote = q->remote;
 	rp.h.local = 0;
 	rp.h.voucher = 0;
-	rp.h.id = q->id;
-	w[6] = 1;					/* one descriptor: the port */
-	w[7] = svc; w[8] = 0;
-	w[9] = (20u << 16) | 0;				/* MAKE_SEND (20), type 0 = port */
-	w[10] = 0x40585043;
-	w[11] = 5;
-	w[12] = 0xf000;
-	w[13] = 16; w[14] = 1;				/* a dictionary of 16 bytes with one entry: */
-	w[15] = 0x74726f70; w[16] = 0;			/* "port" */
-	w[17] = 0xd000;
-	rp.h.size = 72;
-	mach_msg(&rp.h, MACH_SEND_MSG, 72, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
+	rp.h.id = q->id + 100;
+	rp.h.size = 36;
+	w[6] = 0; w[7] = 1;				/* NDR record */
+	w[8] = code;
+	mach_msg(&rp.h, MACH_SEND_MSG, 36, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
 }
 
 static u32 svc_port;
+static u32 dir_port;
 
 int
 main(void)
 {
-	u32 port = 0;
+	u32 port = 0, set = 0;
 	int kr;
 
 	if ((kr = mach_port_allocate(mach_task_self_, 1, &port)) != 0 ||
 	    (kr = mach_port_insert_right(mach_task_self_, port, port, 20)) != 0 ||
+	    (kr = mach_port_allocate(mach_task_self_, 1, &dir_port)) != 0 ||
+	    (kr = mach_port_allocate(mach_task_self_, 3, &set)) != 0 ||
+	    (kr = mach_port_move_member(mach_task_self_, port, set)) != 0 ||
+	    (kr = mach_port_move_member(mach_task_self_, dir_port, set)) != 0 ||
 	    (kr = task_set_special_port(mach_task_self_, 4, port)) != 0) {
 		out("launchd: no bootstrap port, error "); outx((u32)kr); out("\n");
 		return (1);
 	}
 	out("launchd: serving the bootstrap port\n");
 	for (;;) {
-		kr = mach_msg(&rq.h, MACH_RCV_MSG | MACH_RCV_LARGE, 0, sizeof(rq), port, MACH_MSG_TIMEOUT_NONE, 0);
+		const u32 *tr;
+
+		kr = mach_msg(&rq.h, MACH_RCV_MSG | MACH_RCV_LARGE | (3u << 24), 0, sizeof(rq), set, MACH_MSG_TIMEOUT_NONE, 0);
 		if (kr != 0) {
 			out("launchd: receive error "); outx((u32)kr); out("\n");
+			continue;
+		}
+		tr = (const u32 *)(rq.raw + ((rq.h.size + 3) & ~3u));	/* the trailer: type, size, seqno, security token (2 words), audit token (auid euid egid ruid rgid pid ...) */
+		if (rq.h.local == dir_port) {			/* the dirhelper: the directories of the sender */
+			out("launchd: dirhelper request "); outx(rq.h.id); out(" uid "); outx(tr[6]); out("\n");
+			if (rq.h.id != 0xb86d) {
+				u32 i;
+
+				out("launchd:   size "); outx(rq.h.size); out(":");
+				for (i = 0; i < rq.h.size / 4 && i < 40; i++) { out(" "); outx(((u32 *)&rq.h)[i]); }
+				out("\n");
+			}
+			if (rq.h.id == 0xb86d) {
+				make_user_dirs(tr[6], tr[7]);
+				mig_reply_code(&rq.h, 0);
+			} else if (rq.h.id == 0xb872 && rq.h.size >= 48) {		/* (which, flags, suffix: a string, size of the answer): the directory of the process in the user directory, made if need be; the answer has its path */
+				const u32 *w = (const u32 *)&rq.h;
+				u32 which = w[8], slen = w[11], plen, i;
+				static char path[1100];
+				int rc = rq.h.size >= 48 + ((slen + 3) & ~3u) - 4 ? suffix_dir(tr[6], tr[7], which, (const char *)&w[12], slen, (w[9] & 0xff) != 0, path, 1024) : 22;
+
+				if (rc != 0) { mig_reply_code(&rq.h, 0x10000000 | rc); continue; }
+				for (plen = 0; path[plen]; plen++)
+					;
+				plen++;
+				{
+					u32 *x = (u32 *)&rp.h;
+					u32 pad = (plen + 3) & ~3u;
+
+					rp.h.bits = 0x12; rp.h.remote = rq.h.remote; rp.h.local = 0; rp.h.voucher = 0; rp.h.id = rq.h.id + 100;
+					x[6] = 0; x[7] = 1;
+					x[8] = 0;		/* RetCode */
+					x[9] = 0;		/* the offset of the string */
+					x[10] = plen;		/* its length with the NUL */
+					for (i = 0; i < pad; i++) ((char *)&x[11])[i] = i < plen ? path[i] : 0;
+					x[11 + pad / 4] = 0;	/* the out int that follows */
+					rp.h.size = (11 + pad / 4 + 1) * 4;
+					mach_msg(&rp.h, MACH_SEND_MSG, rp.h.size, 0, 0, MACH_MSG_TIMEOUT_NONE, 0);
+				}
+			} else
+				mig_reply_code(&rq.h, 0x47);	/* MIG_BAD_ID-like */
 			continue;
 		}
 		out("launchd: request "); outx(rq.h.id); out("\n");
 		if (xpc_start(&rq.h) == 0)
 			continue;
-		xpc_dump(&rq.h, xpc_start(&rq.h));
 		{
 			const u32 *v = xpc_find(&rq.h, xpc_start(&rq.h), "name");
 
 			if (v != 0 && (*v >> 12) == 9) {
 				out("launchd:   name "); out((const char *)(v + 2)); out("\n");
-			}
-		}
-		{
-			const u32 *v = xpc_find(&rq.h, xpc_start(&rq.h), "name");
-
-			if (v != 0 && (rq.h.id & 0xfff) >= 0x320 && same((const char *)(v + 2), "com.apple.test.nothing")) {
-				if (svc_port == 0)
-					mach_port_allocate(mach_task_self_, 1, &svc_port);
-				reply_port(&rq.h, svc_port);
-				continue;
+				if ((rq.h.id & 0xfff) >= 0x320 || (rq.h.id & 0xfff) == 0xcf) {
+					if (same((const char *)(v + 2), "com.apple.bsd.dirhelper")) {
+						reply_port(&rq.h, dir_port);
+						continue;
+					}
+				}
 			}
 		}
 		reply(&rq.h, (rq.h.id & 0xfff) >= 0x320, 3);

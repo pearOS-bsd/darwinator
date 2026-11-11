@@ -10,4 +10,11 @@ Build: `make` (needs the llvm21 package). Run (as root, with `kern.darwinator.dy
 
 Next: the check-in of a daemon (the service gets the receive right), starting the daemons from the plists of `/System/Library/LaunchDaemons` on demand, `launchctl`, and the start from the boot scripts of pearOS.
 
-`mkfolders.sh` makes `/var/folders/zz/<hash>/{T,C,0}` for root and nobody: the daemons written in Swift stop at `Unable to read _CS_DARWIN_USER_CACHE_DIR` without it (the service `com.apple.bsd.dirhelper` of the Mac makes these on demand; the launchd does not yet).
+## The services
+
+- **Bootstrap look-up and check-in** (libxpc: the ids `0xcf`, `0x324`, `0x325`): `{"port": <send right>}` for a service that exists, `{"error": ESRCH}` for the others.  Every answer has the id `0x20000000` (libxpc checks it), comes from a sender that the kernel reports as pid 1, and carries `req_pid` and `rec_execcnt` of the requester (libxpc checks them when the answer comes from user 0).
+- **`com.apple.bsd.dirhelper`**: the per-user directories of libsystem_coreservices (`confstr(_CS_DARWIN_USER_DIR / _TEMP_DIR / _CACHE_DIR)`), for any user: `/var/folders/<2>/<30>/{0,T,C}/<suffix>/`.  The name is the base-32 encoding (alphabet `0123456789_bcdfghjklmnpqrstvwxyz`, most significant bits first) of the 20 bytes `FFFFEEEE-DDDD-CCCC-BBBB-AAAA` + uid (the compatibility UUID of the uid) + uid, all big endian; checked against the names that the library asks for (root: `zz/zyxvpxvq6csfxvn_n0000000000000`).  The routines: `0xb86d` (make the user's directory and `0`, `T`, `C`) and `0xb872` (make the directory of a process in one of them, the suffix being its bundle id; the answer has the path).  The owner is read from the audit token of the request.
+
+`mkfolders.sh` makes the directories of root and nobody at the start, so the first program does not have to wait for the service.
+
+`lookuptest NAME` asks the bootstrap port for a service (what `bootstrap_look_up` of a program does); `lookuptest NAME stop` stops itself first, to attach a debugger.
