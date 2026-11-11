@@ -172,6 +172,16 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 			kevp[i].flags |= EV_RECEIPT;
 		kevp[i].fflags = kevp[i].filter == EVFILT_TIMER ? timer_fflags_from_darwin(d.fflags) : d.fflags;
 		kevp[i].data = d.data;
+		if (kevp[i].filter == EVFILT_TIMER && (d.fflags & 0x10) != 0) {		/* NOTE_ABSTIME: a deadline in mach_absolute_time (the uptime in ns); FreeBSD's is another clock, so it becomes a time from now */
+			struct timespec nowts;
+			int64_t now, rel;
+
+			nanouptime(&nowts);
+			now = (int64_t)nowts.tv_sec * 1000000000LL + nowts.tv_nsec;
+			rel = d.data - now;
+			kevp[i].fflags = NOTE_NSECONDS;
+			kevp[i].data = rel > 0 ? rel : 1;
+		}
 		kevp[i].udata = (void *)d.udata;
 		kevp[i].ext[0] = d.ext[0];
 		kevp[i].ext[1] = d.ext[1];
@@ -242,6 +252,8 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 				}
 			}
 		}
+		if (darwin_debug >= 2)
+			printf("darwinator: %s[%d]: event out: ident %#lx filter %d flags %#x fflags %#x data %#lx udata %#lx ext %#lx %#lx\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, d.filter, d.flags, d.fflags, (u_long)d.data, (u_long)d.udata, (u_long)d.ext[0], (u_long)d.ext[1]);
 		if (a->size == 72) {
 			char raw[72];
 
