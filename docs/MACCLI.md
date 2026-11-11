@@ -27,3 +27,15 @@ The tools run with the dyld and the libSystem of the Mac itself (the module of t
 | the program is killed by a signal | | 330 (267 SIGILL, 33 SIGUSR-like 127, 17 SIGABRT, 7 SIGSEGV) |
 
 How it went: 900 tools were killed at the first run, 617 after the Mach traps `thread_get_special_reply_port` and `host_create_mach_voucher_trap` and the answer of the bootstrap port, 267 after `proc_info` (flavor 17) for libdispatch.  The tools that are left die in libdispatch (the work queue: `workq_kernreturn` is not a real work queue), in libxpc (check-ins and routines of launchd other than the look-up, ids 0x324 and 0x325) or because a library of the Mac is not on the machine.
+
+## The 267 tools that died with SIGILL, compared with the Mac (2026-11-11)
+
+The list of 267 (the tools that ended on SIGILL in the first full sweep) was run on the pearOS VM (real dyld, `nobody`, no arguments, 8 s) and on a Mac (Tahoe 26.7.2, Intel VM, 5 s).  Same exit class as the Mac's: 43 before the fixes of this day, **127 of 265** after them.
+
+| class | before | after |
+|---|---|---|
+| SIGILL | 267 | 44 (34 of them do not die on the Mac) |
+| timeout (daemons that wait, as on the Mac) | 18 | 190 |
+| exit 1 (usage) | 4 | 21 |
+
+The fixes: the features of `bsdthread_register` (kevent, workloop), the Mach traps 22/23/43/76 and `mk_timer` (91-95), `EVFILT_USER` no longer swallowed (only the workloop filter -17), the trailer of received messages (audit token; the launchd is pid 1), the threads of libpthread (TSD base, `MACH_THREAD_SELF`), and the kqueue table (64 slots) that was not freed when a process exited, which made the tools after the 64th die.  What is left: services that need the launchd (`com.apple.bsd.dirhelper` for `confstr(_CS_DARWIN_USER_DIR)`, check-in of daemons) and a few signature checks (`platformBinary`).
