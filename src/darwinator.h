@@ -28,6 +28,9 @@ extern int darwin_debug;
 struct proc;
 void darwin_kq_exit(struct proc *p);
 void darwin_pth_exit(struct proc *p);
+struct thread;
+void *darwin_mach_port_for_event(struct thread *td, uint32_t name);
+int darwin_mach_event_receive(struct thread *td, uint32_t name, uint32_t option, uint64_t buf, uint32_t bufsize, uint32_t *msgsize);
 extern int darwin_stop;
 extern int darwin_dyld;			/* kern.darwinator.dyld: run a dynamic Mach-O with the dyld that the file names */
 

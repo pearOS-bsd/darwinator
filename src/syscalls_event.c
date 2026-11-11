@@ -104,7 +104,9 @@ struct dkev {
 struct dkev_arg {
 	char	*in, *out;		/* the user arrays, advanced as the kernel takes and gives events */
 	size_t	size;			/* 32 or 48 */
+	uint64_t dout, davail;		/* kevent_qos: the buffer in which the events of Mach ports bring their messages, and what is left of it */
 };
+
 
 /* Darwin's filters: -10 is EVFILT_USER (FreeBSD -11), -8 (Mach ports) and -12 (VM) have no counterpart */
 static int
@@ -115,7 +117,11 @@ filter_from_darwin(int f)
 		return (f);
 	case -10:
 		return (EVFILT_USER);
+	case -8:
+		return (EVFILT_EMPTY);		/* EVFILT_MACHPORT: the slot is taken by mach_ipc.c */
 	default:
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: kevent filter %d is not implemented\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, f);
 		return (0x7000);		/* unknown to the kernel: the change comes back as an EV_ERROR event */
 	}
 }
@@ -123,7 +129,7 @@ filter_from_darwin(int f)
 static int
 filter_to_darwin(int f)
 {
-	return (f == EVFILT_USER ? -10 : f);
+	return (f == EVFILT_USER ? -10 : f == EVFILT_EMPTY ? -8 : f);
 }
 
 static uint32_t
@@ -165,6 +171,20 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		kevp[i].udata = (void *)d.udata;
 		kevp[i].ext[0] = d.ext[0];
 		kevp[i].ext[1] = d.ext[1];
+		if (d.filter == -8) {			/* EVFILT_MACHPORT: the port, found now, goes with the change; the options of the receive in ext[3] */
+			kevp[i].ext[3] = d.fflags;
+			kevp[i].fflags = 0;
+			if (d.flags & EV_ADD) {
+				void *port = darwin_mach_port_for_event(curthread, (uint32_t)d.ident);
+
+				if (darwin_debug >= 1)
+					printf("darwinator: %s[%d]: EVFILT_MACHPORT add for name %#lx: %s (options %#x, flags %#x)\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, port ? "found" : "no receive right with this name", d.fflags, d.flags);
+				if (port == NULL)
+					kevp[i].filter = 0x7000;	/* no such port (or no receive right): the change comes back as an error */
+				else
+					kevp[i].ext[2] = (uint64_t)(uintptr_t)port;
+			}
+		}
 	}
 	return (0);
 }
@@ -186,6 +206,27 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 		d.udata = (uint64_t)kevp[i].udata;
 		d.ext[0] = kevp[i].ext[0];
 		d.ext[1] = kevp[i].ext[1];
+		if (kevp[i].filter == EVFILT_EMPTY) {		/* EVFILT_MACHPORT: with MACH_RCV_MSG the message comes with the event (ext[0]: where, ext[1]: its size, fflags: the result of the receive) */
+			uint32_t opt = (uint32_t)kevp[i].ext[3], got = 0;
+			uint64_t buf = kevp[i].ext[0];
+			uint32_t bsz = (uint32_t)kevp[i].ext[1];
+			bool fromdout = false;
+			int kr;
+
+			d.fflags = 0;
+			d.ext[0] = d.ext[1] = 0;
+			if ((opt & 0x2) != 0 && (kevp[i].flags & EV_EOF) == 0) {
+				if (buf == 0) { buf = a->dout; bsz = (uint32_t)MIN(a->davail, (uint64_t)0x7fffffff); fromdout = true; }
+				kr = buf != 0 ? darwin_mach_event_receive(curthread, (uint32_t)kevp[i].ident, opt, buf, bsz, &got) : 0x10004004;
+				d.fflags = (uint32_t)kr;
+				d.ext[0] = buf; d.ext[1] = got;
+				if (kr == 0 && fromdout) {
+					uint64_t adv = ((uint64_t)got + 7) & ~7ULL;
+
+					a->dout += adv; a->davail -= MIN(adv, a->davail);
+				}
+			}
+		}
 		if (a->size == 72) {
 			char raw[72];
 
@@ -291,6 +332,7 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 	uint32_t flags = (uint32_t)uap->a[7];
 	struct timespec zero = { 0, 0 };
 	struct dkev_arg a = { .in = (char *)uap->a[1], .out = (char *)uap->a[3], .size = 72 };
+	uint64_t davail0 = 0;
 	struct kevent_copyops ops = { .arg = &a, .k_copyout = darwin_kev_copyout, .k_copyin = darwin_kev_copyin, .kevent_size = sizeof(struct kevent) };
 
 	if ((int)uap->a[2] > 0) {		/* EVFILT_WORKLOOP (-17) changes make or configure the workloop itself: there is no kernel workqueue here, so they succeed without events */
@@ -305,7 +347,12 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 		if ((error = kq_for(td, byid ? (int64_t)uap->a[0] : -1, &fd)) != 0)
 			return (error);
 	}
+	if (uap->a[5] != 0 && uap->a[6] != 0 && copyin((void *)uap->a[6], &davail0, sizeof(davail0)) == 0) {
+		a.dout = uap->a[5]; a.davail = davail0;
+	}
 	error = kern_kevent(td, fd, (int)uap->a[2], (int)uap->a[4], &ops, (flags & 1) ? &zero : NULL);
+	if (a.dout != 0 && a.davail != davail0)
+		(void)copyout(&a.davail, (void *)uap->a[6], sizeof(a.davail));
 	if (error != 0 && darwin_debug >= 1)
 		printf("darwinator: %s[%d]: kevent_%s(%d, nchanges %d, nevents %d, flags %#x) failed: %d\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", fd, (int)uap->a[2], (int)uap->a[4], flags, error);
 	return (error);
