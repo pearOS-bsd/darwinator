@@ -9,3 +9,5 @@ A Mach-O program (built on FreeBSD with `clang` and `ld64.lld`, linked against t
 Build: `make` (needs the llvm21 package). Run (as root, with `kern.darwinator.dyld=1`): `./launchd &`.
 
 Next: the check-in of a daemon (the service gets the receive right), starting the daemons from the plists of `/System/Library/LaunchDaemons` on demand, `launchctl`, and the start from the boot scripts of pearOS.
+
+`mkfolders.sh` makes `/var/folders/zz/<hash>/{T,C,0}` for root and nobody: the daemons written in Swift stop at `Unable to read _CS_DARWIN_USER_CACHE_DIR` without it (the service `com.apple.bsd.dirhelper` of the Mac makes these on demand; the launchd does not yet).
