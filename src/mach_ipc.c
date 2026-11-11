@@ -1313,8 +1313,10 @@ recv_msg(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, uin
 		if (el > 3) el = 3;
 		tr[0] = 0; tr[1] = tsize; tr[2] = 0;
 		tr[3] = m->suid; tr[4] = m->sgid;				/* the security token */
-		tr[5] = m->suid; tr[6] = m->suid; tr[7] = m->sgid; tr[8] = m->suid; tr[9] = m->sgid;	/* auid euid egid ruid rgid */
-		tr[10] = m->spid; tr[11] = 0; tr[12] = 0;			/* pid asid pidversion */
+		tr[5] = 0xffffffffu; tr[6] = m->suid; tr[7] = m->sgid; tr[8] = m->suid; tr[9] = m->sgid;	/* auid euid egid ruid rgid, as TASK_AUDIT_TOKEN gives them */
+		tr[10] = m->spid; tr[11] = m->spid; tr[12] = 1;		/* pid asid pidversion (the exec count: 1, as in the token of the task) */
+		if (darwin_debug >= 2)
+			printf("darwinator: %s[%d]: received id %#x, size %u, option %#x, buffer %u: trailer %u bytes (sender pid %d)%s\n", td->td_proc->p_comm, td->td_proc->p_pid, rd32(d, 20), m->size, option, rsize, tsize, m->spid, at + tsize <= rsize ? "" : " DOES NOT FIT");
 		if (at + tsize <= rsize)
 			(void)copyout(tr, (void *)(uintptr_t)(uaddr + at), tsize);
 	}
@@ -1980,7 +1982,7 @@ bootstrap_server(struct thread *td, struct ktask *t, struct kport *dest, struct 
 	r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 	r->data = rd = malloc(64, M_DARWIN_IPC, M_WAITOK | M_ZERO);
 	wr32(rd, 0, MM_MOVE_SEND_ONCE);
-	wr32(rd, 20, rd32(m->data, 20));			/* the id of the request */
+	wr32(rd, 20, 0x20000000);				/* the id of an XPC reply */
 	wr32(rd, 24, 0x40585043);				/* "CPX@" */
 	wr32(rd, 28, 5);					/* version */
 	wr32(rd, 32, 0xf000);					/* a dictionary ... */
