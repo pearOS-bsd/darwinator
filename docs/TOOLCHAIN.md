@@ -9,3 +9,7 @@ against is a text stub written in this repository (`tests/macho-toolchain/libSys
 
 The result runs on the module: dyld (still the one of a Mac) maps the program, finds `libhello.dylib` and `libSystem` and calls `write` through them.  This is the first step of the plan to build the whole userland (dyld, libSystem, libdispatch, objc4, frameworks) from open sources
 and to stop depending on the files of a Mac.
+
+## Objective-C (2026-11-11)
+
+`tests/macho-toolchain/objc/`: a root class with a class method, built on FreeBSD with `clang -fobjc-runtime=macosx` and `ld64.lld` against a text stub of libobjc, runs through the real dyld and the libobjc of the Mac and prints `objc: Hello answer = 42`.  So Objective-C code (the decompiled AppKit classes among it) can be compiled to Mach-O here; what is missing for them is the headers (Foundation, CoreFoundation) and the libraries to link against.
