@@ -19,13 +19,23 @@ extern long write(int, const void *, unsigned long);
 extern void free(void *);
 static void out(const char *s) { unsigned long n = 0; while (s[n]) n++; write(1, s, n); }
 
+static volatile int done;
+
 int
 main(void)
 {
 	xpc_object_t c = xpc_connection_create_mach_service("com.apple.coreservices.launchservicesd", 0, 0);
 	xpc_object_t m;
 
-	sleep(ASYNCTEST_WAIT);	/* time for a debugger to attach */
+	{
+		int w;
+
+		volatile unsigned long spin;
+
+		for (w = 0; w < ASYNCTEST_WAIT; w++)	/* time for a debugger to attach: a spin, since a sleep returns at every stop */
+			for (spin = 0; spin < 1000000000UL; spin++)
+				;
+	}
 
 	xpc_connection_set_event_handler(c, ^(xpc_object_t e) { });
 	xpc_connection_resume(c);
@@ -38,8 +48,14 @@ main(void)
 
 		out("asynctest: reply: "); out(d); out("\n");
 		free(d);
+		done = 1;
 	});
-	sleep(3);
-	out("asynctest: done\n");
+	{
+		int w;
+
+		for (w = 0; w < 20 && !done; w++)
+			sleep(1);
+	}
+	out(done ? "asynctest: done\n" : "asynctest: no reply\n");
 	return 0;
 }

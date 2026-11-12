@@ -121,6 +121,7 @@ struct kport {
 	int		mprot;
 	bool		armed;			/* the timer holds a reference on the port while armed */
 	uint64_t	deadline;		/* the uptime of the expiry, in nanoseconds */
+	uint64_t	context;		/* mach_port_set_context: comes back in the trailer of every message received from this port (libxpc keeps the context of a call here and reads it from the trailer) */
 	struct knlist	kl;			/* the kqueue events of Darwin's EVFILT_MACHPORT: the notes of the kqueues that watch this port (or port set) */
 };
 
@@ -508,6 +509,7 @@ darwin_port_construct(struct thread *td, struct darwin_args *uap)
 		return (kr_ret(td, KERN_NO_SPACE));
 	}
 	p = kp_new(KP_PORT);
+	p->context = (uint64_t)uap->a[2];		/* the context, or the guard with MPO_CONTEXT_AS_GUARD (both are ip_context in XNU): libxpc keeps the context of a call here and reads it back from the trailer of the messages */
 	e = ent_add(t, p, MM_MOVE_RECEIVE);
 	p->refs--;
 	if (e == NULL) { kp_unref(p); kr = KERN_NO_SPACE; }
@@ -938,16 +940,37 @@ darwin_mk_timer_cancel(struct thread *td, struct darwin_args *uap)	/* (name, *re
 	return (kr_ret(td, kr));
 }
 
-/* mach_port_guard / mach_port_unguard (traps 41 and 42): a guarded port can only be changed by someone who knows the guard (libxpc guards the ports of its connections); the guard is not kept here */
+/* mach_port_guard / mach_port_unguard (traps 41 and 42): the guard is the context of the port (ip_context in XNU, the one that comes back in the trailer of a message); libxpc guards a port with the pointer of what it belongs to and reads it from the trailer of the answers */
 static int
 darwin_port_guard(struct thread *td, struct darwin_args *uap)	/* (target, name, guard[, strict]) */
 {
 	struct ktask *t;
+	struct kent *e;
 	int kr = KERN_INVALID_NAME;
 
 	sx_xlock(&km_sx);
-	if ((t = kt_task(td->td_proc)) != NULL && ent_by_name(t, (uint32_t)uap->a[1]) != NULL)
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
 		kr = KERN_SUCCESS;
+		if (e->recv)
+			e->port->context = (uint64_t)uap->a[2];
+	}
+	sx_xunlock(&km_sx);
+	return (kr_ret(td, kr));
+}
+
+static int
+darwin_port_unguard(struct thread *td, struct darwin_args *uap)	/* (target, name, guard) */
+{
+	struct ktask *t;
+	struct kent *e;
+	int kr = KERN_INVALID_NAME;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
+		kr = KERN_SUCCESS;
+		if (e->recv && e->port->context == (uint64_t)uap->a[2])
+			e->port->context = 0;
+	}
 	sx_xunlock(&km_sx);
 	return (kr_ret(td, kr));
 }
@@ -1354,7 +1377,7 @@ trailer_size(uint32_t option)
 {
 	uint32_t el = (option >> 24) & 0xf;
 
-	return (el == 0 ? 8 : el == 1 ? 12 : el == 2 ? 20 : el == 3 ? 52 : 60);
+	return (el == 0 ? 8 : el == 1 ? 12 : el == 2 ? 20 : el == 3 ? 52 : el == 4 ? 60 : el == 5 || el == 7 ? 64 : 68);	/* 4 context, 5 and 7 the filter policy id (msgh_ad), the others the labels too */
 }
 
 static int
@@ -1368,6 +1391,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 	int timo = (option & MACH_RCV_TIMEOUT) ? MAX(1, (int)((int64_t)timeout_ms * hz / 1000)) : 0, error = 0, i;
 	uint8_t *d;
 	uint32_t bits, ldisp0;
+	uint64_t ctxv = 0;
 
 	sx_xlock(&km_sx);
 	if ((t = kt_task(td->td_proc)) == NULL || (e = ent_by_name(t, rname)) == NULL || !e->recv) {
@@ -1413,6 +1437,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 		return (MACH_RCV_TOO_LARGE);
 	}
 	TAILQ_REMOVE(&srcp->q, m, link);
+	ctxv = srcp->context;
 	srcp->qn--;
 	if (srcp->set != NULL && srcp->set->qn > 0)
 		srcp->set->qn--;
@@ -1468,7 +1493,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 	}
 	error = copyout(d, (void *)(uintptr_t)uaddr, m->size);
 	if (error == 0) {		/* the trailer: the elements that the receiver asked for (the type and the size; the sequence number; the sender; the audit token), as far as the buffer goes */
-		uint32_t tsize = trailer_size(option), at = (m->size + 3) & ~3u, tr[15] = { 0 };
+		uint32_t tsize = trailer_size(option), at = (m->size + 3) & ~3u, tr[17] = { 0 };
 
 		if (msgsz != NULL)
 			*msgsz = at + tsize;
@@ -1476,7 +1501,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 		tr[3] = m->suid; tr[4] = m->sgid;				/* the security token */
 		tr[5] = 0xffffffffu; tr[6] = m->suid; tr[7] = m->sgid; tr[8] = m->suid; tr[9] = m->sgid;	/* auid euid egid ruid rgid, as TASK_AUDIT_TOKEN gives them */
 		tr[10] = m->spid; tr[11] = m->spid; tr[12] = 1;		/* pid asid pidversion (the exec count: 1, as in the token of the task) */
-		tr[13] = tr[14] = 0;						/* the context (the trailer of 60 bytes) */
+		tr[13] = (uint32_t)ctxv; tr[14] = (uint32_t)(ctxv >> 32);	/* the context of the port (the trailer of 60 bytes) */
 		if (darwin_debug >= 2)
 			printf("darwinator: %s[%d]: received id %#x, size %u, option %#x, buffer %u: trailer %u bytes (sender pid %d)%s\n", td->td_proc->p_comm, td->td_proc->p_pid, rd32(d, 20), m->size, option, rsize, tsize, m->spid, at + tsize <= rsize ? "" : " DOES NOT FIT");
 		if (at + tsize <= rsize)
@@ -2039,7 +2064,6 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 		}
 	case 3210: case 3216:				/* mach_port_set_mscount, mach_port_set_seqno: accepted */
 	case 3218:					/* mach_port_set_attributes: accepted */
-	case 3229:					/* mach_port_set_context */
 	case 8000: case 8001:				/* task_restartable_ranges_register (the ranges are not used), task_restartable_ranges_synchronize: libobjc needs them to answer 0 */
 	case 3407: case 3408:				/* task_suspend, task_resume */
 	case 3406:					/* task_set_info */
@@ -2049,9 +2073,26 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 	case 3447: case 3448:				/* dyld shared cache image info / state */
 		mig_reply_data(m, id, 0, NULL, 0);
 		return (true);
+	case 3229:					/* mach_port_set_context(task, name, context u64): the context of a receive right */
+		{
+			struct kent *e = m->size >= 44 ? ent_by_name(t, rd32(d, 32)) : NULL;
+
+			if (e == NULL || !e->recv) { mig_reply_data(m, id, e == NULL ? KERN_INVALID_NAME : KERN_INVALID_RIGHT, NULL, 0); return (true); }
+			e->port->context = (uint64_t)rd32(d, 36) | ((uint64_t)rd32(d, 40) << 32);
+			if (darwin_debug >= 1)
+				printf("darwinator: %s[%d]: mach_port_set_context(name %#x, %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, rd32(d, 32), (u_long)e->port->context);
+			mig_reply_data(m, id, 0, NULL, 0);
+			return (true);
+		}
 	case 3228:					/* mach_port_get_context(task, name, *context: 8 bytes) */
-		mig_reply_data(m, id, 0, out, 8);
-		return (true);
+		{
+			struct kent *e = m->size >= 36 ? ent_by_name(t, rd32(d, 32)) : NULL;
+			uint64_t cv = e != NULL && e->recv ? e->port->context : 0;
+
+			if (e == NULL || !e->recv) { mig_reply_data(m, id, e == NULL ? KERN_INVALID_NAME : KERN_INVALID_RIGHT, NULL, 0); return (true); }
+			mig_reply_data(m, id, 0, &cv, 8);
+			return (true);
+		}
 	case 3405:					/* task_info(task, flavor, *info, *count) */
 		a = m->size >= 40 ? rd32(d, 32) : 0;
 		if (darwin_debug >= 2)
@@ -3116,7 +3157,7 @@ static const struct {
 	E(23, 3, darwin_port_extract_member,	"_kernelrpc_mach_port_extract_member_trap"),
 	E(40, 5, darwin_port_get_attributes_trap,	"_kernelrpc_mach_port_get_attributes_trap"),
 	E(41, 4, darwin_port_guard,		"_kernelrpc_mach_port_guard_trap"),
-	E(42, 3, darwin_port_guard,		"_kernelrpc_mach_port_unguard_trap"),
+	E(42, 3, darwin_port_unguard,		"_kernelrpc_mach_port_unguard_trap"),
 	E(43, 3, darwin_generate_activity_id,	"mach_generate_activity_id"),
 	E(44, 3, darwin_task_for_pid_trap,	"task_name_for_pid"),
 	E(45, 3, darwin_task_for_pid_trap,	"task_for_pid"),
