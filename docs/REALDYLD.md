@@ -41,3 +41,12 @@ instruction so that `lldb -p PID` can attach (`process handle SIGSTOP -p false -
 - `task_get_special_port` of a valid port that is not set answers success with a null port.
 - The bootstrap routines 0x320-0x325 answer `{"error": ESRCH}`.
 - Result: `archiveutil` runs to the end. The other tools that died with SIGILL now stop in libxpc (`_xpc_connection_init_failed`) when a service such as cfprefsd is needed: this is the launchd work (a real bootstrap with services), not the kernel.
+
+## ControlCenter of the Mac (a plain, not protected, binary) runs
+
+What it needed, in the order it failed (each one is a file or an answer, not a change of the program):
+1. `/System/Library/CoreServices/SystemVersion.plist` (else HIServices `_RegisterApplication` aborts with `GetMacOSXSystemVersionInformation failed`).
+2. The check-in of LaunchServices (command 500) with an answer in the shape of the real daemon, with the serial-number marker uuid (lsd-stub, see its README); NSXPC messages (`replysig`) are not answered (an answer without the NSXPC fields crashes `_xpc_connection_call_reply_async`).
+3. `syscall(2)`, the indirect call by number (darwinator).
+4. `/System/Library/CoreServices/SystemAppearance.bundle` and the `Resources` of AppKit (`Assets.car`): without them `+[NSAppearance _aquaAppearance]` throws, and the throw ends in a crash of the unwinder (not examined: it happens when an exception goes through frames of the shared cache; a program of ours with its own @try/@catch works).
+Files from the Mac are only in the VM (listed in `/root/macdeps.list`). Tip: the paths a program fails to find are in the trace of `kern.darwinator.debug=2` (the `open`/`stat` lines before the last one).
