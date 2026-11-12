@@ -645,6 +645,9 @@ darwin_setitimer(struct thread *td, struct darwin_args *uap)
 	error = copyin((void *)uap->a[1], &nv, sizeof(nv));
 	if (error != 0)
 		return (error);
+	/* Darwin's timeval has a 32 bit tv_usec and four bytes of padding after it (not zero in what alarm() builds): FreeBSD's is 64 bits, and a garbage upper half made the call fail with EINVAL */
+	nv.it_interval.tv_usec = (int32_t)nv.it_interval.tv_usec;
+	nv.it_value.tv_usec = (int32_t)nv.it_value.tv_usec;
 	error = kern_setitimer(td, (u_int)uap->a[0], &nv, &ov);
 	if (error == 0 && uap->a[2] != 0)
 		error = copyout(&ov, (void *)uap->a[2], sizeof(ov));
