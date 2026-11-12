@@ -25,6 +25,9 @@ extern int socket(int domain, int type, int protocol);
 extern int connect(int s, const void *name, unsigned int namelen);
 extern long send(int s, const void *buf, unsigned long len, int flags);
 extern long recvmsg(int s, void *msg, int flags);
+extern long sendmsg(int s, const void *msg, int flags);
+extern long recv(int s, void *buf, unsigned long len, int flags);
+extern int socketpair(int domain, int type, int protocol, int *sv);
 extern int close(int fd);
 extern long lseek(int fd, long off, int whence);
 extern void *mmap(void *addr, unsigned long len, int prot, int flags, int fd, long off);
@@ -53,6 +56,9 @@ static u32 set;
 static struct { u32 pid; int fd; } clients[64];
 /* the ports that this program made for ports of wsd's replies: the port, the client that got it, and the descriptor that stands for it at wsd (-1: none, the socket of the client) */
 static struct { u32 port; u32 pid; int fd; } pmap[256];
+
+/* the event channels: wsd sends events on a socket (the end that this program keeps), and they go as Mach messages to the port that the client gave in its request (a send right that this program holds) */
+static struct { int fd; u32 port; } evch[64];
 
 static int
 wsd_socket(u32 pid)
@@ -177,6 +183,87 @@ get_reply(int fd, u32 pid, u32 reply_remote)
 	return (0);
 }
 
+/* a complex request of the client: the port descriptors become descriptors of the socket (the first: this connection itself, the others: the end of a new socketpair; this program keeps the other end, and what comes on it
+ * goes to the port that the client gave), the out-of-line memory follows the message in the datagram */
+static int
+send_complex(int fd)
+{
+	static char dg[0x12100];
+	struct iovec iov;
+	struct msghdr mh;
+	char ctl[64];
+	int fds[8], nfds = 0, i, k;
+	u32 *w = (u32 *)&rq.h, ndesc = w[6], off = 0x1c, size = rq.h.size, tail;
+	long n;
+
+	copy(dg, &rq.h, size);
+	tail = size;
+	for (i = 0; i < (int)ndesc && off + 12 <= size; i++) {
+		unsigned char *d = (unsigned char *)dg + off;
+
+		if (d[11] == 0) {					/* a port descriptor */
+			u32 name = *(u32 *)(dg + off);
+			int sv[2];
+
+			if (nfds >= 8) return (-1);
+			if (nfds == 0)
+				fds[nfds++] = fd;			/* the first port stands for this connection */
+			else {
+				if (socketpair(1, 5, 0, sv) != 0) return (-1);
+				fds[nfds++] = sv[1];
+				for (k = 0; k < 64; k++)
+					if (evch[k].fd == 0) { evch[k].fd = sv[0]; evch[k].port = name; break; }
+				out("wsbridge:   event channel for the port "); outx(name); out("\n");
+			}
+			*(u32 *)d = (u32)nfds;				/* 1-based index into the descriptors that go with the datagram */
+			off += 12;
+		} else if (d[11] == 1) {				/* out-of-line memory: the bytes follow the message */
+			u64 addr = *(u64 *)d;
+			u32 len = *(u32 *)(d + 12);
+
+			if (tail + len > sizeof(dg)) return (-1);
+			copy(dg + tail, (const void *)(unsigned long)addr, len);
+			tail += len;
+			off += 16;
+		} else
+			return (-1);
+	}
+	iov.base = dg; iov.len = tail;
+	for (k = 0; k < (int)sizeof(mh); k++) ((char *)&mh)[k] = 0;
+	{
+		u32 *c = (u32 *)ctl;
+
+		for (k = 0; k < (int)sizeof(ctl); k++) ctl[k] = 0;
+		c[0] = 16 + 4 * nfds; c[1] = 0xffff; c[2] = 1;			/* the control message of FreeBSD: SOL_SOCKET, SCM_RIGHTS */
+		for (k = 0; k < nfds; k++) ((int *)(ctl + 16))[k] = fds[k];
+		mh.iov = &iov; mh.iovlen = 1; mh.control = ctl; mh.controllen = (16 + 4 * nfds + 7) & ~7u;
+	}
+	n = sendmsg(fd, &mh, 0);
+	for (k = 1; k < nfds; k++) close(fds[k]);			/* the ends that went to wsd */
+	return (n == (long)tail ? 0 : -1);
+}
+
+/* what wsd sent on the event channels: a message of the window server (the events of a client) -> the port of the client */
+static void
+poll_events(void)
+{
+	int k;
+
+	for (k = 0; k < 64; k++) {
+		long n;
+
+		if (evch[k].fd == 0) continue;
+		while ((n = recv(evch[k].fd, wbuf, sizeof(wbuf), 0x80 /* MSG_DONTWAIT */)) >= 24) {
+			struct hdr *h = (struct hdr *)wbuf;
+
+			h->bits = (h->bits & 0x80000000u) | 0x13;		/* a copy of the send right that this program holds */
+			h->remote = evch[k].port; h->local = 0; h->voucher = 0;
+			h->size = (u32)n;
+			mach_msg(h, MACH_SEND_MSG | 0x80 /* MACH_SEND_TIMEOUT */, (u32)n, 0, 0, 0, 0);
+		}
+	}
+}
+
 /* a message of a client to wsd and the reply back (the requests that carry rights or memory are not forwarded yet) */
 static void
 forward(const u32 *tr, u32 via_port)
@@ -192,14 +279,17 @@ forward(const u32 *tr, u32 via_port)
 	if (fd < 0)
 		goto fail;
 	if (rq.h.bits & 0x80000000u) {
-		out("wsbridge:   complex request: not forwarded yet\n");
-		goto fail;
-	}
-	if (send(fd, &rq.h, rq.h.size, 0) != (long)rq.h.size) goto fail;
+		if (send_complex(fd) != 0) {
+			out("wsbridge:   complex request: not forwarded\n");
+			goto fail;
+		}
+	} else if (send(fd, &rq.h, rq.h.size, 0) != (long)rq.h.size) goto fail;
 	if (rq.h.remote == 0)
 		return;							/* no reply port: nothing to wait for */
 	if (get_reply(fd, pid, rq.h.remote) != 0) goto fail;
-	out("wsbridge:   reply id "); outx(rp.h.id); out(" size "); outx(rp.h.size); out(" bits "); outx(rp.h.bits); out("\n");
+	out("wsbridge:   reply id "); outx(rp.h.id); out(" size "); outx(rp.h.size); out(" bits "); outx(rp.h.bits);
+	if (rp.h.size == 0x24 && !(rp.h.bits & 0x80000000u)) { out(" code "); outx(((u32 *)&rp.h)[8]); }
+	out("\n");
 	mach_msg(&rp.h, MACH_SEND_MSG, rp.h.size, 0, 0, 0, 0);
 	return;
 fail:
@@ -226,7 +316,10 @@ main(void)
 	for (;;) {
 		const u32 *tr;
 
-		kr = mach_msg(&rq.h, MACH_RCV_MSG | MACH_RCV_LARGE | (3u << 24), 0, sizeof(rq), set, 0, 0);
+		kr = mach_msg(&rq.h, MACH_RCV_MSG | MACH_RCV_LARGE | 0x100 /* MACH_RCV_TIMEOUT */ | (3u << 24), 0, sizeof(rq), set, 10, 0);
+		poll_events();
+		if (kr == 0x10004003)				/* timed out: only the event channels were looked at */
+			continue;
 		if (kr != 0) {
 			out("wsbridge: receive error "); outx((u32)kr); out("\n");
 			if (kr == 0x10004002) return (1);
