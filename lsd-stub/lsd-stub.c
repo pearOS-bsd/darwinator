@@ -39,10 +39,10 @@ handle(xpc_object_t peer, xpc_object_t m)
 }
 
 int
-main(void)
+main(int argc, char **argv)
 {
 	dq q = dispatch_queue_create("lsd-stub", 0);
-	xpc_object_t svc = xpc_connection_create_mach_service("com.apple.coreservices.launchservicesd", q, 1);
+	xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[1] : "com.apple.coreservices.launchservicesd", q, 1);
 
 	xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
 		out("lsd-stub: a connection\n");
