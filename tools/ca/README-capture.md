@@ -24,3 +24,12 @@ background colour from the first floats of the 0x58 block) and `wsbsd/tools/wssh
 
 With the Dock as it runs now the picture is the WallpaperLayer only: 1280x800 of (0.176, 0.176, 0.195) -- the solid colour the Dock
 sends when there is no wallpaper image (docs/screenshot-dock-wallpaper-ca.png).  The tile layers have no size and no contents yet.
+
+## The bar on the screen (2026-11-13)
+With `version = 1` in the preferences (tools/dock-prefs) the Dock builds its tiles: a bar of 266x72 and tile layers of 52x52 in slots of 56.  They have no
+contents yet (the Dock never asks for icons: no file of an icon is opened, no IconServices look-up), so `cadraw.py --icons=a.icns,b.icns` paints the glass of
+the bar and the icons that the preferences name on the layers that the Dock sent -- the layout is the Dock's, the pictures are ours:
+
+    python3 cadraw.py ca.bin /tmp/cadock.ppm 1280 800 --icons=ControlCenter.icns,Dock.icns   # then wsshow /tmp/cadock.ppm 0 0 5
+
+docs/screenshot-dock-bar-wsd.png is a wsshot of wsd with that picture.
