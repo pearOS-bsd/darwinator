@@ -756,6 +756,7 @@ static const struct {
 	const char	*name;
 } darwin_more[] = {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
+	E(499, 4, darwin_work_interval_ctl,	AUE_NULL,		"work_interval_ctl"),
 	E(357, 2, darwin_getaudit_addr,	AUE_NULL,		"getaudit_addr"),
 	E(116, 3, darwin_gettimeofday,	AUE_GETTIMEOFDAY,	"gettimeofday"),
 	/* processes and ids */
