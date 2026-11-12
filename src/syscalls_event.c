@@ -106,6 +106,8 @@ struct dkev_arg {
 	size_t	size;			/* 32 or 48 */
 	bool	errors_only;		/* KEVENT_FLAG_ERROR_EVENTS: the changes are receipted, and only the receipts that report an error come back */
 	int	nout;			/* the events that were really given in that mode */
+	struct { uint64_t ident, udata; int16_t filter; uint16_t flags; } chg[64];	/* the changes of this call as they were given: an error comes back with the flags of its change (libdispatch looks for EV_DELETE in it before it touches the udata of a note that it has freed already) */
+	int nchg;
 	uint64_t dout, davail;		/* kevent_qos: the buffer in which the events of Mach ports bring their messages, and what is left of it */
 };
 
@@ -239,6 +241,10 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 			kevp[i].data = rel > 0 ? rel : 1;
 		}
 		kevp[i].udata = (void *)d.udata;
+		if (a->nchg < (int)nitems(a->chg)) {
+			a->chg[a->nchg].ident = kevp[i].ident; a->chg[a->nchg].udata = d.udata; a->chg[a->nchg].filter = kevp[i].filter; a->chg[a->nchg].flags = d.flags;
+			a->nchg++;
+		}
 		kevp[i].ext[0] = d.ext[0];
 		kevp[i].ext[1] = d.ext[1];
 		if (d.filter == -17 && (d.fflags & 0x1) != 0 && ((d.flags & EV_DELETE) != 0 || (d.flags & EV_DISABLE) == 0))			/* NOTE_WL_THREAD_REQUEST: a thread for the workloop (or back with EV_DELETE); with EV_DISABLE (and NOTE_WL_UPDATE_QOS) it is only an update of the QoS of a request that exists */
@@ -287,6 +293,8 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 	for (i = 0; i < count; i++) {
 		if (a->errors_only && (kevp[i].flags & EV_ERROR) != 0 && kevp[i].data == 0)
 			continue;		/* a change that went well: a Mac says nothing */
+		if (darwin_debug >= 1 && (kevp[i].flags & EV_ERROR) != 0)
+			printf("darwinator: %s[%d]: kevent error event: ident %#lx filter %d flags %#x fflags %#x data %ld udata %p\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)kevp[i].ident, kevp[i].filter, kevp[i].flags, kevp[i].fflags, (long)kevp[i].data, kevp[i].udata);
 		memset(&d, 0, sizeof(d));
 		d.ident = kevp[i].ident;
 		d.filter = filter_to_darwin(kevp[i].filter);
@@ -296,6 +304,17 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 		d.udata = (uint64_t)kevp[i].udata;
 		d.ext[0] = kevp[i].ext[0];
 		d.ext[1] = kevp[i].ext[1];
+		if ((kevp[i].flags & EV_ERROR) != 0) {		/* an error: the flags of the change that failed, with EV_ERROR (as XNU gives it) */
+			int q;
+
+			for (q = 0; q < a->nchg; q++)
+				if (a->chg[q].ident == kevp[i].ident && a->chg[q].filter == kevp[i].filter && a->chg[q].udata == (uint64_t)kevp[i].udata) {
+					d.flags = a->chg[q].flags | EV_ERROR;
+					break;
+				}
+		}
+		if (kevp[i].filter == EVFILT_EMPTY)		/* EVFILT_MACHPORT: the notes are made with EV_UDATA_SPECIFIC by libdispatch (the flag has no counterpart here, so it is not kept): an event comes back with it, else libdispatch takes a one-shot note as one without it and deletes it again (ENOENT crashed it) */
+			d.flags |= 0x0100;
 		if (kevp[i].filter == EVFILT_EMPTY && (kevp[i].flags & EV_EOF) != 0)		/* a port that died: EV_VANISHED | EV_DELETE, as XNU gives it */
 			d.flags = (d.flags & ~(uint16_t)EV_EOF) | 0x0200 /* EV_VANISHED */ | EV_DELETE;
 		if (kevp[i].filter == EVFILT_EMPTY) {		/* EVFILT_MACHPORT: with MACH_RCV_MSG the message comes with the event (ext[0]: where, ext[1]: its size, fflags: the result of the receive) */
