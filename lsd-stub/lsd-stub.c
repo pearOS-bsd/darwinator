@@ -20,6 +20,12 @@ extern xpc_object_t xpc_dictionary_get_value(xpc_object_t d, const char *k);
 extern unsigned long xpc_array_get_count(xpc_object_t a);
 extern xpc_object_t xpc_array_get_value(xpc_object_t a, unsigned long i);
 extern const char *xpc_string_get_string_ptr(xpc_object_t s);
+extern xpc_object_t xpc_copy(xpc_object_t o);
+extern const char *xpc_dictionary_get_string(xpc_object_t d, const char *k);
+extern xpc_object_t xpc_string_create(const char *s);
+extern xpc_object_t xpc_data_create(const void *b, unsigned long n);
+extern xpc_object_t xpc_uuid_create(const unsigned char *u);
+extern int xpc_connection_get_pid(xpc_object_t c);
 extern xpc_object_t xpc_array_create(const xpc_object_t *objects, unsigned long count);
 extern void xpc_array_append_value(xpc_object_t a, xpc_object_t v);
 extern xpc_object_t xpc_uint64_create(unsigned long v);
@@ -35,6 +41,15 @@ extern void free(void *p);
 static void out(const char *s) { unsigned long n = 0; while (s[n]) n++; write(2, s, n); }
 
 static void
+lower(char *o, const char *s)
+{
+	unsigned long i;
+
+	for (i = 0; s[i] && i < 254; i++) o[i] = s[i] >= 'A' && s[i] <= 'Z' ? s[i] + 32 : s[i];
+	o[i] = 0;
+}
+
+static void
 handle(xpc_object_t peer, xpc_object_t m)
 {
 	char *d = xpc_copy_description(m);
@@ -42,6 +57,7 @@ handle(xpc_object_t peer, xpc_object_t m)
 
 	out("lsd-stub: message: "); out(d); out("\n");
 	free(d);
+	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && xpc_dictionary_get_value(m, "replysig")) return;	/* the answers of an NSXPC message (no "replysig" reply) crash libxpc of the Mac: not answering is the only thing that works here */
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
 		long cmd = xpc_dictionary_get_int64(m, "command");
 
@@ -82,10 +98,41 @@ handle(xpc_object_t peer, xpc_object_t m)
 			xpc_dictionary_set_value(r, "affectedasns", aff);
 			xpc_dictionary_set_bool(r, "success", 1);
 			xpc_dictionary_set_int64(r, "session", 100001);
+		} else if (cmd == 500) {			/* the check-in of an application: the answer is its own information plus what the daemon adds (found by asking the daemon of the Mac with a program) */
+			xpc_object_t info = xpc_dictionary_get_value(m, "info");
+			xpc_object_t res = info ? xpc_copy(info) : xpc_dictionary_create(0, 0, 0);
+			char low[256];
+			const char *s;
+			unsigned char tok[32];
+			static const unsigned char asnid[16] = { 0xc9, 0x61, 0x72, 0xa0, 0xce, 0x74, 0x4d, 0x62, 0xaf, 0xef, 0xec, 0xfe, 0x4d, 0x04, 0xd8, 0x27 };	/* the marker that makes LaunchServices read the dictionary as an application serial number (seen in the answer of the Mac) */
+			unsigned long i;
+			xpc_object_t asn = xpc_dictionary_create(0, 0, 0);
+
+			for (i = 0; i < 32; i++) tok[i] = 0;
+			tok[0] = 0xf5; tok[1] = 1; tok[8] = 0xf5; tok[9] = 1;
+			xpc_dictionary_set_value(res, "LSAuditToken", xpc_data_create(tok, 32));
+			if ((s = xpc_dictionary_get_string(res, "CFBundleName")) != 0) { lower(low, s); xpc_dictionary_set_value(res, "CFBundleNameLowerCase", xpc_string_create(low)); xpc_dictionary_set_value(res, "LSDisplayName", xpc_string_create(s)); }
+			if ((s = xpc_dictionary_get_string(res, "CFBundleIdentifier")) != 0) { lower(low, s); xpc_dictionary_set_value(res, "BundleIdentifierLowerCase", xpc_string_create(low)); }
+			if ((s = xpc_dictionary_get_string(res, "CFBundleExecutable")) != 0) {
+				lower(low, s);
+				xpc_dictionary_set_value(res, "CFBundleExecutablePath", xpc_string_create(s));
+				xpc_dictionary_set_value(res, "LSExecutableFilenameLowerCaseKey", xpc_string_create(low));
+			}
+			xpc_dictionary_set_int64(res, "LSApplicationMemberCoalitionIDKey", 1);
+			xpc_dictionary_set_int64(res, "pid", xpc_connection_get_pid(peer));
+			xpc_dictionary_set_uint64(asn, "com.apple.coreservices.asn.lo", 100000 + xpc_connection_get_pid(peer));
+			xpc_dictionary_set_uint64(asn, "com.apple.coreservices.asn.hi", 0);
+			xpc_dictionary_set_value(asn, "com.apple.coreservices.asn", xpc_uuid_create(asnid));
+			xpc_dictionary_set_value(res, "LSASN", asn);
+			xpc_dictionary_set_bool(res, "LSApplicationHasRegistered", 1);
+			xpc_dictionary_set_int64(res, "ChangeCount", 1);
+			xpc_dictionary_set_value(r, "result", res);
+			xpc_dictionary_set_bool(r, "success", 1);
 		} else if (cmd == 505) {
 			xpc_dictionary_set_bool(r, "success", 0);
 		} else
 			xpc_dictionary_set_bool(r, "success", 1);
+		if (cmd == 500) { char *rd = xpc_copy_description(r); out("lsd-stub: 500 reply: "); out(rd); out("\n"); free(rd); }
 		xpc_connection_send_message(peer, r);
 	}
 }
