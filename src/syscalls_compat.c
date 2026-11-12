@@ -521,6 +521,15 @@ darwin_mac_syscall(struct thread *td, struct darwin_args *uap)
 	return (0);
 }
 
+/* __pthread_canceled(action): action 0 asks whether the thread was cancelled (0 if it was, EINVAL if not: pthread_cancel is not implemented, so never); 1 and 2 only change the state.  libc calls it when a
+ * cancellation point (sleep, nanosleep, ...) was interrupted: "0" for everything made every interrupted sleep end the thread (exit 0). */
+static int
+darwin_pthread_canceled(struct thread *td, struct darwin_args *uap)
+{
+	td->td_retval[0] = 0;
+	return ((int)uap->a[0] == 0 ? EINVAL : 0);
+}
+
 static int
 darwin_ok(struct thread *td, struct darwin_args *uap __unused)
 {
@@ -702,7 +711,7 @@ static const struct {
 	E(323, 4, darwin_ok,		"process_policy"),
 	E(331, 1, darwin_ok,		"__disable_threadsignal"),
 	E(332, 1, darwin_ok,		"__pthread_markcancel"),
-	E(333, 1, darwin_ok,		"__pthread_canceled"),
+	E(333, 1, darwin_pthread_canceled,	"__pthread_canceled"),
 	E(446, 4, darwin_ok,		"proc_rlimit_control"),
 	E(478, 3, darwin_ok,		"bsdthread_ctl"),
 	E(482, 0, darwin_ok,		"thread_selfusage"),
