@@ -108,7 +108,20 @@ darwin_fetch_syscall_args(struct thread *td)
 		sa->callp = &darwin_sysent[sa->code];
 
 	memcpy(sa->args, &frame->tf_rdi, sizeof(sa->args[0]) * NARGREGS_DARWIN);
-	if (sa->callp->sy_narg > NARGREGS_DARWIN) {
+	if (sa->code == 0 && ((rax >> 24) & 0xff) == DARWIN_CLASS_UNIX) {
+		/* syscall(2): the number is the first argument and the others move up by one (libc's syscall(), used by libraries that call by number) */
+		u_int c = (u_int)frame->tf_rdi;
+
+		sa->code = c != 0 && c < (u_int)darwin_nsyscalls ? c : (u_int)darwin_nsyscalls;
+		sa->callp = sa->code >= (u_int)darwin_nsyscalls ? &nosys_sysent : &darwin_sysent[sa->code];
+		memmove(&sa->args[0], &sa->args[1], sizeof(sa->args[0]) * (NARGREGS_DARWIN - 1));
+		if (sa->callp->sy_narg > NARGREGS_DARWIN - 1) {
+			error = copyin((caddr_t)frame->tf_rsp + sizeof(register_t), &sa->args[NARGREGS_DARWIN - 1],
+			    (sa->callp->sy_narg - (NARGREGS_DARWIN - 1)) * sizeof(sa->args[0]));
+			if (error != 0)
+				return (error);
+		}
+	} else if (sa->callp->sy_narg > NARGREGS_DARWIN) {
 		error = copyin((caddr_t)frame->tf_rsp + sizeof(register_t), &sa->args[NARGREGS_DARWIN],
 		    (sa->callp->sy_narg - NARGREGS_DARWIN) * sizeof(sa->args[0]));
 		if (error != 0)
