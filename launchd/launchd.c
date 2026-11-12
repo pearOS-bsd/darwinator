@@ -225,8 +225,10 @@ vouch(const struct hdr *q)
 static void
 reply(const struct hdr *q, int with_error, int code)
 {
-	if (q->remote == 0)
+	if (q->remote == 0) {
+		out("launchd: no reply port for "); outx(q->id); out("\n");
 		return;
+	}
 	xbegin(q, 0);
 	xdict();
 	if (with_error)
@@ -264,7 +266,7 @@ domain_of(u32 pid)
 	return ("System");
 }
 
-struct svc { int used, own; char name[96]; u32 port; };
+struct svc { int used, own, pre, claimed; char name[96]; u32 port; };		/* pre: made at the start (the MachServices of a plist without HideUntilCheckIn: look-ups work before the check-in) */
 static struct svc svcs[64];
 
 static struct svc *
@@ -444,6 +446,20 @@ main(int argc, char **argv, char **envp)
 		return (1);
 	}
 	svc_add("com.apple.bsd.dirhelper", dir_port, 1);
+	{							/* the MachServices that the plist of the window server has without HideUntilCheckIn: they exist (and can be looked up) before the window server checks in */
+		static const char *pre[] = { "com.apple.iohideventsystem", "com.apple.windowserver", 0 };
+		int pi;
+
+		for (pi = 0; pre[pi]; pi++) {
+			u32 pp = 0;
+
+			if (mach_port_allocate(mach_task_self_, 1, &pp) == 0 && mach_port_insert_right(mach_task_self_, pp, pp, 20) == 0) {
+				struct svc *ps = svc_add(pre[pi], pp, 0);
+
+				if (ps) ps->pre = 1;
+			}
+		}
+	}
 	out("launchd: serving the bootstrap port\n");
 	{
 		/* the services of the system that are started with the launchd (on a Mac the plists of /System/Library/LaunchDaemons say which): the programs on the command line, or notifyd */
@@ -535,8 +551,11 @@ main(int argc, char **argv, char **envp)
 			continue;
 		}
 		out("launchd: request "); outx(rq.h.id); out(" from pid "); outx(trailer_of(&rq.h)[10]); out("\n");
-		if (xpc_start(&rq.h) == 0)
+		if (xpc_start(&rq.h) == 0) {			/* not an XPC message that is in the message itself (the payload may be out of line): an error answer, so that the sender does not wait for ever */
+			out("launchd:   (the body is not in the message: an error answer)\n");
+			reply(&rq.h, 1, 3);
 			continue;
+		}
 		if (debug_dump) xpc_dump(&rq.h, xpc_start(&rq.h));
 		if ((rq.h.id & 0xfff) == 0x12d) {		/* vproc_swap_*: a property of the job or of the manager (VPROC_GSK_*) */
 			const u32 *g = xpc_find(&rq.h, xpc_start(&rq.h), "outgsk");
@@ -556,6 +575,11 @@ main(int argc, char **argv, char **envp)
 					u32 rt = rq.h.id & 0xfff;
 					struct svc *sv = svc_find((const char *)(v + 2));
 
+					if ((rt == 0xce || rt == 0x325) && sv != 0 && sv->pre && !sv->claimed) {	/* the check-in of a service that was made at the start: the receive right goes to it */
+						sv->claimed = 1;
+						reply_port(&rq.h, sv->port, 16);
+						continue;
+					}
 					if (rt == 0xce || rt == 0x325) {		/* check-in (bootstrap_check_in: 0xce; the listener of an XPC connection: 0x325): the service gets the receive right of its port */
 						if (sv == 0 && tr_uid(&rq.h) == 0) {
 							u32 p = 0;
@@ -574,6 +598,7 @@ main(int argc, char **argv, char **envp)
 				}
 			}
 		}
+		out("launchd: no handler for "); outx(rq.h.id); out(", error answer\n");
 		reply(&rq.h, (rq.h.id & 0xfff) >= 0x320, 3);
 	}
 }
