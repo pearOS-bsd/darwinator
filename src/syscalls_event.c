@@ -145,6 +145,62 @@ timer_fflags_from_darwin(uint32_t f)
 	return (r);
 }
 
+
+/*
+ * The synchronisation of workloops (dispatch_sync on a busy workloop): a waiter makes EVFILT_WORKLOOP with NOTE_WL_SYNC_WAIT and its thread id as the ident, and the kernel keeps it until the owner wakes it
+ * (NOTE_WL_SYNC_WAKE with the thread id of the waiter) or the waiter is ended (EV_DELETE with NOTE_WL_END_OWNERSHIP; ENOENT when it never waited).  A wake that comes first is kept (a "fake" waiter)
+ * and the wait that follows returns at once.  The ownership of the workloop itself is not tracked: libdispatch keeps that state in userland.
+ */
+#define	NOTE_WL_SYNC_WAIT	0x4
+#define	NOTE_WL_SYNC_WAKE	0x8
+#define	NOTE_WL_END_OWNERSHIP	0x20
+#define	SW_N	128
+static struct { bool used; uint64_t tid; int state; } sw_tab[SW_N];		/* state: 0 waiting, 1 woken (it has not run yet), 2 a wake that came first, 3 owner (woken and running), 4 cancelled */
+static struct mtx sw_mtx;
+MTX_SYSINIT(darwin_sw_mtx, &sw_mtx, "darwin wl sync", MTX_DEF);
+
+/* returns 0, or ENOENT for an end that finds no waiter */
+static int
+darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
+{
+	int i, free_i = -1, error = 0;
+
+	mtx_lock(&sw_mtx);
+	for (i = 0; i < SW_N; i++) {
+		if (sw_tab[i].used && sw_tab[i].tid == tid)
+			break;
+		if (!sw_tab[i].used && free_i < 0)
+			free_i = i;
+	}
+	if (i == SW_N)
+		i = -1;
+	if ((flags & EV_DELETE) != 0 && (fflags & NOTE_WL_SYNC_WAKE) != 0) {		/* the end: the knote of the waiter (or of the owner that it became) goes */
+		if (value != 0) {		/* the owner ends its ownership (it passes the state of the queue that it knew; a waiter that is cancelled passes 0) */
+			if (i >= 0 && sw_tab[i].state != 0) sw_tab[i].used = false;
+		} else if (i < 0)
+			error = ENOENT;						/* nothing: the waiter did not make its wait yet and no wake came */
+		else if (sw_tab[i].state == 0) { sw_tab[i].state = 4; wakeup(sw_tab); }	/* cancelled while it waits: it goes out without ownership */
+		else sw_tab[i].used = false;
+	} else if ((fflags & NOTE_WL_SYNC_WAKE) != 0) {					/* a wake: the waiter goes on and its knote stays until the end; with no waiter yet the wake is kept */
+		if (i >= 0 && sw_tab[i].state == 0) { sw_tab[i].state = 1; wakeup(sw_tab); }
+		else if (i < 0 && free_i >= 0) { sw_tab[free_i].used = true; sw_tab[free_i].tid = tid; sw_tab[free_i].state = 2; }
+	} else if ((fflags & NOTE_WL_SYNC_WAIT) != 0) {					/* the wait */
+		if (i >= 0 && sw_tab[i].state == 2) sw_tab[i].state = 3;			/* the wake came first: owner now */
+		else if (free_i >= 0 || i >= 0) {
+			if (i < 0) { i = free_i; sw_tab[i].used = true; sw_tab[i].tid = tid; }
+			sw_tab[i].state = 0;
+			while (sw_tab[i].state == 0 && sw_tab[i].used) {
+				if (msleep(sw_tab, &sw_mtx, PCATCH, "wlsync", hz / 4) == EINTR)
+					break;
+			}
+			if (sw_tab[i].state == 1) sw_tab[i].state = 3;			/* woken: the knote of the owner stays */
+			else sw_tab[i].used = false;					/* cancelled or interrupted */
+		}
+	}
+	mtx_unlock(&sw_mtx);
+	return (error);
+}
+
 static int
 darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 {
@@ -187,10 +243,19 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		kevp[i].ext[1] = d.ext[1];
 		if (d.filter == -17 && (d.fflags & 0x1) != 0 && ((d.flags & EV_DELETE) != 0 || (d.flags & EV_DISABLE) == 0))			/* NOTE_WL_THREAD_REQUEST: a thread for the workloop (or back with EV_DELETE); with EV_DISABLE (and NOTE_WL_UPDATE_QOS) it is only an update of the QoS of a request that exists */
 			darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0);
+		if (d.filter == -17 && (d.fflags & (NOTE_WL_SYNC_WAIT | NOTE_WL_SYNC_WAKE)) != 0) {		/* the synchronisation of a workloop: done here (it may sleep); the kqueue gets a change that has no effect */
+			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1]);
+
+			kevp[i].filter = EVFILT_USER;
+			kevp[i].ident = serr == 0 ? 0x57ffffff00000000ULL : 0x57fffffe00000000ULL;
+			kevp[i].flags = (serr == 0 ? EV_ADD | EV_DISABLE : EV_DELETE) | (a->errors_only ? EV_RECEIPT : 0);	/* ENOENT: deleting what is not there gives it back as the error */
+			kevp[i].fflags = 0;
+			kevp[i].data = 0;
+		} else
 		if (d.filter == -17) {			/* EVFILT_WORKLOOP: the requests on a workloop (thread request, ownership) mean nothing here; a disabled EVFILT_USER takes their place, so that adds and deletes balance */
 			kevp[i].filter = EVFILT_USER;
-			kevp[i].ident = d.ident ^ 0x5700000000000000ULL;
-			kevp[i].flags = (d.flags & (EV_ADD | EV_DELETE)) | EV_DISABLE;
+			kevp[i].ident = 0x57ffffff00000000ULL;			/* always the same disabled knote: an add that is repeated changes nothing and a delete never finds nothing */
+			kevp[i].flags = EV_ADD | EV_DISABLE | (a->errors_only ? EV_RECEIPT : 0);
 			kevp[i].fflags = 0;
 			kevp[i].data = 0;
 		}
@@ -366,12 +431,17 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 
 	if (darwin_debug >= 2) {
 		int16_t f0 = 0, fl0 = 0;
+		uint32_t ff0 = 0;
+		uint64_t id0 = 0;
+		int c;
 
-		if ((int)uap->a[2] > 0) {
-			(void)copyin(a.in + 8, &f0, sizeof(f0));
-			(void)copyin(a.in + 10, &fl0, sizeof(fl0));
+		for (c = 0; c < (int)uap->a[2] && c < 4; c++) {
+			(void)copyin(a.in + c * 72 + 8, &f0, sizeof(f0));
+			(void)copyin(a.in + c * 72 + 10, &fl0, sizeof(fl0));
+			(void)copyin(a.in + c * 72 + 24, &ff0, sizeof(ff0));
+			(void)copyin(a.in + c * 72, &id0, sizeof(id0));
+			printf("darwinator: %s[%d]: kevent_%s(%#lx, nchanges %d, nevents %d, flags %#x): change %d: ident %#lx filter %d flags %#x fflags %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", (u_long)uap->a[0], (int)uap->a[2], (int)uap->a[4], flags, c, (u_long)id0, f0, fl0, ff0);
 		}
-		printf("darwinator: %s[%d]: kevent_%s(%#lx, nchanges %d, nevents %d, flags %#x): first change filter %d flags %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", (u_long)uap->a[0], (int)uap->a[2], (int)uap->a[4], flags, f0, fl0);
 	}
 	if (byid || fd == -1) {
 		if ((error = kq_for(td, byid ? (int64_t)uap->a[0] : -1, &fd)) != 0)

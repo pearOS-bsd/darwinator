@@ -2204,6 +2204,7 @@ static const struct ionode io_nodes[] = {
 	{ "Root", "IORegistryEntry", -1 },
 	{ "VirtualMac", "IOPlatformExpertDevice", 0 },
 	{ "IOHIDSystem", "IOHIDSystem", 1 },
+	{ "IOResources", "IOResources", 0 },
 };
 #define	IO_NNODES	((int)nitems(io_nodes))
 #define	IO_ITER_BASE	0x1000
@@ -2444,6 +2445,19 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 
 		if (node >= 0) { const char *cn = io_req_string(m, 32); yes = io_node_matches(node, cn) ? 1 : 0; }
 		mig_reply_data(m, id, 0, &yes, 4);
+		return;
+	}
+	case 2817:					/* io_connect_get_service(connection, *service): the node that the connection is to */
+		if (!conn) break;
+		np = kp_new(KP_IOOBJ); np->kpid = node;
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	case 2828: case 2821:				/* io_registry_entry_set_properties / io_connect_set_properties(entry, properties, *result): taken, nothing is kept */
+	{
+		uint32_t zero = 0;
+
+		mig_reply_data(m, id, 0, &zero, 4);
 		return;
 	}
 	case 2856: {					/* io_service_get_state(service, *state, *busy_state, *accumulated_busy_time): registered, matched, active; not busy */
@@ -2991,6 +3005,66 @@ darwin_work_interval_ctl(struct thread *td, struct darwin_args *uap)
 	return (0);
 }
 
+/* _kernelrpc_mach_port_get_attributes_trap (40): (task, name, flavor, *info, *count), the same answers as the MIG routine 3217 (limits, receive status, dnrequests size) */
+static int
+darwin_port_get_attributes_trap(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kent *e;
+	uint32_t flavor = (uint32_t)uap->a[2], out[10], n = 0, cnt;
+	int kr = KERN_SUCCESS;
+
+	memset(out, 0, sizeof(out));
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) == NULL || (e = ent_by_name(t, (uint32_t)uap->a[1])) == NULL)
+		kr = KERN_INVALID_NAME;
+	else if (flavor == 1) { out[0] = 5; n = 1; }
+	else if (flavor == 2) { out[1] = e->port->set != NULL ? 1 : 0; out[4] = 5; out[5] = (uint32_t)e->port->qn; n = 10; }
+	else if (flavor == 3) { n = 1; }
+	else kr = KERN_INVALID_ARGUMENT;
+	sx_xunlock(&km_sx);
+	if (kr == KERN_SUCCESS) {
+		if (copyin((void *)uap->a[4], &cnt, 4) != 0 || cnt < n)
+			return (kr_ret(td, KERN_INVALID_ARGUMENT));
+		if (copyout(out, (void *)uap->a[3], n * 4) != 0 || copyout(&n, (void *)uap->a[4], 4) != 0)
+			kr = KERN_INVALID_ADDRESS;
+	}
+	return (kr_ret(td, kr));
+}
+
+/* task_name_for_pid (44) and task_for_pid (45)(target, pid, *task): a send right to the task port of the process (the task itself for the own pid); pid_for_task (46)(task, *pid) */
+static int
+darwin_task_for_pid_trap(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct proc *tp;
+	struct kport *tport;
+	struct kent *e;
+	uint32_t name = 0;
+	pid_t pid = (pid_t)uap->a[1];
+	int kr = KERN_SUCCESS;
+
+	if (pid == td->td_proc->p_pid) {
+		name = NAME_TASK_SELF;
+	} else {
+		if ((tp = pfind(pid)) == NULL)
+			return (kr_ret(td, 5 /* KERN_FAILURE */));
+		PROC_UNLOCK(tp);
+		sx_xlock(&km_sx);
+		if ((t = kt_task(td->td_proc)) == NULL) kr = KERN_NO_SPACE;
+		else {
+			tport = kp_new(KP_TASK); tport->kp = tp; tport->kpid = pid;
+			e = ent_add(t, tport, MM_MAKE_SEND);
+			tport->refs--;
+			if (e != NULL) name = e->name; else { kp_unref(tport); kr = KERN_NO_SPACE; }
+		}
+		sx_xunlock(&km_sx);
+	}
+	if (kr == KERN_SUCCESS && copyout(&name, (void *)uap->a[2], 4) != 0)
+		kr = KERN_INVALID_ADDRESS;
+	return (kr_ret(td, kr));
+}
+
 static const struct {
 	int		num, nargs;
 	sy_call_t	*fn;
@@ -3003,9 +3077,12 @@ static const struct {
 	E(20, 3, darwin_port_move_member,	"_kernelrpc_mach_port_move_member_trap"),
 	E(22, 3, darwin_port_move_member,	"_kernelrpc_mach_port_insert_member_trap"),
 	E(23, 3, darwin_port_extract_member,	"_kernelrpc_mach_port_extract_member_trap"),
+	E(40, 5, darwin_port_get_attributes_trap,	"_kernelrpc_mach_port_get_attributes_trap"),
 	E(41, 4, darwin_port_guard,		"_kernelrpc_mach_port_guard_trap"),
 	E(42, 3, darwin_port_guard,		"_kernelrpc_mach_port_unguard_trap"),
 	E(43, 3, darwin_generate_activity_id,	"mach_generate_activity_id"),
+	E(44, 3, darwin_task_for_pid_trap,	"task_name_for_pid"),
+	E(45, 3, darwin_task_for_pid_trap,	"task_for_pid"),
 	E(76, 3, darwin_port_type_trap,		"_kernelrpc_mach_port_type_trap"),
 	E(77, 7, darwin_port_request_notification_trap,	"_kernelrpc_mach_port_request_notification_trap"),
 	E(91, 0, darwin_mk_timer_create,	"mk_timer_create_trap"),
