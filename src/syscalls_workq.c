@@ -416,7 +416,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 			bool deliver;
 
 			PROC_LOCK(td->td_proc);
-			deliver = SIGPENDING(td) || (td->td_proc->p_flag & P_WEXIT) != 0;
+			deliver = SIGPENDING(td) || (td->td_proc->p_flag & (P_WEXIT | P_SINGLE_EXIT | P_STOPPED_SINGLE | P_SINGLE_BOUNDARY | P_WKILLED)) != 0;
 			PROC_UNLOCK(td->td_proc);
 			if (!deliver) {
 				idle += WQ_POLL;
