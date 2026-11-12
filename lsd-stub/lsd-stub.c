@@ -94,14 +94,19 @@ int
 main(int argc, char **argv)
 {
 	dq q = dispatch_queue_create("lsd-stub", 0);
-	xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[1] : "com.apple.coreservices.launchservicesd", q, 1);
+	int i;
 
-	xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
-		out("lsd-stub: a connection\n");
-		xpc_connection_set_event_handler(peer, ^(xpc_object_t m) { handle(peer, m); });
-		xpc_connection_resume(peer);
-	});
-	xpc_connection_resume(svc);
+	/* one listener for each name on the command line (several services in one process: every process of the Mac costs memory here); no name: the LaunchServices daemon */
+	for (i = 1; i < (argc > 1 ? argc : 2); i++) {
+		xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[i] : "com.apple.coreservices.launchservicesd", q, 1);
+
+		xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
+			out("lsd-stub: a connection\n");
+			xpc_connection_set_event_handler(peer, ^(xpc_object_t m) { handle(peer, m); });
+			xpc_connection_resume(peer);
+		});
+		xpc_connection_resume(svc);
+	}
 	out("lsd-stub: serving\n");
 	dispatch_main();
 	return (0);
