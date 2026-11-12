@@ -12,6 +12,8 @@ extern u32 mach_task_self_;
 extern long write(int fd, const void *buf, unsigned long n);
 
 static void out(const char *s) { unsigned long n = 0; while (s[n]) n++; write(2, s, n); }
+extern int open(const char *, int, ...);
+extern int close(int);
 static void hex(u64 v, int digits) { char b[20]; int i; for (i = 0; i < digits; i++) b[i] = "0123456789abcdef"[(v >> (4 * (digits - 1 - i))) & 15]; b[digits] = 0; out(b); }
 
 /*
@@ -51,7 +53,12 @@ main(void)
 		kr = mach_msg(buf, 2 | 0x100000 /* RCV_MSG | RCV_LARGE */, 0, sizeof(buf), set, 0, 0);
 		if (kr != 0) { out("carender-stub: receive error "); hex((u32)kr, 8); out("\n"); continue; }
 		out("carender-stub: msg id "); hex(buf[5], 8); out(" size "); hex(buf[1], 8); out(" bits "); hex(buf[0], 8); out(" remote "); hex(buf[2], 8); out(" local "); hex(buf[3], 8); out("\n  ");
-		n = buf[1] / 4; if (n > 64) n = 64;
+		if (buf[5] >= 0x9c42 && buf[5] <= 0x9c45) {	/* the command streams are kept whole in /tmp/ca.bin: a u32 length, then the message */
+			int cf = open("/tmp/ca.bin", 0x209, 0644);
+
+			if (cf >= 0) { write(cf, &buf[1], 4); write(cf, buf, buf[1]); close(cf); }
+		}
+		n = buf[1] / 4; if (n > 4000) n = 4000;
 		for (i = 6; i < n; i++) { hex(buf[i], 8); out(i % 8 == 5 ? "\n  " : " "); }
 		out("\n");
 		{

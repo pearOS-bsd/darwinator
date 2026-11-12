@@ -374,7 +374,7 @@ darwin_kevent64(struct thread *td, struct darwin_args *uap)
 
 /* kevent_qos(fd, changelist, nchanges, eventlist, nevents, data_out, data_available, flags) and kevent_id(id, ... same): the events are 72 bytes; fd -1 and the ids of workloops are
  * kqueues of the process that are made when first used (a descriptor that the program does not know of).  There is no timeout: KEVENT_FLAG_IMMEDIATE (1) asks not to wait. */
-static struct { struct proc *p; pid_t pid; int64_t id; int fd; } kq_tab[64];
+static struct { struct proc *p; pid_t pid; int64_t id; int fd; } kq_tab[1024];
 static struct mtx kq_mtx;
 MTX_SYSINIT(darwin_kq, &kq_mtx, "darwin kq", MTX_DEF);
 
