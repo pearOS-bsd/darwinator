@@ -23,3 +23,8 @@ kernel sends MACH_NOTIFY_SEND_ONCE to the waiter) and the connection is cancelle
 
 Do not put `com.apple.logd` among the names of the stubs: Dock then finds a logd that does not speak the protocol and
 `os_trace_metadata_init` crashes (the firehose buffer is NULL).
+
+The handshake reply must also carry `bsx_archive` (a keyed archive with a `BSAuditToken` under the key named by
+`bsx_index`): without it RunningBoardServices throws while holding an `os_unfair_lock` and `launchservicesd` then
+waits on that lock for ever.  The stub embeds the archive of the Mac (278 bytes) and patches the token (offset 126).
+With it, the real `launchservicesd` + Dock run: Dock sends its layers (49 messages in /tmp/ca.bin).
