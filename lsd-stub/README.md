@@ -28,3 +28,9 @@ The handshake reply must also carry `bsx_archive` (a keyed archive with a `BSAud
 `bsx_index`): without it RunningBoardServices throws while holding an `os_unfair_lock` and `launchservicesd` then
 waits on that lock for ever.  The stub embeds the archive of the Mac (278 bytes) and patches the token (offset 126).
 With it, the real `launchservicesd` + Dock run: Dock sends its layers (49 messages in /tmp/ca.bin).
+
+RunningBoard, more selectors (seen from lsd and Dock): `void_subscribeToProcessStateChangesWithConfiguration:error:` gets an
+empty reply; `acquireAssertionWithDescriptor:error:` gets the NSError archive of the Mac for a client without the entitlement
+(`RBSServiceErrorDomain` 1).  With the real `launchservicesd` this is still not enough: a thread of lsd sits in
+`-[RBSAssertion acquireWithError:]` (it sleeps and retries on Cocoa error 4101) and a client waits for lsd for ever.
+The format of a successful assertion reply is not known (the Mac refuses the call without the entitlement).
