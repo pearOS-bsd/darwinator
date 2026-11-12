@@ -40,6 +40,13 @@ extern void free(void *p);
 
 static void out(const char *s) { unsigned long n = 0; while (s[n]) n++; write(2, s, n); }
 
+static int
+streq(const char *a, const char *b)
+{
+	while (*a && *a == *b) { a++; b++; }
+	return *a == *b;
+}
+
 static void
 lower(char *o, const char *s)
 {
@@ -157,7 +164,7 @@ main(int argc, char **argv)
 	for (i = 1; i < (argc > 1 ? argc : 2); i++) {
 		xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[i] : "com.apple.coreservices.launchservicesd", q, 1);
 		const char *nm = argc > 1 ? argv[i] : "";
-		int nsx = nm[0] == 'c' && nm[4] == 'a' && nm[10] == 'f' && nm[11] == 'o' && nm[12] == 'n' && nm[13] == 't' && nm[14] == 's' && nm[15] == 0;	/* "com.apple.fonts" */
+		int nsx = streq(nm, "com.apple.fonts") || streq(nm, "com.apple.carboncore.csnameddata");	/* the services whose clients wait for an NSXPC answer */
 
 		xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
 			out("lsd-stub: a connection\n");
