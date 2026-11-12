@@ -246,6 +246,14 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 				rel = d.data * unit;
 			kevp[i].fflags = NOTE_NSECONDS;
 			kevp[i].data = rel > 0 ? rel : 1;
+			{
+				static int shown;
+
+				if (darwin_debug >= 1 && shown < 600) {
+					shown++;
+					printf("darwinator: %s[%d]: timer change: ident %#lx flags %#x fflags %#x data %ld -> in %ld ns\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, d.flags, d.fflags, (long)d.data, (long)kevp[i].data);
+				}
+			}
 		}
 		kevp[i].udata = (void *)d.udata;
 		if (a->nchg < (int)nitems(a->chg)) {
@@ -613,8 +621,17 @@ darwin_sigsuspend(struct thread *td, struct darwin_args *uap)	/* the mask is the
 {
 	sigset_t set;
 
+	int error;
+	static int shown;
+
 	mask_from_darwin((uint32_t)uap->a[0], &set);
-	return (kern_sigsuspend(td, set));
+	error = kern_sigsuspend(td, set);
+	if (darwin_debug >= 1 && shown < 12) {
+		shown++;
+		printf("darwinator: %s[%d]: sigsuspend(mask %#x) returned %d, pending %#x %#x %#x %#x, thread mask %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, (uint32_t)uap->a[0], error,
+		    td->td_siglist.__bits[0], td->td_proc->p_siglist.__bits[0], td->td_sigmask.__bits[0], td->td_proc->p_sigacts->ps_sigignore.__bits[0], td->td_sigmask.__bits[0]);
+	}
+	return (error);
 }
 
 static int

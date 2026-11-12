@@ -1,0 +1,3 @@
+# after
+
+`aftertest` (dispatch_after on the main queue with dispatch_main), `aftertest_g.c`/`aftertest_g2.c` (the same on a global queue), `dt.c` (the values of dispatch_time and the clocks).  Build: `AFTER_SRC=aftertest.c sh build.sh OUT`.  Found with it: every deadline that a program gave (dispatch_after, one-shot dispatch timers) was in the past for the kernel, because `mach_absolute_time` of the comm page began at the load of the module while the kernel compares with its uptime: blocks ran after 1 ms.  The real launchservicesd re-arms its port monitor with dispatch_after and ran it 5000 times a second.  Now the comm page starts at the uptime.

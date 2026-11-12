@@ -299,8 +299,12 @@ darwin_commpage_init(void)
 	uint64_t base = rdtsc();
 	uint32_t scale = (uint32_t)(((uint64_t)1000000000 << 32) / (tsc_freq != 0 ? tsc_freq : 2000000000ULL));
 	uint32_t gen = 1, shift = 0;
-	uint64_t nsbase = 0;
+	uint64_t nsbase;
 	uint8_t n = (uint8_t)mp_ncpus;
+	struct timespec upts;
+
+	nanouptime(&upts);			/* mach_absolute_time starts at the uptime of the kernel (it started at the load of the module): the deadlines that a program gives (timers, mach_wait_until) are compared with the uptime in the kernel */
+	nsbase = (uint64_t)upts.tv_sec * 1000000000ULL + (uint64_t)upts.tv_nsec;
 
 	memset(darwin_commpage, 0, sizeof(darwin_commpage));
 	memcpy(darwin_commpage, "commpage 64-bit", 16);

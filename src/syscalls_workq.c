@@ -272,7 +272,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 {
 	uint64_t kevent_list, data_buf, davail, top;
 	int64_t ids[16], first_kq;
-	int count, error, n, k;
+	int count, error, n, k, quiet = 0;
 	uint64_t wqstart;
 	const uint32_t base_flags = WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_REUSE | WQ_FLAG_THREAD_TSD_BASE_SET | WQ_FLAG_THREAD_KEVENT | 5;
 
@@ -424,7 +424,8 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		}
 		/* a thread beyond the first two that was idle for long sleeps for long (a request for threads wakes it): the first two look at the kqueues.  A thread does not end here: libpthread keeps
 		 * every thread in its list, and the memory of one that ended is gone, so the next new thread would write there */
-		error = tsleep(t, PCATCH, "wqpark", (t - w->thr) >= 2 ? hz : WQ_POLL);
+		quiet++;
+		error = tsleep(t, PCATCH, "wqpark", (t - w->thr) >= 2 ? hz : WQ_POLL * (1 + MIN(quiet / 100, 9)));	/* the poll backs off while nothing comes (up to 20 ms): launchservicesd has 16 workloops and two threads that looked at all of them 500 times a second used 1.5 CPUs */
 		if (error == EINTR || error == ERESTART) {
 			/* a stop for the debugger (lldb attaches with a signal) wakes the sleep with nothing to deliver; libpthread takes an error here as a fault and aborts, so the thread goes on parking */
 			bool deliver;

@@ -14,6 +14,7 @@ extern unsigned long long dispatch_walltime(const void *when, long long delta);
 extern dq dispatch_get_global_queue(long id, unsigned long flags);
 extern unsigned int sleep(unsigned int);
 extern unsigned long long mach_absolute_time(void);
+extern unsigned long long mach_continuous_time(void);
 extern unsigned long long clock_gettime_nsec_np(int);
 extern long write(int, const void *, unsigned long);
 static volatile int fired;
@@ -28,6 +29,7 @@ main(void)
 		out("timertest: mach_absolute_time - uptime (ms): ");
 		{ long long d = (long long)(a - u) / 1000000; int neg = d < 0; if (neg) d = -d; for (k = 22; k >= 0; k--) { b[k] = '0' + d % 10; d /= 10; if (d == 0) break; } b[23] = 0; if (neg) out("-"); out(b + k); out("\n"); }
 		(void)m;
+		{ long long d = (long long)(mach_continuous_time() - a) / 1000000; int neg = d < 0; if (neg) d = -d; for (k = 22; k >= 0; k--) { b[k] = '0' + d % 10; d /= 10; if (d == 0) break; } b[23] = 0; out("timertest: mach_continuous_time - mach_absolute_time (ms): "); if (neg) out("-"); out(b + k); out("\n"); }
 	}
 	ds s = dispatch_source_create(&_dispatch_source_type_timer, 0, 0, dispatch_get_global_queue(0, 0));
 	int i;
