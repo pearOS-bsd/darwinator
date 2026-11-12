@@ -1403,6 +1403,11 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 	if (((m->size + 3) & ~3u) + trailer_size(option) > rsize) {		/* the message and its trailer have to fit, as in XNU (the receiver tries again with a bigger buffer when it asked for MACH_RCV_LARGE) */
 		if (msgsz != NULL)
 			*msgsz = ((m->size + 3) & ~3u) + trailer_size(option);
+		if ((option & 0x4) != 0 && uaddr != 0) {		/* MACH_RCV_LARGE: the size of the message goes into the header of the buffer (msgh_size), so that the receiver can try again with a buffer that fits */
+			uint32_t need = m->size;
+
+			(void)copyout(&need, (void *)(uaddr + 4), sizeof(need));
+		}
 		kp_unref(rp);
 		sx_xunlock(&km_sx);
 		return (MACH_RCV_TOO_LARGE);
@@ -1546,7 +1551,7 @@ darwin_mach_msg2(struct thread *td, struct darwin_args *uap)
 	ua.a[6] = 0;
 	error = darwin_mach_msg(td, &ua);
 	if (darwin_debug >= 1 && td->td_retval[0] != 0 && (opt & 1) != 0)
-		printf("darwinator: %s[%d]: mach_msg send failed: kr %#lx, options %#lx, remote name %#x, id %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)td->td_retval[0], (u_long)opt, hdr[3], hdr[5]);
+		printf("darwinator: %s[%d]: mach_msg send failed: kr %#lx, options %#lx, remote name %#x, id %#x, send_size %u, rcv_size %u\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)td->td_retval[0], (u_long)opt, hdr[3], hdr[5], send_size, rcv_size);
 	if (darwin_debug >= 2)
 		printf("darwinator: mach_msg2: options %#lx send_size %u rcv_size %u rcv_name %#x timeout %lu bits %#lx remote_local %#lx voucher_id %#lx -> kr %#lx\n", (u_long)opt, send_size, rcv_size,
 		    (uint32_t)(uap->a[5] >> 32), (u_long)uap->a[7], (u_long)(uap->a[2] & 0xffffffff), (u_long)uap->a[3], (u_long)uap->a[4], (u_long)td->td_retval[0]);
