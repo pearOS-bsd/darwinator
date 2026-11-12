@@ -2880,6 +2880,8 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 	struct ktask *t;
 	int i;
 
+	if (darwin_debug >= 1 && p->p_sysent == &darwin_sysvec && p->p_xsig == 0)
+		printf("darwinator: %s[%d] exited with status %d\n", p->p_comm, p->p_pid, (int)p->p_xexit);
 	if (darwin_debug >= 1 && p->p_sysent == &darwin_sysvec && (p->p_xsig == SIGILL || p->p_xsig == SIGSEGV || p->p_xsig == SIGBUS || p->p_xsig == SIGABRT || p->p_xsig == SIGTRAP)) {
 		struct thread *tdp = curthread;
 
