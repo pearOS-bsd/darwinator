@@ -98,7 +98,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT, KP_IOKIT };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT, KP_IOKIT, KP_IOOBJ };
 
 struct kmsg;
 struct kport {
@@ -2193,6 +2193,317 @@ bootstrap_server(struct thread *td, struct ktask *t, struct kport *dest, struct 
 	wakeup(rp);
 }
 
+
+/*
+ * The IOKit registry of this system: a table of nodes (the platform, the devices that programs ask for), the objects (an entry or an iterator) are ports of kind KP_IOOBJ.  The routines are the ones of
+ * the kernel subsystem "iokit" (device.defs, 2800..2890, found with migcom): libIOKit of the Mac sends them to the port of host_get_io_main.  Enough for what the window server and the Dock look up;
+ * a request that is not understood fails (and is logged at kern.darwinator.debug >= 1).
+ */
+struct ionode { const char *name, *cls; int parent; };
+static const struct ionode io_nodes[] = {
+	{ "Root", "IORegistryEntry", -1 },
+	{ "VirtualMac", "IOPlatformExpertDevice", 0 },
+	{ "IOHIDSystem", "IOHIDSystem", 1 },
+};
+#define	IO_NNODES	((int)nitems(io_nodes))
+#define	IO_ITER_BASE	0x1000
+#define	IO_ITER_N	128
+#define	IO_CONN_BASE	0x2000			/* a connection (a user client made by io_service_open_extended): the node is kpid - IO_CONN_BASE */
+static struct { int list[16]; int n, pos; } io_iters[IO_ITER_N];
+static int io_iter_next_slot;
+
+static bool
+io_node_matches(int i, const char *cls)
+{
+	return (strcmp(io_nodes[i].cls, cls) == 0 || strcmp(io_nodes[i].name, cls) == 0);
+}
+
+/* the text of the value of a key in a matching dictionary in XML: <key>K</key><string>V</string> */
+static bool
+io_xml_value(const char *xml, const char *key, char *val, size_t vsz)
+{
+	char pat[96];
+	const char *p, *q;
+
+	snprintf(pat, sizeof(pat), "<key>%s</key><string>", key);
+	if ((p = strstr(xml, pat)) == NULL)
+		return (false);
+	p += strlen(pat);
+	if ((q = strstr(p, "</string>")) == NULL || (size_t)(q - p) >= vsz)
+		return (false);
+	memcpy(val, p, q - p); val[q - p] = 0;
+	return (true);
+}
+
+/* a matching dictionary in the binary form of OSSerialize (the signature 0xd3, then words: the type in 0x7f000000, the length in the low bits, the end in 0x80000000; the strings are padded to 4): the value that follows the key */
+static bool
+io_bin_value(const uint8_t *b, uint32_t len, const char *key, char *val, size_t vsz)
+{
+	uint32_t pos = 4, w, l;
+	bool take = false;
+
+	if (len < 8 || rd32(b, 0) != 0xd3)
+		return (false);
+	while (pos + 4 <= len) {
+		uint32_t ty;
+
+		w = rd32(b, pos); pos += 4;
+		l = w & 0xffffff;
+		ty = (w >> 24) & 0x7f;
+		if (ty == 0x08 || ty == 0x09) {			/* a symbol or a string (the length includes the NUL) */
+			if (pos + l > len) return (false);
+			if (take) { if (l >= vsz) return (false); memcpy(val, b + pos, l); val[l] = 0; return (true); }
+			if (l == strlen(key) + 1 && memcmp(b + pos, key, l) == 0) take = true;
+			pos += (l + 3) & ~3u;
+		} else if (ty == 0x0a) {			/* data */
+			pos += (l + 3) & ~3u;
+		} else if (ty == 0x04) {			/* a number: 8 bytes of data */
+			pos += 8;
+		}						/* a dictionary (1), array (2), set (3): the count, the members follow; a boolean (0x0b) or an object (0x0c): nothing */
+		if (ty != 0x08 && ty != 0x09) take = false;
+	}
+	return (false);
+}
+
+static struct kport *
+io_new_iter(int *list, int n)
+{
+	struct kport *ip = kp_new(KP_IOOBJ);
+	int slot = io_iter_next_slot++ % IO_ITER_N, i;
+
+	io_iters[slot].n = n > 16 ? 16 : n; io_iters[slot].pos = 0;
+	for (i = 0; i < io_iters[slot].n; i++) io_iters[slot].list[i] = list[i];
+	ip->kpid = IO_ITER_BASE + slot;
+	return (ip);
+}
+
+/* a reply with the one out parameter of the type io_name_t / io_string_t: the offset (0), the count and the bytes */
+static void
+io_reply_string(struct kmsg *m, int id, const char *str)
+{
+	uint8_t buf[8 + 520];
+	uint32_t len = (uint32_t)strlen(str) + 1;
+
+	memset(buf, 0, sizeof(buf));
+	wr32(buf, 0, 0); wr32(buf, 4, len);
+	memcpy(buf + 8, str, len);
+	mig_reply_data(m, id, 0, buf, 8 + len);
+}
+
+static void
+io_reply_null_port(struct kmsg *m, int id)
+{
+	struct kport *rp = m->reply.port;
+	struct kmsg *r;
+	uint8_t *rd;
+
+	if (rp == NULL || rp->dead)
+		return;
+	r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->data = rd = malloc(40, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+	r->size = 40;
+	wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+	wr32(rd, 4, 40); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+	rd[28 + 10] = MM_MOVE_SEND_ONCE; rd[28 + 11] = 0;
+	TAILQ_INSERT_TAIL(&rp->q, r, link);
+	rp->qn++; kq_post(rp);
+	wakeup(rp);
+}
+
+/* the request has the form NDR(8) + offset(4) + count(4) + the string at 40: the string of an inband parameter */
+static const char *
+io_req_string(struct kmsg *m, uint32_t at)
+{
+	static char tmp[512];
+	uint32_t cnt;
+
+	if (m->size < at + 8)
+		return ("");
+	cnt = rd32(m->data, at + 4);
+	if (cnt > 511 || at + 8 + cnt > m->size)
+		return ("");
+	memcpy(tmp, m->data + at + 8, cnt); tmp[cnt] = 0;
+	return (tmp);
+}
+
+static void
+io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
+{
+	int node = dest->kind == KP_IOOBJ && dest->kpid < IO_ITER_BASE ? (int)dest->kpid : dest->kind == KP_IOOBJ && dest->kpid >= IO_CONN_BASE ? (int)(dest->kpid - IO_CONN_BASE) : -1;
+	int slot = dest->kind == KP_IOOBJ && dest->kpid >= IO_ITER_BASE && dest->kpid < IO_CONN_BASE ? (int)(dest->kpid - IO_ITER_BASE) : -1;
+	bool conn = dest->kind == KP_IOOBJ && dest->kpid >= IO_CONN_BASE;
+	struct kport *np;
+	int list[16], n, i;
+
+	switch (id) {
+	case 2877: {					/* io_server_version(master, *version): the version of the IOKit server (the one of macOS 12: 20190423) */
+		uint64_t v = 20190423;
+
+		mig_reply_data(m, id, 0, &v, 8);
+		return;
+	}
+	case 2827:					/* io_registry_get_root_entry(master, *root) */
+		np = kp_new(KP_IOOBJ); np->kpid = 0;
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	case 2809: {					/* io_registry_entry_from_path(master, path, *entry): "IOService:/" and the names of the nodes below it */
+		const char *path = io_req_string(m, 32);
+		const char *nm;
+
+		nm = strchr(path, ':') != NULL ? strchr(path, ':') + 1 : path;
+		n = -1;
+		if (strcmp(nm, "/") == 0 || *nm == 0) n = 0;
+		else for (i = 0; i < IO_NNODES; i++) {
+			size_t l = strlen(io_nodes[i].name);
+
+			if (strncmp(nm, "/", 1) == 0 && strlen(nm) >= l && strcmp(nm + strlen(nm) - l, io_nodes[i].name) == 0) { n = i; break; }
+		}
+		if (n < 0) { mig_reply(t, m, id, (int)0xe00002c0 /* kIOReturnNoDevice */, NULL, NULL, 0, NULL, 0); return; }
+		np = kp_new(KP_IOOBJ); np->kpid = n;
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	}
+	case 2832: case 2890:				/* io_service_wait_quiet(service, wait_time): nothing is busy */
+		mig_reply_data(m, id, 0, NULL, 0);
+		return;
+	case 2804: case 2873: case 2880: case 2881: {	/* io_service_get_matching_services / _service (XML) and the _bin forms (binary): the nodes of the class that the dictionary names */
+		char cls[96];
+		const char *xml = io_req_string(m, 32);
+		bool found;
+
+		n = 0;
+		if (id == 2880 || id == 2881)
+			found = m->size >= 36 && io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IOProviderClass", cls, sizeof(cls));
+		else
+			found = io_xml_value(xml, "IOProviderClass", cls, sizeof(cls)) || io_xml_value(xml, "IOClass", cls, sizeof(cls)) || io_xml_value(xml, "IONameMatch", cls, sizeof(cls));
+		if (found)
+			for (i = 0; i < IO_NNODES && n < 16; i++)
+				if (io_node_matches(i, cls)) list[n++] = i;
+		if (darwin_debug >= 1)
+			printf("darwinator: IOKit: matching %s: %d node(s)\n", found ? cls : "(no class)", n);
+		if (darwin_debug >= 1 && !found) {
+			uint32_t w;
+
+			for (w = 24; w + 4 <= m->size && w < 80; w += 4)
+				printf("darwinator:   [%u] %08x\n", w, rd32(m->data, w));
+		}
+		if (id == 2873 || id == 2880) {			/* a single service: the first, or none */
+			if (n == 0) { io_reply_null_port(m, id); return; }
+			np = kp_new(KP_IOOBJ); np->kpid = list[0];
+		} else
+			np = io_new_iter(list, n);
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	}
+	case 2802:					/* io_iterator_next(iterator, *object): the next entry or the null port at the end */
+		if (slot < 0) break;
+		if (io_iters[slot].pos >= io_iters[slot].n) { io_reply_null_port(m, id); return; }
+		np = kp_new(KP_IOOBJ); np->kpid = io_iters[slot].list[io_iters[slot].pos++];
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	case 2803:					/* io_iterator_reset */
+		if (slot >= 0) io_iters[slot].pos = 0;
+		mig_reply_data(m, id, 0, NULL, 0);
+		return;
+	case 2834: {					/* io_iterator_is_valid(iterator, *is_valid) */
+		uint32_t one = 1;
+
+		mig_reply_data(m, id, 0, &one, 4);
+		return;
+	}
+	case 2810: case 2800:				/* io_registry_entry_get_name(entry, *name) / io_object_get_class(object, *class) */
+		if (node < 0) break;
+		io_reply_string(m, id, id == 2810 ? io_nodes[node].name : io_nodes[node].cls);
+		return;
+	case 2826: {					/* io_registry_entry_get_path(entry, plane, *path) */
+		char path[256] = "";
+		int chain[8], c = 0, k;
+
+		if (node < 0) break;
+		for (k = node; k > 0 && c < 8; k = io_nodes[k].parent) chain[c++] = k;
+		snprintf(path, sizeof(path), "IOService:/");
+		for (k = c - 1; k >= 0; k--) { strlcat(path, io_nodes[chain[k]].name, sizeof(path)); if (k > 0) strlcat(path, "/", sizeof(path)); }
+		io_reply_string(m, id, path);
+		return;
+	}
+	case 2813: case 2814:				/* io_registry_entry_get_child_iterator / _parent_iterator(entry, plane, *iterator) */
+		if (node < 0) break;
+		n = 0;
+		if (id == 2813) { for (i = 0; i < IO_NNODES && n < 16; i++) if (io_nodes[i].parent == node) list[n++] = i; }
+		else if (io_nodes[node].parent >= 0) list[n++] = io_nodes[node].parent;
+		np = io_new_iter(list, n);
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	case 2801: {					/* io_object_conforms_to(object, class, *conforms) */
+		uint32_t yes = 0;
+
+		if (node >= 0) { const char *cn = io_req_string(m, 32); yes = io_node_matches(node, cn) ? 1 : 0; }
+		mig_reply_data(m, id, 0, &yes, 4);
+		return;
+	}
+	case 2856: {					/* io_service_get_state(service, *state, *busy_state, *accumulated_busy_time): registered, matched, active; not busy */
+		uint8_t st[20];
+
+		memset(st, 0, sizeof(st));
+		st[0] = 7;
+		mig_reply_data(m, id, 0, st, sizeof(st));
+		return;
+	}
+	case 2862: {					/* io_service_open_extended(service, task, type, ndr, properties, *connection, *result): a connection port, kept as an object of the node */
+		struct kport *cp = kp_new(KP_IOOBJ);
+		struct kmsg *r;
+		uint8_t *rd;
+
+		if (node < 0 || m->reply.port == NULL || m->reply.port->dead) { kp_unref(cp); break; }
+		cp->kpid = IO_CONN_BASE + node;
+		r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		r->data = rd = malloc(52, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		r->size = 52;
+		wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+		wr32(rd, 4, 52); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+		r->carry[0].port = cp; cp->refs++; r->carry[0].disp = MM_MOVE_SEND; r->carry[0].nameoff = 28;
+		r->ncarry = 1;
+		rd[28 + 10] = MM_MOVE_SEND; rd[28 + 11] = 0;
+		TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+		m->reply.port->qn++; kq_post(m->reply.port);
+		wakeup(m->reply.port);
+		kp_unref(cp);
+		if (darwin_debug >= 1)
+			printf("darwinator: IOKit: a connection to %s\n", io_nodes[node].name);
+		return;
+	}
+	case 2865: {					/* io_connect_method(connection, selector, scalars, inband, ool, ...): every method of a user client works and gives nothing back */
+		uint8_t z[16];
+
+		if (!conn) break;
+		memset(z, 0, sizeof(z));
+		if (darwin_debug >= 1)
+			printf("darwinator: IOKit: method %u of the connection to %s\n", m->size >= 36 ? rd32(m->data, 32) : 0, io_nodes[node].name);
+		mig_reply_data(m, id, 0, z, sizeof(z));
+		return;
+	}
+	case 2867: case 2816:				/* io_connect_set_notification_port / io_service_close */
+		mig_reply_data(m, id, 0, NULL, 0);
+		return;
+	case 2830: {					/* io_object_get_retain_count */
+		uint32_t one = 1;
+
+		mig_reply_data(m, id, 0, &one, 4);
+		return;
+	}
+	default:
+		break;
+	}
+	if (darwin_debug >= 1)
+		printf("darwinator: IOKit request %d is not served (it fails)\n", id);
+	mig_reply(t, m, id, (int)0xe00002c7 /* kIOReturnUnsupported */, NULL, NULL, 0, NULL, 0);
+}
+
 static void
 mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m)
 {
@@ -2209,10 +2520,26 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 		kp_unref(ip);
 		return;
 	}
-	if (dest->kind == KP_IOKIT) {				/* IOKit's routines (the subsystem 2800): there is no registry, every request fails (the program sees "no such device") */
-		if (darwin_debug >= 1)
-			printf("darwinator: %s[%d]: IOKit request %d (no registry: it fails)\n", td->td_proc->p_comm, td->td_proc->p_pid, id);
-		mig_reply(t, m, id, 5 /* KERN_FAILURE */, NULL, NULL, 0, NULL, 0);
+	if (dest->kind == KP_IOKIT || dest->kind == KP_IOOBJ) {			/* IOKit's routines (the subsystem 2800): the registry of io_serve */
+		if (darwin_debug >= 1) {
+			char txt[161];
+			uint32_t k, n = 0;
+
+			/* the printable text of the request (the matching dictionary, the path or the class name travel as text) */
+			for (k = 24; k < m->size && n < 160; k++)
+				txt[n++] = (d[k] >= 32 && d[k] < 127) ? (char)d[k] : '.';
+			for (k = 0; k < (uint32_t)m->nool && n < 160; k++)
+				if (m->ool[k].type == 1 && m->ool[k].data != NULL) {
+					uint32_t q;
+
+					txt[n++] = '|';
+					for (q = 0; q < m->ool[k].size && n < 160; q++)
+						txt[n++] = (m->ool[k].data[q] >= 32 && m->ool[k].data[q] < 127) ? (char)m->ool[k].data[q] : '.';
+				}
+			txt[n] = 0;
+			printf("darwinator: %s[%d]: IOKit request %d (size %u, %d ool): %s\n", td->td_proc->p_comm, td->td_proc->p_pid, id, m->size, m->nool, txt);
+		}
+		io_serve(t, dest, m, id);
 		return;
 	}
 	if (dest->kind != KP_TASK && !(dest->kind == KP_HOST && id == 206)) {
@@ -2623,6 +2950,45 @@ darwin_port_request_notification_trap(struct thread *td, struct darwin_args *uap
 	if (uap->a[6] != 0 && copyout(&prev, (void *)uap->a[6], 4) != 0)
 		kr = KERN_INVALID_ADDRESS;
 	return (kr_ret(td, kr));
+}
+
+/* work_interval_ctl(operation, work_interval_id, arg, len) (499): the work intervals of the scheduler (the window server makes one for its rendering).  CREATE (1) and CREATE2 (2) give an id and a port (the
+ * parameters are {uint64 id, uint32 port, uint32 flags}); the other operations (join, leave, notify, destroy) succeed: there is no deadline scheduling here */
+int
+darwin_work_interval_ctl(struct thread *td, struct darwin_args *uap)
+{
+	static uint64_t next_id = 1;
+	uint32_t op = (uint32_t)uap->a[0];
+
+	td->td_retval[0] = 0;
+	if (op == 1 || op == 2) {
+		struct ktask *t;
+		struct kport *wp;
+		struct kent *e;
+		uint8_t params[16];
+		uint32_t name = 0;
+		int error;
+
+		if (uap->a[2] == 0 || uap->a[3] < sizeof(params))
+			return (EINVAL);
+		sx_xlock(&km_sx);
+		if ((t = kt_task(td->td_proc)) != NULL) {
+			wp = kp_new(KP_PORT);
+			e = ent_add(t, wp, MM_MOVE_SEND);
+			wp->refs--;
+			if (e != NULL) name = e->name; else kp_unref(wp);
+		}
+		sx_xunlock(&km_sx);
+		memset(params, 0, sizeof(params));
+		next_id++;
+		memcpy(params, &next_id, 8);
+		memcpy(params + 8, &name, 4);
+		error = copyout(params, (void *)uap->a[2], sizeof(params));
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: work interval %lu made (port %#x)\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)next_id, name);
+		return (error);
+	}
+	return (0);
 }
 
 static const struct {

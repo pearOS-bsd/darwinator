@@ -35,6 +35,7 @@ int darwin_wq_kq_ids(struct proc *p, int64_t *ids, int max);
 int darwin_wq_kevent(struct thread *td, int64_t kqid, uint64_t in, int nin, uint64_t out, int nout, uint64_t dout, uint64_t *davail, int *count);
 void darwin_wq_note(struct thread *td);
 uint32_t darwin_thread_kport(struct thread *td);
+int darwin_work_interval_ctl(struct thread *, struct darwin_args *);
 void darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, bool add);
 void darwin_pth_exit(struct proc *p);
 struct thread;
