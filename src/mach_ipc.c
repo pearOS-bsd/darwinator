@@ -2045,6 +2045,21 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			} else {
 				a = right == MACH_PORT_RIGHT_SEND ? e->send : right == MACH_PORT_RIGHT_RECEIVE ? (e->recv ? 1 : 0) : right == MACH_PORT_RIGHT_SEND_ONCE ? e->sonce : 0;
 				if (right == 4) a = (e->port->dead && !e->recv) ? 1 : 0;	/* MACH_PORT_RIGHT_DEAD_NAME */
+				if (darwin_debug >= 1) {		/* a program that asks for the rights of its ports in a loop: where from (the frames of the user stack, once in 200000 calls) */
+					static u_long calls;
+
+					if ((++calls % 200000) == 1) {
+						uint64_t fp = td->td_frame->tf_rbp, ret[6];
+						int q;
+
+						for (q = 0; q < 6; q++) {
+							ret[q] = 0;
+							if (fp == 0 || copyin((void *)(fp + 8), &ret[q], 8) != 0 || copyin((void *)fp, &fp, 8) != 0)
+								break;
+						}
+						printf("darwinator: %s[%d]: mach_port_get_refs loop (call %lu), frames %#lx %#lx %#lx %#lx %#lx %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, calls, (u_long)ret[0], (u_long)ret[1], (u_long)ret[2], (u_long)ret[3], (u_long)ret[4], (u_long)ret[5]);
+					}
+				}
 				mig_reply_data(m, id, 0, &a, 4);
 				return (true);
 			}
