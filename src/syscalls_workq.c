@@ -272,7 +272,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 {
 	uint64_t kevent_list, data_buf, davail, top;
 	int64_t ids[16], first_kq;
-	int count, error, idle = 0, n, k;
+	int count, error, n, k;
 	uint64_t wqstart;
 	const uint32_t base_flags = WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_REUSE | WQ_FLAG_THREAD_TSD_BASE_SET | WQ_FLAG_THREAD_KEVENT | 5;
 
@@ -377,11 +377,22 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 			mtx_unlock(&wq_mtx);
 		}
 		/* events of the kqueue of the workqueue (not while the event manager is out: its events are for it, and a second manager would fail on its lock) */
+		bool claimed;
+
 		davail = WQ_KEVENT_DATA_SIZE; count = 0;
 		mtx_lock(&wq_mtx);
 		n = w->mgr;
+		if (n == 0)
+			w->mgr = 1;			/* claimed before the look: two threads that look at once would both find events and both become the manager (libdispatch: "Locking the manager should not fail") */
 		mtx_unlock(&wq_mtx);
-		error = n == 0 ? darwin_wq_kevent(td, -1, 0, 0, kevent_list, WQ_KEVENT_LIST_LEN, data_buf, &davail, &count) : 0;
+		claimed = n == 0;
+		error = claimed ? darwin_wq_kevent(td, -1, 0, 0, kevent_list, WQ_KEVENT_LIST_LEN, data_buf, &davail, &count) : 0;
+		if (claimed && !(error == 0 && count > 0)) {		/* nothing: the claim goes back */
+			mtx_lock(&wq_mtx);
+			w->mgr = 0;
+			mtx_unlock(&wq_mtx);
+			claimed = false;
+		}
 		if (error == 0 && count > 0) {
 			t->parked = 0;
 			if (darwin_debug >= 2) {
@@ -403,29 +414,30 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 					if (copyin((void *)(kevent_list + (uint64_t)j * WQ_KEVENT_SIZE + 8), &fj, sizeof(fj)) != 0 || fj != -8)
 						only_mach = false;
 				}
-				if (!only_mach) { mtx_lock(&wq_mtx); t->ismgr = 1; w->mgr = 1; mtx_unlock(&wq_mtx); }
+				mtx_lock(&wq_mtx);
+				if (!only_mach) { t->ismgr = 1; w->mgr = 1; }		/* the claim becomes the manager */
+				else if (claimed) w->mgr = 0;				/* only Mach messages: an ordinary thread, the claim goes back */
+				mtx_unlock(&wq_mtx);
 				wq_set_regs(td, t, wqstart, kevent_list, base_flags | (only_mach ? 0 : WQ_FLAG_THREAD_EVENT_MANAGER), (uint32_t)count, top);
 			}
 			return (EJUSTRETURN);
 		}
 		/* a thread beyond the first two that was idle for long sleeps for long (a request for threads wakes it): the first two look at the kqueues.  A thread does not end here: libpthread keeps
 		 * every thread in its list, and the memory of one that ended is gone, so the next new thread would write there */
-		error = tsleep(t, PCATCH, "wqpark", (t - w->thr) >= 2 && idle > WQ_IDLE_LIFE ? hz : WQ_POLL);
+		error = tsleep(t, PCATCH, "wqpark", (t - w->thr) >= 2 ? hz : WQ_POLL);
 		if (error == EINTR || error == ERESTART) {
 			/* a stop for the debugger (lldb attaches with a signal) wakes the sleep with nothing to deliver; libpthread takes an error here as a fault and aborts, so the thread goes on parking */
 			bool deliver;
 
 			PROC_LOCK(td->td_proc);
-			deliver = SIGPENDING(td) || (td->td_proc->p_flag & (P_WEXIT | P_SINGLE_EXIT | P_STOPPED_SINGLE | P_SINGLE_BOUNDARY | P_WKILLED)) != 0;
+			deliver = (td->td_proc->p_flag & P_TRACED) == 0 || SIGPENDING(td) || (td->td_proc->p_flag & (P_WEXIT | P_SINGLE_EXIT | P_STOPPED_SINGLE | P_SINGLE_BOUNDARY | P_WKILLED)) != 0;	/* only a process that is being debugged goes on (anything else would spin here when the sleep returns at once) */
 			PROC_UNLOCK(td->td_proc);
 			if (!deliver) {
-				idle += WQ_POLL;
 				continue;
 			}
 		}
 		if (error != 0 && error != EWOULDBLOCK)
 			break;
-		idle += WQ_POLL;
 	}
 	return (error == ERESTART ? EINTR : error);
 }
@@ -491,11 +503,13 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
 				w->want = WQ_MAX_THREADS;
 		}
 		{
-			int i, idle = 0;
+			int i, idle = 0, woken = 0;
 
-			for (i = 0; i < WQ_MAX_THREADS; i++)		/* wake the parked threads first: they take the work */
-				if (w->thr[i].used && w->thr[i].td != NULL)
-					wakeup(&w->thr[i]), idle++;
+			for (i = 0; i < WQ_MAX_THREADS; i++)		/* wake the parked threads first: they take the work (as many as the requests: waking all of them at every request kept 33 threads of launchservicesd at 4 CPUs) */
+				if (w->thr[i].used && w->thr[i].td != NULL) {
+					if (woken < MAX((int)n, 1)) { wakeup(&w->thr[i]); woken++; }
+					idle++;
+				}
 			while ((w->want > 0 || w->want_oc > 0) && w->nthreads < WQ_MAX_THREADS && w->nthreads >= idle) {
 				bool oc = w->want_oc > 0;
 
@@ -584,7 +598,7 @@ darwin_wq_note(struct thread *td)
 	} else if (w != NULL) {
 		int i;
 
-		for (i = 0; i < WQ_MAX_THREADS; i++)
+		for (i = 0; i < 2; i++)			/* only the first two threads look at the kqueues (the others sleep): a program that adds sources all the time woke all of them (33 in launchservicesd) and used 4 CPUs */
 			if (w->thr[i].used && w->thr[i].td != NULL)
 				wakeup(&w->thr[i]);
 	}

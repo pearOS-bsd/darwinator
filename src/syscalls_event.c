@@ -394,6 +394,7 @@ darwin_kevent64(struct thread *td, struct darwin_args *uap)
 /* kevent_qos(fd, changelist, nchanges, eventlist, nevents, data_out, data_available, flags) and kevent_id(id, ... same): the events are 72 bytes; fd -1 and the ids of workloops are
  * kqueues of the process that are made when first used (a descriptor that the program does not know of).  There is no timeout: KEVENT_FLAG_IMMEDIATE (1) asks not to wait. */
 static struct { struct proc *p; pid_t pid; int64_t id; int fd; } kq_tab[1024];
+static int kq_hi;			/* the slots in use are all below this: the scans stop there (a thread of the pool looks at them at every wake-up) */
 static struct mtx kq_mtx;
 MTX_SYSINIT(darwin_kq, &kq_mtx, "darwin kq", MTX_DEF);
 
@@ -405,7 +406,7 @@ kq_for(struct thread *td, int64_t id, int *fdp)
 	struct kqueue_args ka;
 
 	mtx_lock(&kq_mtx);
-	for (i = 0; i < (int)nitems(kq_tab); i++) {
+	for (i = 0; i < kq_hi; i++) {
 		if (kq_tab[i].p == p && kq_tab[i].pid == p->p_pid && kq_tab[i].id == id) {
 			*fdp = kq_tab[i].fd;
 			mtx_unlock(&kq_mtx);
@@ -414,6 +415,8 @@ kq_for(struct thread *td, int64_t id, int *fdp)
 		if (kq_tab[i].p == NULL && free_i < 0)
 			free_i = i;
 	}
+	if (free_i < 0 && kq_hi < (int)nitems(kq_tab))
+		free_i = kq_hi;
 	mtx_unlock(&kq_mtx);
 	if (free_i < 0)
 		return (EMFILE);
@@ -421,6 +424,8 @@ kq_for(struct thread *td, int64_t id, int *fdp)
 		return (error);
 	mtx_lock(&kq_mtx);
 	kq_tab[free_i].p = p; kq_tab[free_i].pid = p->p_pid; kq_tab[free_i].id = id; kq_tab[free_i].fd = td->td_retval[0];
+	if (free_i >= kq_hi)
+		kq_hi = free_i + 1;
 	*fdp = td->td_retval[0];
 	mtx_unlock(&kq_mtx);
 	return (0);
@@ -433,9 +438,11 @@ darwin_kq_exit(struct proc *p)
 	int i;
 
 	mtx_lock(&kq_mtx);
-	for (i = 0; i < (int)nitems(kq_tab); i++)
+	for (i = 0; i < kq_hi; i++)
 		if (kq_tab[i].p == p)
 			memset(&kq_tab[i], 0, sizeof(kq_tab[i]));
+	while (kq_hi > 0 && kq_tab[kq_hi - 1].p == NULL)
+		kq_hi--;
 	mtx_unlock(&kq_mtx);
 }
 
@@ -514,7 +521,7 @@ darwin_wq_kq_ids(struct proc *p, int64_t *ids, int max)
 	int i, n = 0;
 
 	mtx_lock(&kq_mtx);
-	for (i = 0; i < (int)nitems(kq_tab) && n < max; i++)
+	for (i = 0; i < kq_hi && n < max; i++)
 		if (kq_tab[i].p == p && kq_tab[i].pid == p->p_pid && kq_tab[i].id != -1)
 			ids[n++] = kq_tab[i].id;
 	mtx_unlock(&kq_mtx);
