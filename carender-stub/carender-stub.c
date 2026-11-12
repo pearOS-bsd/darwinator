@@ -71,6 +71,13 @@ main(void)
 					out("carender-stub: answered "); hex(buf[5], 8); out("\n");
 				}
 		}
+		if (buf[5] == 0x9c42 && (buf[0] & 0x80000000) && buf[6] >= 1 && ((buf[9] >> 16) & 0xff) == 0x12) {	/* a commit with a send-once right (the Dock waits on it): an empty message to it */
+			u32 ack[6];
+
+			ack[0] = 0x12; ack[1] = 24; ack[2] = buf[7]; ack[3] = 0; ack[4] = 0; ack[5] = 0;
+			kr = mach_msg(ack, 1, 24, 0, 0, 0, 0);
+			out("carender-stub: commit acknowledged "); hex((u32)kr, 8); out("\n");
+		}
 		if (buf[5] == 0x9d0a) { answer_register(buf, p1, p2, 1, 1, 0); out("carender-stub: answered the register\n"); }
 	}
 }
