@@ -506,6 +506,21 @@ darwin_guarded_writev(struct thread *td, struct darwin_args *uap)	/* (fd, guard,
 
 /* ---- small ones ---- */
 
+/* __mac_syscall(policy, call, arg) (381): the calls to a policy of the MAC framework; "Sandbox" is asked by libsandbox (sandbox_init and the checks), no policy is loaded here, so all of them succeed.  Logged at kern.darwinator.debug >= 1. */
+static int
+darwin_mac_syscall(struct thread *td, struct darwin_args *uap)
+{
+	char pol[32];
+
+	if (darwin_debug >= 1) {
+		memset(pol, 0, sizeof(pol));
+		(void)copyinstr((void *)uap->a[0], pol, sizeof(pol), NULL);
+		printf("darwinator: %s[%d]: __mac_syscall(\"%s\", %ld, %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, pol, (long)uap->a[1], (u_long)uap->a[2]);
+	}
+	td->td_retval[0] = 0;
+	return (0);
+}
+
 static int
 darwin_ok(struct thread *td, struct darwin_args *uap __unused)
 {
@@ -695,7 +710,7 @@ static const struct {
 	E(286, 2, darwin_esrch,		"gettid"),
 	E(38,  3, darwin_enotsup,	"crossarch_trap"),
 	E(483, 3, darwin_eperm,		"csrctl"),
-	E(381, 3, darwin_ok,		"__mac_syscall"),
+	E(381, 3, darwin_mac_syscall,	"__mac_syscall"),
 	/* what APFS and HFS+ have and this system has not: ENOTSUP, the answer that programs check for */
 	E(205, 2, darwin_enotsup,	"undelete"),
 	E(221, 5, darwin_enotsup,	"setattrlist"),

@@ -2890,6 +2890,16 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 		int wi;
 
 		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax);
+		if (tdp == curthread) {			/* the frames (rbp chain): the return addresses of the callers */
+			uint64_t fp = tdp->td_frame->tf_rbp, pair[2];
+			int fi;
+
+			for (fi = 0; fi < 24 && fp != 0 && copyin((void *)fp, pair, sizeof(pair)) == 0; fi++) {
+				printf("darwinator:   frame %d: return %#lx\n", fi, (u_long)pair[1]);
+				if (pair[0] <= fp) break;
+				fp = pair[0];
+			}
+		}
 		if (tdp == curthread) {			/* a few words of the stack: the return addresses show who called */
 			uint64_t sw[12];
 			int k;
