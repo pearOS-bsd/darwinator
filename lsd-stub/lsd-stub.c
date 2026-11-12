@@ -50,14 +50,24 @@ lower(char *o, const char *s)
 }
 
 static void
-handle(xpc_object_t peer, xpc_object_t m)
+handle(xpc_object_t peer, xpc_object_t m, int nsxpc)
 {
 	char *d = xpc_copy_description(m);
 	xpc_object_t r;
 
 	out("lsd-stub: message: "); out(d); out("\n");
 	free(d);
-	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && xpc_dictionary_get_value(m, "replysig")) return;	/* the answers of an NSXPC message (no "replysig" reply) crash libxpc of the Mac: not answering is the only thing that works here */
+	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && xpc_dictionary_get_value(m, "replysig")) {
+		xpc_object_t nr;
+
+		/* a service whose clients wait for the answer (the fonts): an empty NSXPC answer (the client reports an error and goes on) */
+		if (nsxpc && (nr = xpc_dictionary_create_reply(m)) != 0) {
+			xpc_dictionary_set_uint64(nr, "sequence", xpc_dictionary_get_uint64(m, "sequence"));
+			xpc_dictionary_set_uint64(nr, "f", 0);
+			xpc_connection_send_message(peer, nr);
+		}
+		return;
+	}	/* the answers of an NSXPC message (no "replysig" reply) crash libxpc of the Mac: not answering is the only thing that works here */
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
 		long cmd = xpc_dictionary_get_int64(m, "command");
 
@@ -146,10 +156,12 @@ main(int argc, char **argv)
 	/* one listener for each name on the command line (several services in one process: every process of the Mac costs memory here); no name: the LaunchServices daemon */
 	for (i = 1; i < (argc > 1 ? argc : 2); i++) {
 		xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[i] : "com.apple.coreservices.launchservicesd", q, 1);
+		const char *nm = argc > 1 ? argv[i] : "";
+		int nsx = nm[0] == 'c' && nm[4] == 'a' && nm[10] == 'f' && nm[11] == 'o' && nm[12] == 'n' && nm[13] == 't' && nm[14] == 's' && nm[15] == 0;	/* "com.apple.fonts" */
 
 		xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
 			out("lsd-stub: a connection\n");
-			xpc_connection_set_event_handler(peer, ^(xpc_object_t m) { handle(peer, m); });
+			xpc_connection_set_event_handler(peer, ^(xpc_object_t m) { handle(peer, m, nsx); });
 			xpc_connection_resume(peer);
 		});
 		xpc_connection_resume(svc);
