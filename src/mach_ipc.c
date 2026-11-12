@@ -431,12 +431,8 @@ mp_event(struct knote *kn, long hint __unused)
 {
 	struct kport *p = kn->kn_hook;
 
-	if (p == NULL) {
-		kn->kn_flags |= EV_EOF;
-		return (1);
-	}
-	if (p->dead) {
-		kn->kn_flags |= EV_EOF;
+	if (p == NULL || p->dead) {			/* the port is gone: the event is delivered once (EV_VANISHED) and the note goes (the program may free what udata points at: a second event would find it freed) */
+		kn->kn_flags |= EV_EOF | EV_ONESHOT;
 		return (1);
 	}
 	kn->kn_data = p->qn;

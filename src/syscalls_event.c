@@ -296,6 +296,8 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 		d.udata = (uint64_t)kevp[i].udata;
 		d.ext[0] = kevp[i].ext[0];
 		d.ext[1] = kevp[i].ext[1];
+		if (kevp[i].filter == EVFILT_EMPTY && (kevp[i].flags & EV_EOF) != 0)		/* a port that died: EV_VANISHED | EV_DELETE, as XNU gives it */
+			d.flags = (d.flags & ~(uint16_t)EV_EOF) | 0x0200 /* EV_VANISHED */ | EV_DELETE;
 		if (kevp[i].filter == EVFILT_EMPTY) {		/* EVFILT_MACHPORT: with MACH_RCV_MSG the message comes with the event (ext[0]: where, ext[1]: its size, fflags: the result of the receive) */
 			uint32_t opt = (uint32_t)kevp[i].ext[3], got = 0;
 			uint64_t buf = kevp[i].ext[0];
