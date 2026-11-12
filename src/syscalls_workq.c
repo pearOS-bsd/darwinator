@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/signalvar.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
@@ -410,6 +411,18 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		/* a thread beyond the first two that was idle for long sleeps for long (a request for threads wakes it): the first two look at the kqueues.  A thread does not end here: libpthread keeps
 		 * every thread in its list, and the memory of one that ended is gone, so the next new thread would write there */
 		error = tsleep(t, PCATCH, "wqpark", (t - w->thr) >= 2 && idle > WQ_IDLE_LIFE ? hz : WQ_POLL);
+		if (error == EINTR || error == ERESTART) {
+			/* a stop for the debugger (lldb attaches with a signal) wakes the sleep with nothing to deliver; libpthread takes an error here as a fault and aborts, so the thread goes on parking */
+			bool deliver;
+
+			PROC_LOCK(td->td_proc);
+			deliver = SIGPENDING(td) || (td->td_proc->p_flag & P_WEXIT) != 0;
+			PROC_UNLOCK(td->td_proc);
+			if (!deliver) {
+				idle += WQ_POLL;
+				continue;
+			}
+		}
 		if (error != 0 && error != EWOULDBLOCK)
 			break;
 		idle += WQ_POLL;

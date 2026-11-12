@@ -296,8 +296,11 @@ forward(const u32 *tr, u32 via_port)
 			goto fail;
 		}
 	} else if (send(fd, &rq.h, rq.h.size, 0) != (long)rq.h.size) goto fail;
-	if (rq.h.remote == 0)
-		return;							/* no reply port: nothing to wait for */
+	if (rq.h.remote == 0) {
+		/* no reply port (a routine without a reply, like SetWindowLevel): wsd answers every request anyway, so its answer is read and dropped; left on the socket it would be taken as the answer of the next request */
+		(void)get_reply(fd, pid, 0);
+		return;
+	}
 	if (get_reply(fd, pid, rq.h.remote) != 0) goto fail;
 	out("wsbridge:   reply id "); outx(rp.h.id); out(" size "); outx(rp.h.size); out(" bits "); outx(rp.h.bits);
 	if (rp.h.size == 0x24 && !(rp.h.bits & 0x80000000u)) { out(" code "); outx(((u32 *)&rp.h)[8]); }
