@@ -1767,6 +1767,30 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, 0, &type, 4);
 			return (true);
 		}
+	case 3215:					/* mach_port_extract_right(task, name, msgt_name, *poly, *poly_type): a right to the port of the name, in the reply (a send-once or a send right made from the receive right) */
+		{
+			struct kent *e = m->size >= 40 ? ent_by_name(t, rd32(d, 32)) : NULL;
+			uint32_t mt = m->size >= 40 ? rd32(d, 36) : 0;
+			struct kmsg *r;
+			uint8_t *rd;
+			int disp = mt == MM_MAKE_SEND_ONCE || mt == MM_MOVE_SEND_ONCE ? MM_MAKE_SEND_ONCE : MM_MAKE_SEND;
+
+			if (e == NULL || !e->recv) { mig_reply_data(m, id, e == NULL ? KERN_INVALID_NAME : KERN_INVALID_RIGHT, NULL, 0); return (true); }
+			if (m->reply.port == NULL || m->reply.port->dead)
+				return (true);
+			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->data = rd = malloc(40, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->size = 40;							/* only the port descriptor: the type of the right is its disposition (no NDR, no other field) */
+			wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+			wr32(rd, 4, 40); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+			r->carry[0].port = e->port; e->port->refs++; r->carry[0].disp = disp; r->carry[0].nameoff = 28;
+			r->ncarry = 1;
+			rd[28 + 10] = disp == MM_MAKE_SEND_ONCE ? 18 : 17; rd[28 + 11] = 0;
+			TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+			m->reply.port->qn++; kq_post(m->reply.port);
+			wakeup(m->reply.port);
+			return (true);
+		}
 	case 3217:					/* mach_port_get_attributes(task, name, flavor, *info, *count) */
 		{
 			struct kent *e = m->size >= 44 ? ent_by_name(t, rd32(d, 32)) : NULL;

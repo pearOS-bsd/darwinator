@@ -595,6 +595,7 @@ main(int argc, char **argv, char **envp)
 						reply_port(&rq.h, sv->port, sv->own ? 20 : 19);
 						continue;
 					}
+					if (rt >= 0x320 || rt == 0xcf) { out("launchd:   NOT FOUND: "); out((const char *)(v + 2)); out("\n"); }
 				}
 			}
 		}
