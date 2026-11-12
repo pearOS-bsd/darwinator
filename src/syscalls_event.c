@@ -272,7 +272,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 				void *port = darwin_mach_port_for_event(curthread, (uint32_t)d.ident);
 
 				if (darwin_debug >= 1)
-					printf("darwinator: %s[%d]: EVFILT_MACHPORT add for name %#lx: %s (options %#x, flags %#x)\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, port ? "found" : "no receive right with this name", d.fflags, d.flags);
+					printf("darwinator: %s[%d]: EVFILT_MACHPORT add for name %#lx: %s (options %#x, flags %#x, udata %#lx)\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, port ? "found" : "no receive right with this name", d.fflags, d.flags, (u_long)d.udata);
 				if (port == NULL)
 					kevp[i].filter = 0x7000;	/* no such port (or no receive right): the change comes back as an error */
 				else
@@ -338,7 +338,7 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 				}
 			}
 		}
-		if (darwin_debug >= 2)
+		if (darwin_debug >= 2 || (darwin_debug >= 1 && d.filter == -8))
 			printf("darwinator: %s[%d]: event out: ident %#lx filter %d flags %#x fflags %#x data %#lx udata %#lx ext %#lx %#lx\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, d.filter, d.flags, d.fflags, (u_long)d.data, (u_long)d.udata, (u_long)d.ext[0], (u_long)d.ext[1]);
 		if (a->size == 72) {
 			char raw[72];
