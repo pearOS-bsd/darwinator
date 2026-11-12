@@ -42,6 +42,15 @@ def obj(r,req=0,depth=0):
             n=r.u64(); return ('shmem_inline',fl,r.raw(n) if n not in (0xffffffff,0xffffffffffffffff) else 'attached')
         a=r.u64(); b=r.u64(); return ('shmem_port',fl,a,b)
     if t==0x12: return filt(r)
+    if t==0x17:				# CA::Render::Image::decode: i32, i8, i8 (planes), i32 w, i32 h, planes x u64 (row bytes), i8 shared?, then a Shmem object or inline data
+        fl=r.u32(); fmt=r.u8(); np=r.u8(); w=r.u32(); h=r.u32()
+        rows=[r.u64() for _ in range(np)]
+        if r.u8(): data=obj(r,0x34,depth+1)
+        else:
+            n=r.u64(); data=r.raw(n) if n not in (0xffffffff,0xffffffffffffffff) else 'attached'
+        return ('image',fl,fmt,w,h,rows,data)
+    if t==0x1f:				# CA::Render::LayerHost: Object flags i32, the context to show (a port of the message: no bytes), i32, i8
+        of=r.u32(); return ('layerhost',of,r.u32(),r.u8())	# the Object base reads an i32 (flags) first
     raise Exception('object type %d at %d'%(t,r.p))
 def arr(r,retained,depth):
     tag=r.u8()
