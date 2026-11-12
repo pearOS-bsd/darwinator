@@ -15,3 +15,12 @@ Object types found in QuartzCore (`CA::Render::Decoder::decode_object` jump tabl
 (signed distance field: the glass of the Dock; Object flags, decode_data 0x70, ...).  caparse.py knows Image and LayerHost now; SDFLayer not yet.
 The capture under lldb stops after ~15 KB (Dock stalls under the debugger), so the Mac stream is the start of the Dock only: one 54x54 image and a
 128x128 one, a LayerHost, no tiles yet.  A different way to capture (not ptrace) is needed for the whole stream.
+
+## Drawing the scene (2026-11-13)
+`cadraw.py ca.bin out.ppm` paints the layers of /tmp/ca.bin (the last state of every layer, depth first from the roots: centre position, size,
+background colour from the first floats of the 0x58 block) and `wsbsd/tools/wsshow` puts the PPM in a window of wsd (reloads it when it changes):
+
+    python3 cadraw.py /tmp/ca.bin /tmp/cadock.ppm --watch &   wsshow /tmp/cadock.ppm 0 0 5 &
+
+With the Dock as it runs now the picture is the WallpaperLayer only: 1280x800 of (0.176, 0.176, 0.195) -- the solid colour the Dock
+sends when there is no wallpaper image (docs/screenshot-dock-wallpaper-ca.png).  The tile layers have no size and no contents yet.
