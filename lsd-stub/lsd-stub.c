@@ -5,6 +5,9 @@ typedef void *dq;
 extern xpc_object_t xpc_connection_create_mach_service(const char *name, dq q, unsigned long flags);
 extern void xpc_connection_set_event_handler(xpc_object_t c, void (^h)(xpc_object_t));
 extern void xpc_connection_resume(xpc_object_t c);
+extern void xpc_connection_cancel(xpc_object_t c);
+extern void xpc_release(xpc_object_t o);
+extern void xpc_dictionary_set_string(xpc_object_t d, const char *k, const char *v);
 extern void xpc_connection_send_message(xpc_object_t c, xpc_object_t m);
 extern xpc_object_t xpc_dictionary_create_reply(xpc_object_t m);
 extern long xpc_dictionary_get_int64(xpc_object_t d, const char *k);
@@ -78,6 +81,42 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
 		long cmd = xpc_dictionary_get_int64(m, "command");
 
+		if (streq(svc, "com.apple.runningboard") && xpc_dictionary_get_string(m, "rbs_selector") != 0) {
+			/* RunningBoard: the answer to the handshake (the shape found by asking the runningboardd of the Mac with a program): the response with the handle of the calling process.  Anything else: no answer, and the connection ends (the client is told) */
+			const char *sel = xpc_dictionary_get_string(m, "rbs_selector");
+
+			if (streq(sel, "handshakeWithRequest:")) {
+				long pid = xpc_connection_get_pid(peer);
+				xpc_object_t rv = xpc_dictionary_create(0, 0, 0), h = xpc_dictionary_create(0, 0, 0), ch = xpc_dictionary_create(0, 0, 0), id = xpc_dictionary_create(0, 0, 0);
+				xpc_object_t at = xpc_dictionary_create(0, 0, 0), bu = xpc_dictionary_create(0, 0, 0);
+
+				xpc_dictionary_set_string(rv, "bsx_class", "RBSHandshakeResponse");
+				xpc_dictionary_set_value(rv, "success-keys", xpc_array_create(0, 0));
+				xpc_dictionary_set_value(rv, "success-values", xpc_array_create(0, 0));
+				xpc_dictionary_set_value(rv, "fail-keys", xpc_array_create(0, 0));
+				xpc_dictionary_set_value(rv, "fail-values", xpc_array_create(0, 0));
+				xpc_dictionary_set_string(id, "bsx_class", "RBSOpaqueProcessIdentity");
+				xpc_dictionary_set_int64(id, "_pid", pid);
+				xpc_dictionary_set_int64(id, "_auid", 0);
+				xpc_dictionary_set_string(id, "_description", "anon<lsd>(0)");
+				xpc_dictionary_set_value(ch, "_identity", id);
+				xpc_dictionary_set_uint64(ch, "_pid", pid);
+				xpc_dictionary_set_string(at, "bsx_index", "1");
+				xpc_dictionary_set_value(ch, "_bsAuditToken", at);
+				xpc_dictionary_set_uint64(ch, "_data", 0);
+				xpc_dictionary_set_string(bu, "bsx_class", "RBSProcessBundle");
+				xpc_dictionary_set_value(ch, "_bundle", bu);
+				xpc_dictionary_set_value(h, "_codedHandle", ch);
+				xpc_dictionary_set_string(h, "bsx_class", "RBSProcessHandle");
+				xpc_dictionary_set_value(rv, "_handle", h);
+				xpc_dictionary_set_value(r, "return-value", rv);
+				xpc_connection_send_message(peer, r);
+				return;
+			}
+			xpc_release(r);					/* not sent: the destruction of the reply drops the right to reply, and the client is told that no answer will come */
+			xpc_connection_cancel(peer);
+			return;
+		}
 		/* the answers of the launchservicesd of the Mac (found by asking it with a program on the Mac): 100 check-in, 110 the info page (a shared memory of 15 pages), 200 the meta information
 		 * (the session of the graphics server), 505 and 360 (an application that is not known): "success": false */
 		if (cmd == 100) {

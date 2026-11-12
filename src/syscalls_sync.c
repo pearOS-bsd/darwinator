@@ -229,6 +229,8 @@ darwin_psynch_rw_unlock(struct thread *td, struct darwin_args *uap)
 static int
 kr_of(struct thread *td, int error)
 {
+	if (error != 0 && darwin_debug >= 2)
+		DPRINTF("%s[%d]: vm trap failed: error %d\n", td->td_proc->p_comm, td->td_proc->p_pid, error);
 	td->td_retval[0] = error == 0 ? KERN_SUCCESS : error == EFAULT ? KERN_INVALID_ADDRESS : KERN_INVALID_ARGUMENT;
 	return (0);
 }

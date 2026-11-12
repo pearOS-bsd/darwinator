@@ -11,3 +11,15 @@ The real `launchservicesd` of the Mac (run through the module) crashes in libxpc
 - 500 (check-in of an application): the answer is `{success, result: <the info of the application + LSAuditToken, LSDisplayName, CFBundleExecutablePath, LSExecutableFilenameLowerCaseKey, BundleIdentifierLowerCase, CFBundleNameLowerCase, LSApplicationMemberCoalitionIDKey, pid, LSApplicationHasRegistered, ChangeCount, LSASN>}` (shape found by asking the daemon of the Mac with a program). `LSASN` must be a dictionary of three entries (`...asn.lo`, `...asn.hi` and `com.apple.coreservices.asn` = the marker uuid C96172A0-CE74-4D62-AFEF-ECFE4D04D827): LaunchServices reads only that form as a serial number; with another uuid the conversion returns NULL and the caller crashes in `CFDictionaryGetValue(NULL)`.
 - Messages that carry `replysig` (NSXPC): they are not answered. An answer without the NSXPC fields takes `_xpc_connection_call_reply_async` of libxpc to a NULL context (SIGSEGV in ControlCenter, Dock, ...).
 - Other things the apps need (not here): `/System/Library/CoreServices/SystemVersion.plist` (without it `GetMacOSXSystemVersionInformation failed` aborts HIServices `_RegisterApplication`); it is a fact file of the version, copied to the VM only.
+
+## RunningBoard (com.apple.runningboard) as a stub
+
+The real `launchservicesd` (tools/stack-dock-reallsd.sh) waits for RunningBoard at start-up.  The stub answers
+`handshakeWithRequest:` with the shape that the runningboardd of the Mac gives (found by asking it with a program under
+lldb): `{"return-value": {bsx_class: RBSHandshakeResponse, success-keys/values, fail-keys/values: [], _handle: {bsx_class:
+RBSProcessHandle, _codedHandle: {_identity {RBSOpaqueProcessIdentity, _pid, _auid, _description}, _pid, _bsAuditToken
+{bsx_index}, _data, _bundle}}}}`.  Any other selector: the reply is released (so the right to reply is destroyed and the
+kernel sends MACH_NOTIFY_SEND_ONCE to the waiter) and the connection is cancelled.
+
+Do not put `com.apple.logd` among the names of the stubs: Dock then finds a logd that does not speak the protocol and
+`os_trace_metadata_init` crashes (the firehose buffer is NULL).

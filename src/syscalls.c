@@ -239,6 +239,14 @@ darwin_nosys(struct thread *td, struct nosys_args *uap)
 	if (darwin_debug)
 		printf("darwinator: %s[%d]: unimplemented system call %#x (%s)\n", td->td_proc->p_comm, td->td_proc->p_pid,
 		    td->td_sa.original_code, td->td_sa.code < (u_int)DARWIN_NSYSCALLS && darwin_syscallnames[td->td_sa.code] != NULL ? darwin_syscallnames[td->td_sa.code] : "?");
+	if (darwin_debug && td->td_sa.original_code == 0x2000226) {		/* os_fault_with_payload(namespace, code, payload, size, string, flags): who complains, and why */
+		char str[120] = "";
+		size_t done;
+
+		(void)copyinstr((void *)td->td_sa.args[4], str, sizeof(str), &done);
+		printf("darwinator: %s[%d]: os_fault_with_payload ns %ld code %#lx string \"%s\"\n", td->td_proc->p_comm, td->td_proc->p_pid,
+		    (long)td->td_sa.args[0], (long)td->td_sa.args[1], str);
+	}
 	return (nosys(td, uap));
 }
 

@@ -361,6 +361,8 @@ port_die(struct kport *p)
 static int
 kr_ret(struct thread *td, int kr)
 {
+	if (kr != 0 && darwin_debug >= 2)
+		DPRINTF("%s[%d]: mach trap %u -> kr %d\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_sa.code - DARWIN_MACH_BASE, kr);
 	td->td_retval[0] = (register_t)(uint32_t)kr;
 	return (0);
 }
@@ -628,6 +630,18 @@ darwin_port_insert_right(struct thread *td, struct darwin_args *uap)	/* (target,
 	return (kr_ret(td, kr));
 }
 
+static void notify_id(struct kport *to, int nid, uint32_t arg);
+
+/* a send-once right that is destroyed without being used: its port (a reply port that somebody waits on) gets MACH_NOTIFY_SEND_ONCE (71), so that the waiter knows no answer will come */
+static void
+sonce_destroyed(struct kport *p, int n)
+{
+	if (darwin_debug)
+		printf("darwinator: send-once right destroyed (port %p, dead %d, waiters %d)\n", p, p->dead, p->waiters);
+	while (n-- > 0)
+		notify_id(p, 71, 0);
+}
+
 static int
 darwin_port_deallocate(struct thread *td, struct darwin_args *uap)	/* (target, name): one send or send-once right, or the dead name */
 {
@@ -638,7 +652,7 @@ darwin_port_deallocate(struct thread *td, struct darwin_args *uap)	/* (target, n
 	sx_xlock(&km_sx);
 	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
 		if (e->send > 0) { e->send--; kr = KERN_SUCCESS; }
-		else if (e->sonce > 0) { e->sonce--; kr = KERN_SUCCESS; }
+		else if (e->sonce > 0) { e->sonce--; kr = KERN_SUCCESS; sonce_destroyed(e->port, 1); }
 		else if (e->recv) kr = KERN_INVALID_RIGHT;
 		ent_drop_if_empty(e);
 		ns_check();
@@ -668,6 +682,7 @@ darwin_port_mod_refs(struct thread *td, struct darwin_args *uap)	/* (target, nam
 			e->send += delta; kr = KERN_SUCCESS;
 		} else if (right == MACH_PORT_RIGHT_SEND_ONCE && delta < 0 && e->sonce >= -delta) {
 			e->sonce += delta; kr = KERN_SUCCESS;
+			sonce_destroyed(e->port, -delta);
 		}
 		ent_drop_if_empty(e);
 	}
@@ -1414,6 +1429,8 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 		m = NULL;
 		if (error != 0 || rp->dead)
 			break;
+		if (darwin_debug >= 2 && timo == 0 && (rname < 0x4000) && !(rp->kind == KP_SET))
+			printf("darwinator: %s[%d] tid %d: receive blocks on %#x (kind %d)\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_tid, rname, rp->kind);
 		error = sx_sleep(rp, &km_sx, PCATCH, "machmsg", timo);
 		if ((e = ent_by_name(t, setname)) == NULL || !e->recv || e->port != rp)
 			error = EINVAL;
@@ -2032,16 +2049,17 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			if (e == NULL) { mig_reply_data(m, id, KERN_INVALID_NAME, NULL, 0); return (true); }
 			if (id == 3205 || id == 3232) {
 				if (e->recv) { e->recv = false; port_die(e->port); }
+				if (e->sonce > 0) sonce_destroyed(e->port, e->sonce);
 				e->send = 0; e->sonce = 0;
 			} else if (id == 3206) {
 				if (e->send > 0) e->send--;
-				else if (e->sonce > 0) e->sonce--;
+				else if (e->sonce > 0) { e->sonce--; sonce_destroyed(e->port, 1); }
 				else if (e->recv) kr = KERN_INVALID_RIGHT;
 			} else if (id == 3208) {
 				kr = KERN_INVALID_RIGHT;
 				if (right == MACH_PORT_RIGHT_RECEIVE && e->recv && delta < 0) { e->recv = false; port_die(e->port); kr = KERN_SUCCESS; }
 				else if (right == MACH_PORT_RIGHT_SEND && e->send > 0 && e->send + delta >= 0) { e->send += delta; kr = KERN_SUCCESS; }
-				else if (right == MACH_PORT_RIGHT_SEND_ONCE && e->sonce > 0 && e->sonce + delta >= 0) { e->sonce += delta; kr = KERN_SUCCESS; }
+				else if (right == MACH_PORT_RIGHT_SEND_ONCE && e->sonce > 0 && e->sonce + delta >= 0) { e->sonce += delta; kr = KERN_SUCCESS; if (delta < 0) sonce_destroyed(e->port, -delta); }
 			} else {
 				a = right == MACH_PORT_RIGHT_SEND ? e->send : right == MACH_PORT_RIGHT_RECEIVE ? (e->recv ? 1 : 0) : right == MACH_PORT_RIGHT_SEND_ONCE ? e->sonce : 0;
 				if (right == 4) a = (e->port->dead && !e->recv) ? 1 : 0;	/* MACH_PORT_RIGHT_DEAD_NAME */
@@ -2975,6 +2993,7 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 	if ((t = kt_get(p, false)) != NULL) {
 		for (i = 0; i < KE_N; i++)
 			if (t->e[i].used) {
+				if (t->e[i].sonce > 0) sonce_destroyed(t->e[i].port, t->e[i].sonce);
 				if (t->e[i].recv) port_die(t->e[i].port);
 				kp_unref(t->e[i].port);
 				t->e[i].used = false;
