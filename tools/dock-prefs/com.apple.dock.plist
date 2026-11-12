@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>version</key><integer>1</integer><key>region</key><string>US</string><key>loc</key><string>en_US:US</string><key>mod-count</key><integer>1</integer>
+<key>persistent-apps</key><array>
+<dict><key>GUID</key><integer>3751510712</integer><key>tile-type</key><string>file-tile</string><key>tile-data</key><dict>
+<key>bundle-identifier</key><string>com.apple.controlcenter</string><key>dock-extra</key><integer>0</integer>
+<key>file-data</key><dict><key>_CFURLString</key><string>file:///System/Library/CoreServices/ControlCenter.app/</string><key>_CFURLStringType</key><integer>15</integer></dict>
+<key>file-label</key><string>Control Centre</string><key>file-mod-date</key><integer>3875510296</integer><key>file-type</key><integer>41</integer><key>is-beta</key><integer>0</integer><key>parent-mod-date</key><integer>3875510296</integer></dict></dict>
+<dict><key>GUID</key><integer>3751510713</integer><key>tile-type</key><string>file-tile</string><key>tile-data</key><dict>
+<key>bundle-identifier</key><string>com.apple.dock</string><key>dock-extra</key><integer>0</integer>
+<key>file-data</key><dict><key>_CFURLString</key><string>file:///System/Library/CoreServices/Dock.app/</string><key>_CFURLStringType</key><integer>15</integer></dict>
+<key>file-label</key><string>Dock</string><key>file-mod-date</key><integer>3875510296</integer><key>file-type</key><integer>41</integer><key>is-beta</key><integer>0</integer><key>parent-mod-date</key><integer>3875510296</integer></dict></dict>
+</array><key>persistent-others</key><array/></dict></plist>
