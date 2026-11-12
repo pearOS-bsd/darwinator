@@ -447,7 +447,7 @@ main(int argc, char **argv, char **envp)
 	}
 	svc_add("com.apple.bsd.dirhelper", dir_port, 1);
 	{							/* the MachServices that the plist of the window server has without HideUntilCheckIn: they exist (and can be looked up) before the window server checks in */
-		static const char *pre[] = { "com.apple.iohideventsystem", "com.apple.windowserver", "com.apple.PowerManagement.control", 0 };
+		static const char *pre[] = { "com.apple.iohideventsystem", "com.apple.windowserver", "com.apple.PowerManagement.control", "com.apple.lsd.mapdb", "com.apple.lsd.modifydb", "com.apple.coreservices.launchservicesd", 0 };
 		int pi;
 
 		for (pi = 0; pre[pi]; pi++) {
