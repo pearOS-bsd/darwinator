@@ -57,12 +57,12 @@ lower(char *o, const char *s)
 }
 
 static void
-handle(xpc_object_t peer, xpc_object_t m, int nsxpc)
+handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 {
 	char *d = xpc_copy_description(m);
 	xpc_object_t r;
 
-	out("lsd-stub: message: "); out(d); out("\n");
+	out("lsd-stub: message ("); out(svc); out("): "); out(d); out("\n");
 	free(d);
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && xpc_dictionary_get_value(m, "replysig")) {
 		xpc_object_t nr;
@@ -168,7 +168,7 @@ main(int argc, char **argv)
 
 		xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
 			out("lsd-stub: a connection\n");
-			xpc_connection_set_event_handler(peer, ^(xpc_object_t m) { handle(peer, m, nsx); });
+			xpc_connection_set_event_handler(peer, ^(xpc_object_t m) { handle(peer, m, nsx, nm); });
 			xpc_connection_resume(peer);
 		});
 		xpc_connection_resume(svc);

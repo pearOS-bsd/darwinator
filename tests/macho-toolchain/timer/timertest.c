@@ -1,4 +1,7 @@
 /* a dispatch timer of 2 s (interval 2 s): it has to fire about 5 times in 11 s (a loop of firings was seen in launchservicesd) */
+#ifndef WALL
+#define WALL 0
+#endif
 typedef void *dq;
 typedef void *ds;
 extern const struct dispatch_source_type_s _dispatch_source_type_timer;
@@ -7,6 +10,7 @@ extern void dispatch_source_set_timer(ds s, unsigned long long start, unsigned l
 extern void dispatch_source_set_event_handler(ds s, void (^h)(void));
 extern void dispatch_resume(ds s);
 extern unsigned long long dispatch_time(unsigned long long when, long long delta);
+extern unsigned long long dispatch_walltime(const void *when, long long delta);
 extern dq dispatch_get_global_queue(long id, unsigned long flags);
 extern unsigned int sleep(unsigned int);
 extern unsigned long long mach_absolute_time(void);
@@ -29,10 +33,10 @@ main(void)
 	int i;
 
 	dispatch_source_set_event_handler(s, ^{ fired++; });
-	dispatch_source_set_timer(s, dispatch_time(0, 2000000000LL), 2000000000ULL, 100000000ULL);
+	dispatch_source_set_timer(s, WALL ? dispatch_walltime(0, 2000000000LL) : dispatch_time(0, 2000000000LL), 2000000000ULL, 100000000ULL);
 	dispatch_resume(s);
 	for (i = 0; i < 11; i++) sleep(1);
-	out(fired >= 4 && fired <= 6 ? "timertest: ok (about 5 firings)\n" : "timertest: WRONG number of firings\n");
+	out(fired >= 4 && fired <= 8 ? "timertest: ok\n" : "timertest: WRONG number of firings\n");
 	{ char b[8]; int f = fired > 99 ? 99 : fired; b[0] = '0' + f / 10; b[1] = '0' + f % 10; b[2] = '\n'; b[3] = 0; out("timertest: fired "); out(b); }
 	return 0;
 }

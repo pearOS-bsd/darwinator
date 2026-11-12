@@ -230,13 +230,20 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 			kevp[i].flags |= EV_RECEIPT;
 		kevp[i].fflags = kevp[i].filter == EVFILT_TIMER ? timer_fflags_from_darwin(d.fflags) : d.fflags;
 		kevp[i].data = d.data;
-		if (kevp[i].filter == EVFILT_TIMER && (d.fflags & 0x10) != 0) {		/* NOTE_ABSTIME: a deadline in mach_absolute_time (the uptime in ns); FreeBSD's is another clock, so it becomes a time from now */
+		if (kevp[i].filter == EVFILT_TIMER) {
+			/* Darwin's timer: the unit of data is SECONDS 1, USECONDS 2, NSECONDS 4, MACHTIME 0x100 (nanoseconds here) or milliseconds; ABSOLUTE (0x8) says that data is a deadline: in the uptime
+			 * clock (mach_absolute_time) with MACHTIME, else on the wall clock (libdispatch's DISPATCH_CLOCK_WALL: nanoseconds since the epoch); LEEWAY, CRITICAL, BACKGROUND and
+			 * MACH_CONTINUOUS_TIME (0x10, 0x20, 0x40, 0x80) are hints.  FreeBSD's kqueue gets a time from now in nanoseconds. */
 			struct timespec nowts;
-			int64_t now, rel;
+			int64_t now, unit, rel;
 
-			nanouptime(&nowts);
-			now = (int64_t)nowts.tv_sec * 1000000000LL + nowts.tv_nsec;
-			rel = d.data - now;
+			unit = (d.fflags & 0x100) ? 1 : (d.fflags & 1) ? 1000000000LL : (d.fflags & 2) ? 1000LL : (d.fflags & 4) ? 1 : 1000000LL;
+			if ((d.fflags & 0x8) != 0) {
+				if ((d.fflags & 0x100) != 0) nanouptime(&nowts); else nanotime(&nowts);
+				now = (int64_t)nowts.tv_sec * 1000000000LL + nowts.tv_nsec;
+				rel = d.data * unit - now;
+			} else
+				rel = d.data * unit;
 			kevp[i].fflags = NOTE_NSECONDS;
 			kevp[i].data = rel > 0 ? rel : 1;
 		}
