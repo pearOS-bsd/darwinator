@@ -730,6 +730,15 @@ darwin_getaudit_addr(struct thread *td, struct darwin_args *uap)
 	return (copyout(ai, (void *)uap->a[0], sizeof(ai)));
 }
 
+/* audit_session_join(port) (351): the session of the port becomes the one of the process, and the id comes back; there is one session per user here (100000 + uid, the id of getaudit_addr).
+ * launchservicesd calls it for every request and does not answer when it fails. */
+static int
+darwin_audit_session_join(struct thread *td, struct darwin_args *uap __unused)
+{
+	td->td_retval[0] = 100000 + td->td_ucred->cr_ruid;
+	return (0);
+}
+
 /* gettimeofday(tv, tz, mach_absolute_time *): the third argument of Darwin's libsystem_kernel (__gettimeofday_with_mach), which mach_get_times needs: the time of the uptime clock at the moment of the call */
 static int
 darwin_gettimeofday(struct thread *td, struct darwin_args *uap)
@@ -758,6 +767,7 @@ static const struct {
 #define	E(num, nargs, fn, ev, name)	{ (num), (nargs), (sy_call_t *)(fn), (ev), (name) }
 	E(499, 4, darwin_work_interval_ctl,	AUE_NULL,		"work_interval_ctl"),
 	E(357, 2, darwin_getaudit_addr,	AUE_NULL,		"getaudit_addr"),
+	E(351, 1, darwin_audit_session_join,	AUE_NULL,		"audit_session_join"),
 	E(116, 3, darwin_gettimeofday,	AUE_GETTIMEOFDAY,	"gettimeofday"),
 	/* processes and ids */
 	E(2,   0, sys_fork,		AUE_FORK,		"fork"),

@@ -58,6 +58,7 @@
 #define	WQ_KEVENT_DATA_SIZE	(32 * 1024)
 #define	WQ_MAX_THREADS		32
 #define	WQ_IDLE_LIFE		(5 * hz)
+#define	WQ_NREQ			128			/* workloops with a thread request, and workloops that a thread looks at (launchservicesd has more than 16: its listener did not get a thread and never answered) */
 #define	WQ_POLL			MAX(1, hz / 500)	/* 2 ms: how often a parked thread looks at its kqueue */
 #define	TSD_OFFSET		0xe0			/* the TSD block in the pthread structure */
 
@@ -82,8 +83,8 @@ struct wqp {
 	int		want_oc;		/* the same for the requests with the overcommit flag (libdispatch has separate root queues for them: the thread must say that it is for them) */
 	int		wantqos_oc;
 	int		nthreads;
-	struct { int64_t id; lwpid_t tid; } wl[16];		/* the workloops that a thread works for now: one thread at a time for each */
-	struct { int64_t id; uint64_t udata; uint32_t qos; } req[16];	/* thread requests of workloops (libdispatch wakes a serial queue with one) */
+	struct { int64_t id; lwpid_t tid; } wl[WQ_NREQ];		/* the workloops that a thread works for now: one thread at a time for each */
+	struct { int64_t id; uint64_t udata; uint32_t qos; } req[WQ_NREQ];	/* thread requests of workloops (libdispatch wakes a serial queue with one) */
 	struct wqthr	thr[WQ_MAX_THREADS];
 };
 
@@ -235,7 +236,7 @@ wl_busy(struct wqp *w, int64_t id)
 {
 	int i;
 
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < WQ_NREQ; i++)
 		if (w->wl[i].id == id && w->wl[i].tid != 0)
 			return (true);
 	return (false);
@@ -246,7 +247,7 @@ wl_claim(struct wqp *w, int64_t id, lwpid_t tid)
 {
 	int i, freei = -1;
 
-	for (i = 0; i < 16; i++) {
+	for (i = 0; i < WQ_NREQ; i++) {
 		if (w->wl[i].id == id) { if (w->wl[i].tid != 0) return (false); w->wl[i].tid = tid; return (true); }
 		if (w->wl[i].id == 0 && freei < 0) freei = i;
 	}
@@ -261,7 +262,7 @@ wl_release(struct wqp *w, int64_t id)
 {
 	int i;
 
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < WQ_NREQ; i++)
 		if (w->wl[i].id == id)
 			w->wl[i].tid = 0;
 }
@@ -271,7 +272,7 @@ static int
 wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int nevents, bool kevent_return)
 {
 	uint64_t kevent_list, data_buf, davail, top;
-	int64_t ids[16], first_kq;
+	int64_t ids[WQ_NREQ], first_kq;
 	int count, error, n, k, quiet = 0;
 	uint64_t wqstart;
 	const uint32_t base_flags = WQ_FLAG_THREAD_NEWSPI | WQ_FLAG_THREAD_PRIO_QOS | WQ_FLAG_THREAD_REUSE | WQ_FLAG_THREAD_TSD_BASE_SET | WQ_FLAG_THREAD_KEVENT | 5;
@@ -351,7 +352,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		}
 		mtx_unlock(&wq_mtx);
 		/* events of the workloops: the thread works for the first that has some (and nobody else works for) */
-		n = darwin_wq_kq_ids(td->td_proc, ids, 16);
+		n = darwin_wq_kq_ids(td->td_proc, ids, WQ_NREQ);
 		for (k = 0; k < n; k++) {
 			bool got;
 
@@ -561,7 +562,7 @@ darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, b
 	w = wq_get(td->td_proc, true);
 	if (w == NULL) { mtx_unlock(&wq_mtx); return; }
 	w->wqstart = wqstart; w->pthsize = pthsize;
-	for (i = 0; i < 16; i++) {
+	for (i = 0; i < WQ_NREQ; i++) {
 		if (w->req[i].id == id) {
 			if (add) { w->req[i].udata = udata; w->req[i].qos = qos; } else w->req[i].id = 0;
 			freei = -2;
