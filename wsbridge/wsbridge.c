@@ -136,6 +136,18 @@ get_reply(int fd, u32 pid, u32 reply_remote)
 		for (i = 0; i < (int)ndesc && off + 12 <= size; i++) {
 			unsigned char *d = (unsigned char *)&rp + off;
 
+			if (d[11] == 0 && rp.h.id == 0x7d64 && i == 1) {	/* the answer to NewConnectionPort: its second port is the memory of the packages session (0x40 bytes, SLSPackagesSessionShmem: the client maps it with mach_vm_map; found with REA in SLSNewConnection); wsd has none, so it is zeroed memory */
+				u64 sz = 0x40;
+				u32 entry = 0;
+				void *mem = mmap(0, 0x1000, 3, 0x1002 /* MAP_ANON | MAP_PRIVATE */, -1, 0);
+
+				if ((long)mem != -1 && mach_make_memory_entry_64(mach_task_self_, &sz, (u64)(unsigned long)mem, 3, &entry, 0) == 0) {
+					*(u32 *)d = entry; d[10] = 17;
+					out("wsbridge:   second port of the connection: a memory entry "); outx(entry); out("\n");
+					off += 12;
+					continue;
+				}
+			}
 			if (d[11] == 0) {				/* a port descriptor: the name is an index of the descriptors passed, or only a name */
 				u32 name = *(u32 *)d, np;
 				int pfd = (name >= 1 && (int)name <= nfds) ? fds[name - 1] : -1;
