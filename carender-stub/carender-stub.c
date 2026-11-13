@@ -165,6 +165,12 @@ main(void)
 			mach_msg(fm, 1, 0x34, 0, 0, 0, 0);
 			out("carender-stub: fence port made\n");
 		}
-		if (buf[5] == 0x9d0a) { answer_register(buf, p1, p2, 1, 1, 0); out("carender-stub: answered the register\n"); }
+		if (buf[5] == 0x9d0a) {
+			static u32 client_id = 1;		/* the two numbers of the answer: the id of the client; the commits of its contexts carry it and SetWindowLayerContext names it (they were always 1: every client looked the same) */
+
+			client_id++;
+			answer_register(buf, p1, p2, client_id, client_id, 0);
+			out("carender-stub: answered the register, client "); hex(client_id, 8); out("\n");
+		}
 	}
 }
