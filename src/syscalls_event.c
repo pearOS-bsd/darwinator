@@ -385,6 +385,8 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 			continue;		/* a change that went well: a Mac says nothing */
 		if (darwin_debug >= 1 && (kevp[i].flags & EV_ERROR) != 0)
 			printf("darwinator: %s[%d]: kevent error event: ident %#lx filter %d flags %#x fflags %#x data %ld udata %p\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)kevp[i].ident, kevp[i].filter, kevp[i].flags, kevp[i].fflags, (long)kevp[i].data, kevp[i].udata);
+		if (darwin_debug >= 1 && (kevp[i].flags & EV_ONESHOT) != 0 && kevp[i].filter != EVFILT_EMPTY)
+			printf("darwinator: %s[%d]: one-shot event out: ident %#lx filter %d flags %#x fflags %#x data %ld udata %p\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)kevp[i].ident, filter_to_darwin(kevp[i].filter), kevp[i].flags, kevp[i].fflags, (long)kevp[i].data, kevp[i].udata);
 		memset(&d, 0, sizeof(d));
 		d.ident = kevp[i].ident;
 		d.filter = filter_to_darwin(kevp[i].filter);
@@ -408,6 +410,8 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 				d.data = 0;
 			}
 		}
+		if (kevp[i].filter == EVFILT_PROC)		/* the same for a process watched with NOTE_EXIT (libxpc and libnotify watch their daemons): a one-shot event without EV_UDATA_SPECIFIC makes libdispatch delete the note again (\"Unregistration failed\": every client of a daemon that exited died with it) */
+			d.flags |= 0x0100;
 		if (kevp[i].filter == EVFILT_EMPTY)		/* EVFILT_MACHPORT: the notes are made with EV_UDATA_SPECIFIC by libdispatch (the flag has no counterpart here, so it is not kept): an event comes back with it, else libdispatch takes a one-shot note as one without it and deletes it again (ENOENT crashed it) */
 			d.flags |= 0x0100;
 		if (kevp[i].filter == EVFILT_EMPTY && (kevp[i].flags & EV_EOF) != 0)		/* a port that died: EV_VANISHED | EV_DELETE, as XNU gives it */
