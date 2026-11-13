@@ -219,12 +219,17 @@ static struct mtx sw_mtx;
 MTX_SYSINIT(darwin_sw_mtx, &sw_mtx, "darwin wl sync", MTX_DEF);
 
 /* returns 0, or ENOENT for an end that finds no waiter */
+int darwin_wl_trace;
+SYSCTL_INT(_kern_darwinator, OID_AUTO, wl_trace, CTLFLAG_RW, &darwin_wl_trace, 0, "log the workloop synchronisation (NOTE_WL_SYNC_WAIT/WAKE, END_OWNERSHIP)");
+
 static int
 darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
 {
 	int i, free_i = -1, error = 0;
 
 	mtx_lock(&sw_mtx);
+	if (darwin_wl_trace)
+		printf("darwinator: %s[%d] tid %d: wl sync ident %#lx fflags %#x flags %#x value %#lx\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, curthread->td_tid, (u_long)tid, fflags, flags, (u_long)value);
 	for (i = 0; i < SW_N; i++) {
 		if (sw_tab[i].used && sw_tab[i].tid == tid)
 			break;
@@ -233,15 +238,21 @@ darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
 	}
 	if (i == SW_N)
 		i = -1;
-	if ((flags & EV_DELETE) != 0 && (fflags & NOTE_WL_SYNC_WAKE) != 0) {		/* the end: the knote of the waiter (or of the owner that it became) goes */
+	if ((fflags & 0x100) != 0 && (fflags & NOTE_WL_SYNC_WAKE) != 0 && (flags & EV_DELETE) == 0) {
+		/* NOTE_WL_IGNORE_ESTALE | DISCOVER_OWNER | SYNC_WAKE with the owner of the queue as the ident (libdispatch: _dispatch_event_loop_wait_for_ownership, before the wait): the waiter tells the kernel
+		 * who owns the queue.  It wakes nobody; it makes the knote of the owner, which the end of its ownership (EV_DELETE) finds later (without it that end is ENOENT and libdispatch stops).
+		 * Taken as a wake it woke an owner that was waiting for something else. */
+		if (i < 0 && free_i >= 0) { sw_tab[free_i].used = true; sw_tab[free_i].tid = tid; sw_tab[free_i].state = 3; }
+	} else if ((flags & EV_DELETE) != 0 && (fflags & NOTE_WL_SYNC_WAKE) != 0) {		/* the end: the knote of the waiter (or of the owner that it became) goes */
 		if (value != 0) {		/* the owner ends its ownership (it passes the state of the queue that it knew; a waiter that is cancelled passes 0) */
 			if (i >= 0 && sw_tab[i].state != 0) sw_tab[i].used = false;
 		} else if (i < 0)
-			error = ENOENT;						/* nothing: the waiter did not make its wait yet and no wake came */
+			error = (fflags & 0x20) != 0 ? 0 : ENOENT;	/* END_OWNERSHIP of a thread that owns the queue without a wait of its own: nothing to remove, no error */
 		else if (sw_tab[i].state == 0) { sw_tab[i].state = 4; wakeup(sw_tab); }	/* cancelled while it waits: it goes out without ownership */
 		else sw_tab[i].used = false;
 	} else if ((fflags & NOTE_WL_SYNC_WAKE) != 0) {					/* a wake: the waiter goes on and its knote stays until the end; with no waiter yet the wake is kept */
 		if (i >= 0 && sw_tab[i].state == 0) { sw_tab[i].state = 1; wakeup(sw_tab); }
+		else if (i >= 0 && sw_tab[i].state == 3) sw_tab[i].state = 2;		/* a knote that is left from an ownership, and the wake is for the wait that comes next: kept (a wake that is ignored here is lost, the wait never ends) */
 		else if (i < 0 && free_i >= 0) { sw_tab[free_i].used = true; sw_tab[free_i].tid = tid; sw_tab[free_i].state = 2; }
 	} else if ((fflags & NOTE_WL_SYNC_WAIT) != 0) {					/* the wait */
 		if (i >= 0 && sw_tab[i].state == 2) sw_tab[i].state = 3;			/* the wake came first: owner now */
@@ -251,15 +262,20 @@ darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
 			while (sw_tab[i].state == 0 && sw_tab[i].used) {
 				int e = msleep(sw_tab, &sw_mtx, PCATCH, "wlsync", hz / 4);
 
+				if (darwin_wl_trace)
+					printf("darwinator: %s[%d] tid %d: wl wait ident %#lx slept: %d state %d\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, curthread->td_tid, (u_long)tid, e, sw_tab[i].state);
 				if (e == EINTR || e == ERESTART) {
-					/* a signal (or a stop of the process for a debugger) is not a wake: kevent_id would return as if the owner had passed the queue on, and libdispatch would run on with a queue that
-					 * somebody else owns (its wake of this waiter later found a context that was gone: "Invalid wlh").  Only the end of the process leaves the wait. */
+					/* the wait is left only for a reason that is real: a signal for the thread, or the process that stops or ends (kevent_id then returns EINTR; libdispatch asks again).
+					 * Any other interruption of the sleep (it comes with nothing pending) is not one: a success would let libdispatch run on with a queue that somebody else owns, EINTR makes it abort. */
 					struct proc *p = curthread->td_proc;
+					bool real = SIGPENDING(curthread) || (p->p_flag & (P_WEXIT | P_SINGLE_EXIT | P_STOPPED_SIG | P_STOPPED_SINGLE | P_STOPPED_TRACE)) != 0;
 
 					if (darwin_debug >= 1)
-						printf("darwinator: %s[%d]: workloop wait interrupted (%d)\n", p->p_comm, p->p_pid, e);
-					if ((p->p_flag & (P_WEXIT | P_SINGLE_EXIT)) != 0 || SIGISMEMBER(p->p_siglist, SIGKILL) || SIGISMEMBER(curthread->td_siglist, SIGKILL))
+						printf("darwinator: %s[%d]: workloop wait interrupted (%d), %s: pflag %#x tdflags %#x\n", p->p_comm, p->p_pid, e, real ? "real" : "spurious", p->p_flag, curthread->td_flags);
+					if (real) {
+						error = EINTR;
 						break;
+					}
 				}
 			}
 			if (sw_tab[i].state == 1) sw_tab[i].state = 3;			/* woken: the knote of the owner stays */
@@ -267,6 +283,8 @@ darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
 		}
 	}
 	mtx_unlock(&sw_mtx);
+	if (error != 0)
+		printf("darwinator: %s[%d] tid %d: wl sync ident %#lx fflags %#x flags %#x value %#lx: error %d (entry %d)\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, curthread->td_tid, (u_long)tid, fflags, flags, (u_long)value, error, i);
 	return (error);
 }
 
@@ -289,6 +307,8 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		} else if ((error = copyin(a->in, &d, a->size)) != 0)
 			return (error);
 		a->in += a->size;
+		if (darwin_wl_trace && (d.filter == -10 || (d.ident >> 32) == 0x57fffffe))
+			printf("darwinator: chg filter %d ident %#lx flags %#x fflags %#x data %ld\n", d.filter, (u_long)d.ident, d.flags, d.fflags, (long)d.data);
 		memset(&kevp[i], 0, sizeof(kevp[i]));
 		kevp[i].ident = d.ident;
 		kevp[i].filter = filter_from_darwin(d.filter);
@@ -344,6 +364,9 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		}
 		if (d.filter == -17 && (d.fflags & (NOTE_WL_SYNC_WAIT | NOTE_WL_SYNC_WAKE)) != 0) {		/* the synchronisation of a workloop: done here (it may sleep); the kqueue gets a change that has no effect */
 			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1]);
+
+			if (serr == EINTR)
+				return (EINTR);
 
 			kevp[i].filter = EVFILT_USER;
 			kevp[i].ident = serr == 0 ? 0x57ffffff00000000ULL : 0x57fffffe00000000ULL;
@@ -599,7 +622,7 @@ darwin_kevent_qos_common(struct thread *td, struct darwin_args *uap, bool byid)
 		(void)copyout(&a.davail, (void *)uap->a[6], sizeof(a.davail));
 	if (error == 0 && (byid || (int)uap->a[0] == -1) && (int)uap->a[2] > 0)
 		darwin_wq_note(td);		/* sources were added to the kqueue of the workqueue: a thread of the pool has to look at it */
-	if (error != 0 && darwin_debug >= 1)
+	if (error != 0 && (darwin_debug >= 1 || error != EINTR))
 		printf("darwinator: %s[%d]: kevent_%s(%d, nchanges %d, nevents %d, flags %#x) failed: %d\n", td->td_proc->p_comm, td->td_proc->p_pid, byid ? "id" : "qos", fd, (int)uap->a[2], (int)uap->a[4], flags, error);
 	return (error);
 }
