@@ -87,7 +87,7 @@ main(void)
 	mach_port_allocate(mach_task_self_, 1, &p1); mach_port_insert_right(mach_task_self_, p1, p1, 20); mach_port_insert_member(mach_task_self_, p1, set);
 	mach_port_allocate(mach_task_self_, 1, &p2); mach_port_insert_right(mach_task_self_, p2, p2, 20); mach_port_insert_member(mach_task_self_, p2, set);
 	for (;;) {
-		kr = mach_msg(buf, 2 | 0x100000 /* RCV_MSG | RCV_LARGE */, 0, sizeof(buf), set, 0, 0);
+		kr = mach_msg(buf, 2 | 0x100000 /* RCV_MSG | RCV_LARGE */ | 0x03000000 /* the audit trailer: who sent it */, 0, sizeof(buf), set, 0, 0);
 		if (kr != 0) { out("carender-stub: receive error "); hex((u32)kr, 8); out("\n"); continue; }
 		out("carender-stub: msg id "); hex(buf[5], 8); out(" size "); hex(buf[1], 8); out(" bits "); hex(buf[0], 8); out(" remote "); hex(buf[2], 8); out(" local "); hex(buf[3], 8); out("\n  ");
 		if (buf[5] >= 0x9c42 && buf[5] <= 0x9c45) {	/* the command streams are kept whole in /tmp/ca.bin: a u32 length, then the message */
@@ -117,7 +117,12 @@ main(void)
 				}
 				nmsg++;
 			}
-			ca_send(1, buf, buf[1], 0, 0);
+			{	/* with the pid of the sender (word 10 of the audit trailer, after the message): wsd keeps a scene and a window for each client */
+				u32 tr = (buf[1] + 3) / 4, pid[1];
+
+				pid[0] = tr + 10 < sizeof(buf) / 4 ? buf[tr + 10] : 0;
+				ca_send(3, pid, 4, buf, buf[1]);
+			}
 		}
 		n = buf[1] / 4; if (n > 4000) n = 4000;
 		for (i = 6; i < n; i++) { hex(buf[i], 8); out(i % 8 == 5 ? "\n  " : " "); }
