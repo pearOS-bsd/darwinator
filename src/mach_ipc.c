@@ -3127,6 +3127,7 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 		int wi;
 
 		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx, fault address %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax, (u_long)tdp->td_frame->tf_addr);
+		printf("darwinator:   regs rdi %#lx rsi %#lx rdx %#lx rcx %#lx rbx %#lx rbp %#lx r12 %#lx r13 %#lx r14 %#lx r15 %#lx\n", (u_long)tdp->td_frame->tf_rdi, (u_long)tdp->td_frame->tf_rsi, (u_long)tdp->td_frame->tf_rdx, (u_long)tdp->td_frame->tf_rcx, (u_long)tdp->td_frame->tf_rbx, (u_long)tdp->td_frame->tf_rbp, (u_long)tdp->td_frame->tf_r12, (u_long)tdp->td_frame->tf_r13, (u_long)tdp->td_frame->tf_r14, (u_long)tdp->td_frame->tf_r15);
 		if (tdp == curthread) {			/* the frames (rbp chain): the return addresses of the callers */
 			uint64_t fp = tdp->td_frame->tf_rbp, pair[2];
 			int fi;
