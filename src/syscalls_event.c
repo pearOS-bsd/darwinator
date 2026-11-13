@@ -912,7 +912,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			al.volattr = 0;
 		al.dirattr = S_ISDIR(sb.st_mode) ? (al.dirattr & DA_DIR_SUPPORTED) : 0;
 		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
-		al.forkattr = 0;
+		al.forkattr = (uap->a[4] & 0x20) ? (al.forkattr & 0x31) : 0;		/* FSOPT_ATTR_CMN_EXTENDED: relpath 1, realdevid 0x10, realfsid 0x20 */
 	}
 	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || ((al.dirattr & ~DA_DIR_SUPPORTED) || (al.dirattr && !S_ISDIR(sb.st_mode) && !(cmn & DA_CMN_RETURNED))) || al.forkattr || (file & ~DA_FILE_SUPPORTED)) {
 		if (darwin_debug >= 1)
@@ -943,7 +943,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	{
 		char *nameref = NULL;
 
-		char *pathref = NULL, *vmpref = NULL, *vnmref = NULL, *vmdref = NULL;
+		char *pathref = NULL, *vmpref = NULL, *vnmref = NULL, *vmdref = NULL, *relref = NULL;
 		bool vsysv = false;
 
 		if (cmn & DA_CMN_RETURNED) {	/* attribute_set_t: what is in the buffer */
@@ -1014,6 +1014,9 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (file & DA_FILE_IOBLOCKSIZE)	PUT32(sb.st_blksize);
 		if (file & DA_FILE_DATALENGTH)	PUT64(sb.st_size);
 		if (file & DA_FILE_DATAALLOCSIZE) PUT64(sb.st_blocks * 512);
+		if (al.forkattr & 0x1)		{ relref = p; p += 8; }
+		if (al.forkattr & 0x10)		PUT32(darwin_from_dev(sb.st_dev));
+		if (al.forkattr & 0x20)		{ PUT32(darwin_from_dev(sb.st_dev)); PUT32(darwin_from_dev(sb.st_dev) == 16777225 ? 26 : 0); }
 		if (nameref != NULL) {		/* the name follows the fixed part, padded to 4 */
 			int32_t off = (int32_t)(p - nameref);
 			uint32_t l = (uint32_t)namelen;
@@ -1034,6 +1037,12 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			int32_t off = (int32_t)(p - vnmref); uint32_t l = (uint32_t)strlen(vn) + 1;
 
 			memcpy(vnmref, &off, 4); memcpy(vnmref + 4, &l, 4); memcpy(p, vn, l); p += roundup2(l, 4);
+		}
+		if (relref != NULL) {
+			int32_t off = (int32_t)(p - relref);
+			uint32_t l = (uint32_t)strlen(path) + 1;
+
+			memcpy(relref, &off, 4); memcpy(relref + 4, &l, 4); memcpy(p, path, l); p += roundup2(l, 4);
 		}
 		if (vmdref != NULL) {
 			const char *dv = vsysv ? "/dev/disk3s4s1" : "/dev/disk3s1";
