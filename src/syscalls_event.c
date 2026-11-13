@@ -178,6 +178,8 @@ filter_from_darwin(int f)
 		return (EVFILT_USER);
 	case -8:
 		return (EVFILT_EMPTY);		/* EVFILT_MACHPORT: the slot is taken by mach_ipc.c */
+	case -12: case -14:
+		return (EVFILT_USER);		/* EVFILT_VM, EVFILT_MEMORYSTATUS: memory pressure never comes here; see darwin_kev_copyin */
 	default:
 		if (darwin_debug >= 1)
 			printf("darwinator: %s[%d]: kevent filter %d is not implemented\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, f);
@@ -342,6 +344,13 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		if (d.filter == -17) {			/* EVFILT_WORKLOOP: the requests on a workloop (thread request, ownership) mean nothing here; a disabled EVFILT_USER takes their place, so that adds and deletes balance */
 			kevp[i].filter = EVFILT_USER;
 			kevp[i].ident = 0x57ffffff00000000ULL;			/* always the same disabled knote: an add that is repeated changes nothing and a delete never finds nothing */
+			kevp[i].flags = EV_ADD | EV_DISABLE | (a->errors_only ? EV_RECEIPT : 0);
+			kevp[i].fflags = 0;
+			kevp[i].data = 0;
+		}
+		if (d.filter == -12 || d.filter == -14) {	/* accepted and silent: a disabled EVFILT_USER takes the place (libdispatch crashes on the error of a memory pressure source) */
+			kevp[i].filter = EVFILT_USER;
+			kevp[i].ident = 0x57ffffff00000000ULL;
 			kevp[i].flags = EV_ADD | EV_DISABLE | (a->errors_only ? EV_RECEIPT : 0);
 			kevp[i].fflags = 0;
 			kevp[i].data = 0;
