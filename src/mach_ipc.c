@@ -110,7 +110,8 @@ struct kport {
 	pid_t		kpid;
 	int		qn, waiters;
 	TAILQ_HEAD(, kmsg) q;
-	struct kport	*set;			/* the port set that this port is a member of (a port is in one set at most) */
+	struct kport	*set;			/* the port set that this port is a member of ... */
+	struct kport	*xset[3];		/* ... and the others (as in XNU a port can be in several sets: CFRunLoop puts its wakeup port in the set of every mode) */
 	int		count;			/* KP_SEM: the value */
 	struct kport	*dn_port;		/* a dead-name notification is sent here when this port dies (mach_port_request_notification) */
 	struct file	*fp;			/* KP_FILE: a fileport holds the open file */
@@ -341,6 +342,7 @@ port_die(struct kport *p)
 
 	p->dead = true;
 	p->set = NULL;
+	memset(p->xset, 0, sizeof(p->xset));
 	if (p->dn_port != NULL) {
 		struct kport *np = p->dn_port;
 
@@ -375,12 +377,54 @@ kr_ret(struct thread *td, int kr)
 #define	EVFILT_MACHPORT_SLOT	EVFILT_EMPTY
 static struct { struct kport *port; lwpid_t tid; } ev_pending[32];
 
+static bool
+pset_has(const struct kport *p, const struct kport *s)
+{
+	int i;
+
+	if (p->set == s) return (true);
+	for (i = 0; i < 3; i++)
+		if (p->xset[i] == s) return (true);
+	return (false);
+}
+
+/* the port goes into the set (the sets that it is in already stay) */
+static bool
+pset_add(struct kport *p, struct kport *s)
+{
+	int i;
+
+	if (pset_has(p, s)) return (true);
+	if (p->set == NULL) { p->set = s; return (true); }
+	for (i = 0; i < 3; i++)
+		if (p->xset[i] == NULL) { p->xset[i] = s; return (true); }
+	return (false);
+}
+
+/* the port leaves the set s (s == NULL: all of them) */
+static void
+pset_del(struct kport *p, struct kport *s)
+{
+	int i;
+
+	if (p->set != NULL && (s == NULL || p->set == s)) {
+		if (p->set->qn >= p->qn) p->set->qn -= p->qn;
+		p->set = NULL;
+	}
+	for (i = 0; i < 3; i++)
+		if (p->xset[i] != NULL && (s == NULL || p->xset[i] == s)) {
+			if (p->xset[i]->qn >= p->qn) p->xset[i]->qn -= p->qn;
+			p->xset[i] = NULL;
+		}
+	if (p->set == NULL)			/* the first slot is the one that is looked at */
+		for (i = 0; i < 3; i++)
+			if (p->xset[i] != NULL) { p->set = p->xset[i]; p->xset[i] = NULL; break; }
+}
+
 static void
 set_leave(struct kport *p)
 {
-	if (p->set != NULL && p->set->qn >= p->qn)
-		p->set->qn -= p->qn;
-	p->set = NULL;
+	pset_del(p, NULL);
 }
 
 static void
@@ -391,6 +435,15 @@ kq_post(struct kport *p)
 	if (p->set != NULL) {
 		p->set->qn++;
 		KNOTE_UNLOCKED(&p->set->kl, 0);
+	}
+	{
+		int xi;
+
+		for (xi = 0; xi < 3; xi++)
+			if (p->xset[xi] != NULL) {
+				p->xset[xi]->qn++;
+				KNOTE_UNLOCKED(&p->xset[xi]->kl, 0);
+			}
 	}
 	KNOTE_UNLOCKED(&p->kl, 0);
 }
@@ -770,7 +823,7 @@ darwin_port_move_member(struct thread *td, struct darwin_args *uap)	/* (target, 
 		kr = KERN_INVALID_RIGHT;
 		if (m->recv && m->port->kind == KP_PORT) {
 			if ((uint32_t)uap->a[2] == 0) { set_leave(m->port); kr = KERN_SUCCESS; }
-			else if ((a = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && a->recv && a->port->kind == KP_SET) { set_leave(m->port); m->port->set = a->port; a->port->qn += m->port->qn; wakeup(a->port); if (a->port->qn > 0) kq_post_set(a->port); kr = KERN_SUCCESS; }
+			else if ((a = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && a->recv && a->port->kind == KP_SET) { if (!pset_has(m->port, a->port) && pset_add(m->port, a->port)) { a->port->qn += m->port->qn; wakeup(a->port); if (a->port->qn > 0) kq_post_set(a->port); } kr = KERN_SUCCESS; }
 		}
 	}
 	sx_xunlock(&km_sx);
@@ -789,7 +842,7 @@ darwin_port_extract_member(struct thread *td, struct darwin_args *uap)	/* (targe
 	sx_xlock(&km_sx);
 	if ((t = kt_task(td->td_proc)) != NULL && (m = ent_by_name(t, (uint32_t)uap->a[1])) != NULL) {
 		kr = KERN_INVALID_RIGHT;
-		if ((a = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && m->port->set == a->port) { set_leave(m->port); kr = KERN_SUCCESS; }
+		if ((a = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && pset_has(m->port, a->port)) { pset_del(m->port, a->port); kr = KERN_SUCCESS; }
 	}
 	sx_xunlock(&km_sx);
 	return (kr_ret(td, kr));
@@ -847,6 +900,7 @@ mk_timer_fire(void *arg, int pending __unused)
 			p->qn++; kq_post(p);
 			wakeup(p);
 			if (p->set != NULL) wakeup(p->set);
+			{ int xi; for (xi = 0; xi < 3; xi++) if (p->xset[xi] != NULL) wakeup(p->xset[xi]); }
 		}
 		kp_unref(p);
 	}
@@ -1395,6 +1449,7 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 	wakeup(dp);
 	if (dp->set != NULL)
 		wakeup(dp->set);
+	{ int xi; for (xi = 0; xi < 3; xi++) if (dp->xset[xi] != NULL) wakeup(dp->xset[xi]); }
 	kp_unref(dp);						/* the queue does not hold the port: the receive right does */
 	sx_xunlock(&km_sx);
 	return (KERN_SUCCESS);
@@ -1457,7 +1512,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 
 			src = NULL;
 			for (k = 0; k < KE_N; k++)
-				if (t->e[k].used && t->e[k].port->set == rp && !TAILQ_EMPTY(&t->e[k].port->q)) { src = t->e[k].port; rname = t->e[k].name; break; }
+				if (t->e[k].used && pset_has(t->e[k].port, rp) && !TAILQ_EMPTY(&t->e[k].port->q)) { src = t->e[k].port; rname = t->e[k].name; break; }
 		}
 		if (src != NULL && (m = TAILQ_FIRST(&src->q)) != NULL) { srcp = src; break; }
 		m = NULL;
@@ -1492,6 +1547,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 	srcp->qn--;
 	if (srcp->set != NULL && srcp->set->qn > 0)
 		srcp->set->qn--;
+	{ int xi; for (xi = 0; xi < 3; xi++) if (srcp->xset[xi] != NULL && srcp->xset[xi]->qn > 0) srcp->xset[xi]->qn--; }
 	d = m->data;
 	/* the header as the receiver sees it: the reply right as the remote port, the destination as the local port */
 	bits = rd32(d, 0);
