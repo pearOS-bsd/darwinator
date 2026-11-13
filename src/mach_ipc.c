@@ -727,7 +727,35 @@ self_port(struct thread *td, uint32_t name)
 }
 static int darwin_self_task(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_TASK_SELF)); }
 static int darwin_self_host(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_HOST_SELF)); }
-static int darwin_self_thread(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_THREAD_SELF)); }
+/* thread_self_trap: every thread has a name of its own (libdispatch and libpthread take the name as the id of the thread: with one name for all, dispatch_sync took the owner of a queue for itself) */
+static int
+darwin_self_thread(struct thread *td, struct darwin_args *uap __unused)
+{
+	struct ktask *t;
+	struct kent *e = NULL;
+	uint32_t name = NAME_THREAD_SELF;
+	int i;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL) {
+		for (i = 0; i < KE_N; i++)
+			if (t->e[i].used && t->e[i].port->kind == KP_THREAD && t->e[i].port->kpid == (pid_t)td->td_tid && t->e[i].port->kp == td->td_proc) { e = &t->e[i]; break; }
+		if (e == NULL) {
+			struct kport *th = kp_new(KP_THREAD);
+
+			th->kp = td->td_proc; th->kpid = td->td_tid;
+			e = ent_add(t, th, MM_MAKE_SEND);
+			th->refs--;
+		}
+		if (e != NULL) {
+			if (e->send < 4096) e->send++;
+			name = e->name;
+		}
+	}
+	sx_xunlock(&km_sx);
+	td->td_retval[0] = name;
+	return (0);
+}
 
 
 static int
@@ -1888,7 +1916,7 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			if (dest->kind != KP_THREAD) return (false);
 #if defined(__amd64__)
 			a = m->size >= 40 ? rd32(d, 32) : 0;
-			if (a == 4 && dest->kpid == 0) {
+			if (a == 4 && (dest->kpid == 0 || dest->kpid == (pid_t)td->td_tid)) {
 				uint64_t r[21];
 				struct trapframe *tf = td->td_frame;
 
