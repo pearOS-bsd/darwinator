@@ -963,8 +963,6 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	if (cmn & DA_CMN_RETURNED) {			/* the caller takes what there is: the attributes that are not known are left out and the set that came back says which they are */
 		cmn &= DA_CMN_SUPPORTED_EXT;
 		al.volattr &= DA_VOL_SUPPORTED;
-		if (al.volattr != 0 && (al.volattr & DA_VOL_INFO) == 0)
-			al.volattr = 0;
 		al.dirattr = S_ISDIR(sb.st_mode) ? (al.dirattr & DA_DIR_SUPPORTED) : 0;
 		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
 		al.forkattr = (uap->a[4] & 0x20) ? (al.forkattr & DA_CMNEXT_SUPPORTED) : 0;		/* FSOPT_ATTR_CMN_EXTENDED */
@@ -974,7 +972,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			printf("darwinator: %s[%d]: getattrlist %s: attributes not supported: common %#x (of which %#x), volume %#x, dir %#x, file %#x, fork %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, path, cmn, cmn & ~DA_CMN_SUPPORTED, al.volattr, al.dirattr, file, al.forkattr);
 		return (EINVAL);
 	}
-	if (al.volattr != 0 && ((al.volattr & DA_VOL_INFO) == 0 || (file != 0 && !(cmn & DA_CMN_RETURNED))))
+	if (al.volattr != 0 && file != 0 && !(cmn & DA_CMN_RETURNED))	/* (a Mac takes volume attributes without ATTR_VOL_INFO too: IsPairedBootVolume asks for ATTR_VOL_CAPABILITIES alone) */
 		return (EINVAL);
 	if (S_ISDIR(sb.st_mode) && file != 0 && !(cmn & DA_CMN_RETURNED))
 		return (EINVAL);			/* file attributes of a directory */
