@@ -1527,6 +1527,13 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 		tr[13] = (uint32_t)ctxv; tr[14] = (uint32_t)(ctxv >> 32);	/* the context of the port (the trailer of 60 bytes) */
 		if (darwin_debug >= 2)
 			printf("darwinator: %s[%d]: received id %#x, size %u, option %#x, buffer %u: trailer %u bytes (sender pid %d)%s\n", td->td_proc->p_comm, td->td_proc->p_pid, rd32(d, 20), m->size, option, rsize, tsize, m->spid, at + tsize <= rsize ? "" : " DOES NOT FIT");
+		if (darwin_debug >= 2 && rd32(d, 20) >= 0x2700 && rd32(d, 20) < 0x2900) {		/* the requests and replies of coreservicesd: the words of the message */
+			uint32_t w;
+
+			printf("darwinator:   body of %#x:", rd32(d, 20));
+			for (w = 24; w + 4 <= m->size && w < 24 + 4 * 24; w += 4) printf(" %08x", rd32(d, w));
+			printf("\n");
+		}
 		if (at + tsize <= rsize)
 			(void)copyout(tr, (void *)(uintptr_t)(uaddr + at), tsize);
 	}
@@ -2318,6 +2325,10 @@ static const struct ionode io_nodes[] = {
 	{ "Data", "IOMedia", 6, "disk3s1" },
 	{ "Preboot", "IOMedia", 6, "disk3s2" },
 	{ "EFI System Partition", "IOMedia", 5, "efiesp" },
+	{ "Recovery", "IOMedia", 6, "disk3s3" },
+	{ "Untitled", "IOMedia", 6, "disk3s4" },
+	{ "Update", "IOMedia", 6, "disk3s5" },
+	{ "VM", "IOMedia", 6, "disk3s6" },
 };
 #define	IO_NNODES	((int)nitems(io_nodes))
 #define	IO_ITER_BASE	0x1000
