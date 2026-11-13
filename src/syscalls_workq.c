@@ -328,7 +328,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 				uint64_t ea = w->req[k].eaddr, em = w->req[k].emask, ev = w->req[k].evalue;
 
 				mtx_unlock(&wq_mtx);
-				if (copyin((void *)(uintptr_t)ea, &qs, 8) == 0 && (qs & em) != ev) {
+				if (copyin((void *)(uintptr_t)ea, &qs, 8) == 0 && (qs & em) != (ev & em)) {
 					if (darwin_debug >= 2)
 						printf("darwinator: %s[%d]: the request of the workloop %#lx is stale (state %#lx mask %#lx want %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)w->req[k].id, (u_long)qs, (u_long)em, (u_long)ev);
 					mtx_lock(&wq_mtx);
@@ -345,6 +345,12 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 
 				w->req[k].id = 0;
 				t->parked = 0;
+				if (darwin_debug >= 2) {
+					uint64_t qs2 = 0;
+
+					if (w->req[k].eaddr != 0) (void)copyin((void *)(uintptr_t)w->req[k].eaddr, &qs2, 8);
+					printf("darwinator: serving workloop %#lx: state now %#lx (mask %#lx want %#lx)\n", (u_long)rid, (u_long)qs2, (u_long)w->req[k].emask, (u_long)w->req[k].evalue);
+				}
 				if (darwin_debug >= 2)
 					printf("darwinator: %s[%d]: a thread serves the request of the workloop %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)rid);
 				mtx_unlock(&wq_mtx);
