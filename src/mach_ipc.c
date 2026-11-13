@@ -2304,13 +2304,20 @@ bootstrap_server(struct thread *td, struct ktask *t, struct kport *dest, struct 
  * the kernel subsystem "iokit" (device.defs, 2800..2890, found with migcom): libIOKit of the Mac sends them to the port of host_get_io_main.  Enough for what the window server and the Dock look up;
  * a request that is not understood fails (and is logged at kern.darwinator.debug >= 1).
  */
-struct ionode { const char *name, *cls; int parent; };
+struct ionode { const char *name, *cls; int parent; const char *bsd; };
 static const struct ionode io_nodes[] = {
-	{ "Root", "IORegistryEntry", -1 },
-	{ "VirtualMac", "IOPlatformExpertDevice", 0 },
-	{ "IOHIDSystem", "IOHIDSystem", 1 },
-	{ "IOResources", "IOResources", 0 },
-	{ "IOSurfaceRoot", "IOSurfaceRoot", 1 },
+	{ "Root", "IORegistryEntry", -1, NULL },
+	{ "VirtualMac", "IOPlatformExpertDevice", 0, NULL },
+	{ "IOHIDSystem", "IOHIDSystem", 1, NULL },
+	{ "IOResources", "IOResources", 0, NULL },
+	{ "IOSurfaceRoot", "IOSurfaceRoot", 1, NULL },
+	/* the disk of a Mac (what DiskArbitration and the Finder look for): the container disk3 with its volumes */
+	{ "APPLE SSD", "IOBlockStorageDevice", 1, NULL },
+	{ "AppleAPFSMedia", "IOMedia", 5, "disk3" },
+	{ "Macintosh HD", "IOMedia", 6, "disk3s4s1" },
+	{ "Data", "IOMedia", 6, "disk3s1" },
+	{ "Preboot", "IOMedia", 6, "disk3s2" },
+	{ "EFI System Partition", "IOMedia", 5, "efiesp" },
 };
 #define	IO_NNODES	((int)nitems(io_nodes))
 #define	IO_ITER_BASE	0x1000
@@ -2476,18 +2483,25 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 		mig_reply_data(m, id, 0, NULL, 0);
 		return;
 	case 2804: case 2873: case 2880: case 2881: {	/* io_service_get_matching_services / _service (XML) and the _bin forms (binary): the nodes of the class that the dictionary names */
-		char cls[96];
+		char cls[96], bsdname[48];
 		const char *xml = io_req_string(m, 32);
 		bool found;
 
 		n = 0;
+		bsdname[0] = 0;
+		if (id == 2880 || id == 2881)
+			(void)(m->size >= 36 && io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "BSD Name", bsdname, sizeof(bsdname)));
 		if (id == 2880 || id == 2881)
 			found = m->size >= 36 && (io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IOProviderClass", cls, sizeof(cls)) ||
 			    io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IOClass", cls, sizeof(cls)) ||
 			    io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IONameMatch", cls, sizeof(cls)));
 		else
 			found = io_xml_value(xml, "IOProviderClass", cls, sizeof(cls)) || io_xml_value(xml, "IOClass", cls, sizeof(cls)) || io_xml_value(xml, "IONameMatch", cls, sizeof(cls));
-		if (found)
+		if (bsdname[0] != 0) {		/* a medium by its BSD name */
+			for (i = 0; i < IO_NNODES && n < 16; i++)
+				if (io_nodes[i].bsd != NULL && strcmp(io_nodes[i].bsd, bsdname) == 0 && (!found || io_node_matches(i, cls))) list[n++] = i;
+			found = true; strlcpy(cls, bsdname, sizeof(cls));
+		} else if (found)
 			for (i = 0; i < IO_NNODES && n < 16; i++)
 				if (io_node_matches(i, cls)) list[n++] = i;
 		if (darwin_debug >= 1)
