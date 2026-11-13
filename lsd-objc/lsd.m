@@ -71,6 +71,10 @@ static void logf_(NSString *s) { fprintf(stderr, "lsd-objc: %s\n", [s UTF8String
 			((__bridge void (^)(id, id, id, char, id))blk)(store, node, nil, 0, nil);
 		} else if ([sel isEqualToString:@"getServerStatusWithCompletionHandler:"]) {	/* the status of the server (a Mac's lsd says 256) */
 			((__bridge void (^)(unsigned))blk)(256);
+		} else if (strncmp(sg, "v@?cI@\"NSArray\"c@", 16) == 0) {	/* registerItemInfo:...: (success, identifier, the items, a flag, error): the registration is accepted, nothing is stored (the store is read only) */
+			((__bridge void (^)(char, unsigned, id, char, id))blk)(1, 1, @[], 0, nil);
+		} else if (strncmp(sg, "v@?I@", 5) == 0) {		/* (unsigned, error): registerContainerURL: the identifier of the container (1: the store is read only, nothing is really added), no error */
+			((__bridge void (^)(unsigned, id))blk)(1, nil);
 		} else if (other == 0 && nobj == 2)		/* v@? then one object (an @? counts one): (nil) */
 			((__bridge void (^)(id))blk)(nil);
 		else if (other == 0 && nobj == 3)
