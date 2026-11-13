@@ -914,7 +914,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
 		al.forkattr = 0;
 	}
-	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || (al.dirattr && !(cmn & DA_CMN_RETURNED)) || al.forkattr || (file & ~DA_FILE_SUPPORTED)) {
+	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || ((al.dirattr & ~DA_DIR_SUPPORTED) || (al.dirattr && !S_ISDIR(sb.st_mode) && !(cmn & DA_CMN_RETURNED))) || al.forkattr || (file & ~DA_FILE_SUPPORTED)) {
 		if (darwin_debug >= 1)
 			printf("darwinator: %s[%d]: getattrlist %s: attributes not supported: common %#x (of which %#x), volume %#x, dir %#x, file %#x, fork %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, path, cmn, cmn & ~DA_CMN_SUPPORTED, al.volattr, al.dirattr, file, al.forkattr);
 		return (EINVAL);
@@ -958,7 +958,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
 		if (cmn & DA_CMN_OBJTAG)	PUT32(0);
 		if (cmn & DA_CMN_OBJID)		{ PUT32(sb.st_ino); PUT32(sb.st_gen); }
-		if (cmn & DA_CMN_CRTIME)	PUTTS(sb.st_birthtim);
+		if (cmn & DA_CMN_CRTIME)	PUTTS(sb.st_mtim);		/* the files of a Mac's system were made as they are: the creation time is the modification time (a copy keeps the second, not the birth) */
 		if (cmn & DA_CMN_MODTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_CHGTIME)	PUTTS(sb.st_ctim);
 		if (cmn & DA_CMN_ACCTIME)	PUTTS(sb.st_atim);
@@ -972,7 +972,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_FILEID)	PUT64(sb.st_ino);
 		if (cmn & DA_CMN_PARENTID)	PUT64(2);
 		if (cmn & DA_CMN_FULLPATH)	{ pathref = p; p += 8; }
-		if (cmn & DA_CMN_ADDEDTIME)	PUTTS(sb.st_birthtim);
+		if (cmn & DA_CMN_ADDEDTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_ERROR)		PUT32(0);
 		if (cmn & DA_CMN_DATAPROT)	PUT32(0);
 		if (al.volattr != 0) {
