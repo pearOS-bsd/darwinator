@@ -98,6 +98,7 @@ darwin_mmap(struct thread *td, struct darwin_args *uap)
 	ma.flags = f;
 	ma.fd = (int)uap->a[4];
 	ma.pos = (off_t)uap->a[5];
+	if (d & DARWIN_MAP_ANON) { ma.fd = -1; ma.pos = 0; }	/* the fd of an anonymous mapping is the VM tag (VM_MAKE_TAG << 24) on a Mac; FreeBSD refuses an fd */
 	return (sys_mmap(td, &ma));
 }
 

@@ -57,6 +57,28 @@ main(void)
 			int cf = open("/tmp/ca.bin", 0x209, 0644);
 
 			if (cf >= 0) { write(cf, &buf[1], 4); write(cf, buf, buf[1]); close(cf); }
+			if (buf[0] & 0x80000000) {		/* the out-of-line data of the commit (an Image's pixels...): /tmp/ca-ool-<message>-<descriptor>.bin */
+				static u32 nmsg;
+				u32 off = 28, k;
+
+				for (k = 0; k < buf[6] && off + 16 <= buf[1]; k++) {
+					unsigned char *dsc = (unsigned char *)buf + off;
+
+					if (dsc[11] == 1) {
+						unsigned long ad = *(unsigned long *)dsc;
+						u32 sz = *(u32 *)(dsc + 12);
+						char nm[40] = "/tmp/ca-ool-00-0.bin";
+						int of;
+
+						nm[12] = '0' + (nmsg / 10) % 10; nm[13] = '0' + nmsg % 10; nm[15] = '0' + k;
+						of = open(nm, 0x601, 0644);
+						if (of >= 0) { write(of, (void *)ad, sz); close(of); }
+						off += 16;
+					} else
+						off += 12;
+				}
+				nmsg++;
+			}
 		}
 		n = buf[1] / 4; if (n > 4000) n = 4000;
 		for (i = 6; i < n; i++) { hex(buf[i], 8); out(i % 8 == 5 ? "\n  " : " "); }

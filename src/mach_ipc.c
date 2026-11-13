@@ -1094,6 +1094,9 @@ darwin_sem_timedwait(struct thread *td, struct darwin_args *uap)		/* (sem, sec, 
 	return (kr_ret(td, kr));
 }
 
+/* kern.darwinator.fast_sleep_ms: when not 0 the relative waits of a second or more (sleep(3)) last this many ms; IOSurface sleeps 241 s for an IOSurfaceRoot that pearOS never has */
+int darwin_fast_sleep_ms = 0;
+
 static int darwin_sem_timedwait_signal(struct thread *td, struct darwin_args *uap) { return (kr_ret(td, sem_wait_signal(td, (uint32_t)uap->a[0], (uint32_t)uap->a[1], semtimo((uint32_t)uap->a[2], (int32_t)uap->a[3])))); }
 
 /* __semwait_signal(cond_sem, mutex_sem, timeout, relative, tv_sec, tv_nsec) (334, 423): what the old pthread condition variables wait with; the error is the value of the call */
@@ -1107,7 +1110,9 @@ darwin_semwait_signal(struct thread *td, struct darwin_args *uap)
 		int64_t sec = (int64_t)uap->a[4];
 		int32_t nsec = (int32_t)uap->a[5];
 
-		if ((int)uap->a[3] == 0) {			/* an absolute time */
+		if ((int)uap->a[3] != 0 && darwin_fast_sleep_ms > 0 && sec >= 1 && sec <= 5) {	/* a relative sleep(3) */
+			nsec = darwin_fast_sleep_ms * 1000000; sec = 0;
+		} else if ((int)uap->a[3] == 0) {			/* an absolute time */
 			struct timespec now;
 
 			nanotime(&now);
@@ -2305,6 +2310,7 @@ static const struct ionode io_nodes[] = {
 	{ "VirtualMac", "IOPlatformExpertDevice", 0 },
 	{ "IOHIDSystem", "IOHIDSystem", 1 },
 	{ "IOResources", "IOResources", 0 },
+	{ "IOSurfaceRoot", "IOSurfaceRoot", 1 },
 };
 #define	IO_NNODES	((int)nitems(io_nodes))
 #define	IO_ITER_BASE	0x1000
@@ -2476,7 +2482,9 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 
 		n = 0;
 		if (id == 2880 || id == 2881)
-			found = m->size >= 36 && io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IOProviderClass", cls, sizeof(cls));
+			found = m->size >= 36 && (io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IOProviderClass", cls, sizeof(cls)) ||
+			    io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IOClass", cls, sizeof(cls)) ||
+			    io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IONameMatch", cls, sizeof(cls)));
 		else
 			found = io_xml_value(xml, "IOProviderClass", cls, sizeof(cls)) || io_xml_value(xml, "IOClass", cls, sizeof(cls)) || io_xml_value(xml, "IONameMatch", cls, sizeof(cls));
 		if (found)
