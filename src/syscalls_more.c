@@ -269,6 +269,8 @@ out:
 /* ---- statfs64, fstatfs64 ---- */
 
 /* a ufs/zfs file system of this system is shown as the two APFS volumes of a Mac (system "/" and data "/System/Volumes/Data"): vol 1 system, 2 data, 0 as it is */
+extern int darwin_two_volumes;
+
 static void
 darwin_apfsify(struct darwin_statfs64 *d, int vol)
 {
@@ -276,10 +278,10 @@ darwin_apfsify(struct darwin_statfs64 *d, int vol)
 		return;
 	strlcpy(d->f_fstypename, "apfs", sizeof(d->f_fstypename));
 	d->f_type = 26; d->f_fssubtype = 1;
-	d->f_fsid[0] = vol == 1 ? 16777231 : 16777225; d->f_fsid[1] = 26;
+	d->f_fsid[0] = vol == 1 && darwin_two_volumes ? 16777231 : vol == 3 ? 16777226 : 16777225; d->f_fsid[1] = 26;
 	d->f_flags = vol == 1 ? 0x4480d001 : 0x4909000;
-	strlcpy(d->f_mntonname, vol == 1 ? "/" : "/System/Volumes/Data", sizeof(d->f_mntonname));
-	strlcpy(d->f_mntfromname, vol == 1 ? "/dev/disk3s4s1" : "/dev/disk3s1", sizeof(d->f_mntfromname));
+	strlcpy(d->f_mntonname, vol == 1 ? "/" : vol == 3 ? "/System/Volumes/Preboot" : "/System/Volumes/Data", sizeof(d->f_mntonname));
+	strlcpy(d->f_mntfromname, vol == 1 ? "/dev/disk3s4s1" : vol == 3 ? "/dev/disk3s2" : "/dev/disk3s1", sizeof(d->f_mntfromname));
 }
 
 static bool
@@ -311,6 +313,8 @@ darwin_statfs_out_vol(const struct statfs *s, void *ubuf, int vol)
 	strlcpy(d->f_mntonname, s->f_mntonname, sizeof(d->f_mntonname));
 	strlcpy(d->f_mntfromname, s->f_mntfromname, sizeof(d->f_mntfromname));
 	darwin_apfsify(d, vol);
+	if (darwin_debug >= 2)
+		printf("darwinator: %s[%d]: statfs out: %s on %s fsid %d,%d type %s\n", curproc->p_comm, curproc->p_pid, d->f_mntfromname, d->f_mntonname, d->f_fsid[0], d->f_fsid[1], d->f_fstypename);
 	error = copyout(d, ubuf, sizeof(*d));
 	free(d, M_DARWIN);
 	return (error);
@@ -382,7 +386,7 @@ darwin_statfs64(struct thread *td, struct darwin_args *uap)
 	if (error == 0 && copyinstr((const char *)uap->a[0], path, sizeof(path), NULL) != 0)
 		strlcpy(path, "/", sizeof(path));
 	if (error == 0)
-		error = darwin_statfs_out_vol(s, (void *)uap->a[1], darwin_path_on_system_volume(path) ? 1 : 2);
+		error = darwin_statfs_out_vol(s, (void *)uap->a[1], strncmp(path, "/System/Volumes/Preboot", 23) == 0 ? 3 : darwin_path_on_system_volume(path) ? 1 : 2);
 	free(s, M_DARWIN);
 	return (error);
 }
@@ -404,7 +408,7 @@ darwin_fstatfs64(struct thread *td, struct darwin_args *uap)
 
 			vref(vp);
 			if (vn_fullpath(vp, &fullpath, &freepath) == 0 && fullpath != NULL)
-				vol = darwin_path_on_system_volume(fullpath) ? 1 : 2;
+				vol = strncmp(fullpath, "/System/Volumes/Preboot", 23) == 0 ? 3 : darwin_path_on_system_volume(fullpath) ? 1 : 2;
 			vrele(vp);
 			if (freepath != NULL)
 				free(freepath, M_TEMP);
