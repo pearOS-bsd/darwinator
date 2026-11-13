@@ -79,6 +79,7 @@ darwin_mknod(struct thread *td, struct darwin_args *uap)
 /* ---- getfsstat64(buf, bufsize, flags): the count, or the structures that fit ---- */
 
 SYSCTL_DECL(_kern_darwinator);
+#define	DA_CMNEXT_SUPPORTED	0x7fcu		/* ATTR_CMNEXT_: relpath 4, privatesize 8, linkid 0x10, nofirmlinkpath 0x20, realdevid 0x40, realfsid 0x80, cloneid 0x100, ext flags 0x200, recursive gencount 0x400 */
 int darwin_two_volumes = 1;
 SYSCTL_INT(_kern_darwinator, OID_AUTO, two_volumes, CTLFLAG_RW, &darwin_two_volumes, 0, "getfsstat shows the root as a system and a data volume");
 
@@ -905,6 +906,8 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		return (EINVAL);
 	cmn = al.commonattr;
 	file = al.fileattr;
+	if (darwin_debug >= 1 && (uap->a[4] & 0x20))
+		printf("darwinator: %s[%d]: getattrlist extended: options %#lx common %#x vol %#x dir %#x file %#x fork %#x bufsize %lu\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)uap->a[4], al.commonattr, al.volattr, al.dirattr, al.fileattr, al.forkattr, (u_long)uap->a[3]);
 	if (cmn & DA_CMN_RETURNED) {			/* the caller takes what there is: the attributes that are not known are left out and the set that came back says which they are */
 		cmn &= DA_CMN_SUPPORTED_EXT;
 		al.volattr &= DA_VOL_SUPPORTED;
@@ -912,9 +915,9 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			al.volattr = 0;
 		al.dirattr = S_ISDIR(sb.st_mode) ? (al.dirattr & DA_DIR_SUPPORTED) : 0;
 		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
-		al.forkattr = (uap->a[4] & 0x20) ? (al.forkattr & 0x31) : 0;		/* FSOPT_ATTR_CMN_EXTENDED: relpath 1, realdevid 0x10, realfsid 0x20 */
+		al.forkattr = (uap->a[4] & 0x20) ? (al.forkattr & DA_CMNEXT_SUPPORTED) : 0;		/* FSOPT_ATTR_CMN_EXTENDED */
 	}
-	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || ((al.dirattr & ~DA_DIR_SUPPORTED) || (al.dirattr && !S_ISDIR(sb.st_mode) && !(cmn & DA_CMN_RETURNED))) || al.forkattr || (file & ~DA_FILE_SUPPORTED)) {
+	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || ((al.dirattr & ~DA_DIR_SUPPORTED) || (al.dirattr && !S_ISDIR(sb.st_mode) && !(cmn & DA_CMN_RETURNED))) || (al.forkattr & ~((uap->a[4] & 0x20) ? DA_CMNEXT_SUPPORTED : 0u)) || (file & ~DA_FILE_SUPPORTED)) {
 		if (darwin_debug >= 1)
 			printf("darwinator: %s[%d]: getattrlist %s: attributes not supported: common %#x (of which %#x), volume %#x, dir %#x, file %#x, fork %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, path, cmn, cmn & ~DA_CMN_SUPPORTED, al.volattr, al.dirattr, file, al.forkattr);
 		return (EINVAL);
@@ -943,7 +946,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	{
 		char *nameref = NULL;
 
-		char *pathref = NULL, *vmpref = NULL, *vnmref = NULL, *vmdref = NULL, *relref = NULL;
+		char *pathref = NULL, *vmpref = NULL, *vnmref = NULL, *vmdref = NULL, *relref = NULL, *nfref = NULL;
 		bool vsysv = false;
 
 		if (cmn & DA_CMN_RETURNED) {	/* attribute_set_t: what is in the buffer */
@@ -1014,9 +1017,15 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (file & DA_FILE_IOBLOCKSIZE)	PUT32(sb.st_blksize);
 		if (file & DA_FILE_DATALENGTH)	PUT64(sb.st_size);
 		if (file & DA_FILE_DATAALLOCSIZE) PUT64(sb.st_blocks * 512);
-		if (al.forkattr & 0x1)		{ relref = p; p += 8; }
-		if (al.forkattr & 0x10)		PUT32(darwin_from_dev(sb.st_dev));
-		if (al.forkattr & 0x20)		{ PUT32(darwin_from_dev(sb.st_dev)); PUT32(darwin_from_dev(sb.st_dev) == 16777225 ? 26 : 0); }
+		if (al.forkattr & 0x4)		{ relref = p; p += 8; }			/* RELPATH, NOFIRMLINKPATH: attrrefs (the strings follow the fixed part) */
+		if (al.forkattr & 0x8)		PUT64(sb.st_size);			/* PRIVATESIZE */
+		if (al.forkattr & 0x10)		PUT64(sb.st_ino);			/* LINKID */
+		if (al.forkattr & 0x20)		{ nfref = p; p += 8; }
+		if (al.forkattr & 0x40)		PUT32(darwin_from_dev(sb.st_dev));	/* REALDEVID */
+		if (al.forkattr & 0x80)		{ PUT32(darwin_from_dev(sb.st_dev)); PUT32(darwin_from_dev(sb.st_dev) == 16777225 ? 26 : 0); }	/* REALFSID */
+		if (al.forkattr & 0x100)	PUT64(0);				/* CLONEID */
+		if (al.forkattr & 0x200)	PUT64(0);				/* EXT_FLAGS */
+		if (al.forkattr & 0x400)	PUT64(0);				/* RECURSIVE_GENCOUNT */
 		if (nameref != NULL) {		/* the name follows the fixed part, padded to 4 */
 			int32_t off = (int32_t)(p - nameref);
 			uint32_t l = (uint32_t)namelen;
@@ -1039,10 +1048,17 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			memcpy(vnmref, &off, 4); memcpy(vnmref + 4, &l, 4); memcpy(p, vn, l); p += roundup2(l, 4);
 		}
 		if (relref != NULL) {
+			const char *rp = path[0] == '/' ? path + 1 : path;		/* relative to the volume */
 			int32_t off = (int32_t)(p - relref);
+			uint32_t l = (uint32_t)strlen(rp) + 1;
+
+			memcpy(relref, &off, 4); memcpy(relref + 4, &l, 4); memcpy(p, rp, l); p += roundup2(l, 4);
+		}
+		if (nfref != NULL) {
+			int32_t off = (int32_t)(p - nfref);
 			uint32_t l = (uint32_t)strlen(path) + 1;
 
-			memcpy(relref, &off, 4); memcpy(relref + 4, &l, 4); memcpy(p, path, l); p += roundup2(l, 4);
+			memcpy(nfref, &off, 4); memcpy(nfref + 4, &l, 4); memcpy(p, path, l); p += roundup2(l, 4);
 		}
 		if (vmdref != NULL) {
 			const char *dv = vsysv ? "/dev/disk3s4s1" : "/dev/disk3s1";
