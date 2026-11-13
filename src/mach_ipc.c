@@ -155,6 +155,7 @@ struct ktask {
 	struct kport	*reg[3];
 };
 static struct ktask *kt_tab[KT_N];
+static int thsusp[256];			/* a thread that suspended itself (thread_suspend on its own port) sleeps while its slot (tid & 255) is set */
 static uint32_t rd32(const uint8_t *b, size_t off) { uint32_t v; memcpy(&v, b + off, 4); return (v); }
 static void wr32(uint8_t *b, size_t off, uint32_t v) { memcpy(b + off, &v, 4); }
 /* the bootstrap port of the system: the receive right that the task which acts as launchd sets with task_set_special_port(TASK_BOOTSTRAP_PORT); every task without one gets a send right to it (like the inheritance of the bootstrap port in a Mac).  While nobody serves it, the kernel answers as a launchd without services (KP_BOOTSTRAP). */
@@ -1993,7 +1994,25 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, KERN_FAILURE, NULL, 0);
 			return (true);
 		}
-	case 3605: case 3606: case 3607: case 3608: case 3609:		/* thread_suspend, resume, abort, abort_safely, depress_abort: accepted */
+	case 3605:					/* thread_suspend: of the calling thread (a thread parks itself: HIServices' SOME_OTHER_THREAD_SWALLOWED_AT_LEAST_ONE_EXCEPTION): it sleeps until thread_resume or a signal; of another thread: accepted, nothing happens */
+		if (dest->kind != KP_THREAD) return (false);
+		if (dest->kpid == 0 || dest->kpid == (pid_t)td->td_tid) {
+			int slot = (int)(td->td_tid & 255);
+
+			thsusp[slot] = 1;
+			while (thsusp[slot] != 0) {
+				if (sx_sleep(&thsusp[slot], &km_sx, PCATCH, "thsusp", 0) != 0) break;
+			}
+			thsusp[slot] = 0;
+		}
+		mig_reply_data(m, id, 0, NULL, 0);
+		return (true);
+	case 3606:					/* thread_resume */
+		if (dest->kind != KP_THREAD) return (false);
+		if (dest->kpid != 0) { int slot = (int)(dest->kpid & 255); if (thsusp[slot] != 0) { thsusp[slot] = 0; wakeup(&thsusp[slot]); } }
+		mig_reply_data(m, id, 0, NULL, 0);
+		return (true);
+	case 3607: case 3608: case 3609:		/* thread_abort, abort_safely, depress_abort: accepted */
 	case 3613: case 3617: case 3604: case 3611: case 3600:		/* thread_set_exception_ports, policy_set, set_state, set_special_port, terminate: accepted, nothing happens */
 		if (dest->kind != KP_THREAD) return (false);
 		mig_reply_data(m, id, 0, NULL, 0);
