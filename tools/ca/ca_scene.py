@@ -64,7 +64,8 @@ class Scene:
                 L = x[3]
                 d = struct.unpack_from('<6d', L['pod'], 0x28)
                 col = struct.unpack_from('<5f', L['pod'], 0)
-                subs = L['subs'][1] if L['subs'] and L['subs'][0] == 'ids' else []
+                old = self.layers.get(x[1])
+                subs = L['subs'][1] if L['subs'] and L['subs'][0] == 'ids' else (old['subs'] if old and not L['subs'] else [])		# no array in the record: the sublayers stay
                 name = L['o'][1].decode('latin1') if L['o'] and L['o'][0] == 'string' else ''
                 img = None
                 c = L['contents']
@@ -83,7 +84,8 @@ class Scene:
 
     def roots(self):
         child = set(s for L in self.layers.values() for s in L['subs'])
-        return [i for i in self.layers if i not in child]
+        r = [i for i in self.layers if i not in child]
+        return sorted(r, key=lambda i: -(self.layers[i]['size'][0] * self.layers[i]['size'][1]))		# the biggest (the wallpaper) first: it is the back
 
     def render(self, W, H):
         import numpy as np
