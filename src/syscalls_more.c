@@ -292,6 +292,7 @@ darwin_apfsify(struct darwin_statfs64 *d, int vol)
 	if (vol < 1 || vol > 6) vol = 2;
 	d->f_fsid[0] = vol == 1 && !darwin_two_volumes ? 16777225 : v[vol].fsid; d->f_fsid[1] = 26;
 	d->f_flags = v[vol].flags;
+	d->f_reserved[0] = vol == 2 ? 1 : 0;		/* f_flags_ext: MNT_EXT_ROOT_DATA_VOL on the data volume ("root data"): CarbonCore then says "/" for its mount point */
 	strlcpy(d->f_mntonname, v[vol].on, sizeof(d->f_mntonname));
 	strlcpy(d->f_mntfromname, v[vol].from, sizeof(d->f_mntfromname));
 }
