@@ -1076,7 +1076,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_MODTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_CHGTIME)	PUTTS(sb.st_ctim);
 		if (cmn & DA_CMN_ACCTIME)	PUTTS(sb.st_atim);
-		if ((cmn & DA_CMN_FNDRINFO) || fndreq)	{ memset(p, 0, 32); p += 32; }		/* the Finder info: 32 bytes, nothing set */
+		if (cmn & DA_CMN_FNDRINFO)	{ memset(p, 0, 32); p += 32; }		/* the Finder info: 32 bytes, nothing set */
 		if (cmn & DA_CMN_OWNERID)	PUT32(sb.st_uid);
 		if (cmn & DA_CMN_GRPID)		PUT32(sb.st_gid);
 		if (cmn & DA_CMN_ACCESSMASK)	PUT32(sb.st_mode);
@@ -1142,6 +1142,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (al.forkattr & 0x100)	PUT64(0);				/* CLONEID */
 		if (al.forkattr & 0x200)	PUT64(0);				/* EXT_FLAGS */
 		if (al.forkattr & 0x400)	PUT64(0);				/* RECURSIVE_GENCOUNT */
+		if (fndreq) { memset(p, 0, 32); p += 32; }	/* (the Finder info that was asked for and is not in the set: the Mac has 32 zero bytes here, between the fixed part and the strings) */
 		if (nameref != NULL) {		/* the name follows the fixed part, padded to 4 */
 			int32_t off = (int32_t)(p - nameref);
 			uint32_t l = (uint32_t)namelen;
