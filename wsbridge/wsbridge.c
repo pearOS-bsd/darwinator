@@ -31,6 +31,7 @@ extern int socketpair(int domain, int type, int protocol, int *sv);
 extern int close(int fd);
 extern long lseek(int fd, long off, int whence);
 extern void *mmap(void *addr, unsigned long len, int prot, int flags, int fd, long off);
+extern int ftruncate(int fd, long len);
 extern int mach_make_memory_entry_64(u32 task, u64 *size, u64 offset, int perm, u32 *handle, u32 parent);
 extern char *getenv(const char *name);
 
@@ -155,6 +156,8 @@ get_reply(int fd, u32 pid, u32 reply_remote)
 				int pfd = (name >= 1 && (int)name <= nfds) ? fds[name - 1] : -1;
 				long fsz = pfd >= 0 ? lseek(pfd, 0, 2) : -1;		/* a memory object has a size; a socket does not */
 
+				if (fsz > 0 && fsz < 4096 && ftruncate(pfd, 4096) == 0)
+					fsz = 4096;				/* the client maps more than the pixels of a window of 1x1 (the state of the window): at least a page */
 				if (fsz > 0) {						/* shared memory of wsd: a Mach memory entry for it, which the client maps with mach_vm_map */
 					void *mem = mmap(0, (unsigned long)fsz, 3, 1, pfd, 0);
 					u64 sz = (u64)fsz;
