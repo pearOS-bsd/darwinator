@@ -3295,13 +3295,14 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 
 	if (darwin_debug >= 1 && p->p_sysent == &darwin_sysvec && p->p_xsig == 0)
 		printf("darwinator: %s[%d] exited with status %d\n", p->p_comm, p->p_pid, (int)p->p_xexit);
-	if (darwin_debug >= 1 && p->p_sysent == &darwin_sysvec && (p->p_xsig == SIGILL || p->p_xsig == SIGSEGV || p->p_xsig == SIGBUS || p->p_xsig == SIGABRT || p->p_xsig == SIGTRAP)) {
+	if ((darwin_debug >= 1 || p->p_xsig == SIGILL) && p->p_sysent == &darwin_sysvec && (p->p_xsig == SIGILL || p->p_xsig == SIGSEGV || p->p_xsig == SIGBUS || p->p_xsig == SIGABRT || p->p_xsig == SIGTRAP)) {
 		struct thread *tdp = curthread;
 
 		/* a Darwin process that dies of a signal of a fault: where (the thread that exits is the one that took it) */
 		uint64_t w[40];
 		int wi;
 
+		{ extern void darwin_wq_dump_deliveries(void); darwin_wq_dump_deliveries(); }
 		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx, fault address %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax, (u_long)tdp->td_frame->tf_addr);
 		printf("darwinator:   regs rdi %#lx rsi %#lx rdx %#lx rcx %#lx rbx %#lx rbp %#lx r12 %#lx r13 %#lx r14 %#lx r15 %#lx\n", (u_long)tdp->td_frame->tf_rdi, (u_long)tdp->td_frame->tf_rsi, (u_long)tdp->td_frame->tf_rdx, (u_long)tdp->td_frame->tf_rcx, (u_long)tdp->td_frame->tf_rbx, (u_long)tdp->td_frame->tf_rbp, (u_long)tdp->td_frame->tf_r12, (u_long)tdp->td_frame->tf_r13, (u_long)tdp->td_frame->tf_r14, (u_long)tdp->td_frame->tf_r15);
 		if (tdp == curthread) {			/* the frames (rbp chain): the return addresses of the callers */

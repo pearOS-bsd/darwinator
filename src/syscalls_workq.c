@@ -32,6 +32,22 @@
 
 #include "darwinator.h"
 extern int darwin_wl_stale_check;
+struct wqdl { int tid; int64_t id; uint64_t qs, em, ev, ea; int ticks; };
+static struct wqdl wq_dl[32];
+static unsigned wq_dl_n;
+void darwin_wq_dump_deliveries(void);
+void
+darwin_wq_dump_deliveries(void)
+{
+	int i;
+
+	for (i = 0; i < 32; i++) {
+		struct wqdl *r = &wq_dl[(wq_dl_n + i) % 32];
+
+		if (r->tid != 0)
+			printf("darwinator:   delivery tid %d wl %#lx state %#lx mask %#lx want %#lx addr %#lx ticks %d\n", r->tid, (u_long)r->id, (u_long)r->qs, (u_long)r->em, (u_long)r->ev, (u_long)r->ea, r->ticks);
+	}
+}
 
 #define	WQOPS_THREAD_RETURN		0x004
 #define	WQOPS_QUEUE_NEWSPISUPP		0x010
@@ -354,6 +370,13 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 				}
 				if (darwin_debug >= 2)
 					printf("darwinator: %s[%d]: a thread serves the request of the workloop %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)rid);
+				{
+					uint64_t qn = 0;
+					struct wqdl *r;
+
+					if (w->req[k].eaddr != 0) (void)copyin((void *)(uintptr_t)w->req[k].eaddr, &qn, 8);
+					r = &wq_dl[wq_dl_n++ % 32]; r->tid = td->td_tid; r->id = rid; r->qs = qn; r->em = w->req[k].emask; r->ev = w->req[k].evalue; r->ea = w->req[k].eaddr; r->ticks = ticks;
+				}
 				mtx_unlock(&wq_mtx);
 				memset(ev, 0, sizeof(ev));
 				memcpy(ev, &kqid, 8);					/* ident: the workloop */
