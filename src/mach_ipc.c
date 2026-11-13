@@ -41,6 +41,7 @@
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
+#include <sys/rwlock.h>
 #include <vm/vm_object.h>
 #include <vm/vm_extern.h>
 #include <sys/sysent.h>
@@ -2688,11 +2689,16 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			ep = kp_new(KP_MEMENT);
 			ep->mobj = e->object.vm_object;
 			vm_object_reference(ep->mobj);
+			VM_OBJECT_WLOCK(ep->mobj);			/* the object is no longer private to its one mapping: when that is removed (the server frees its buffer after it has sent the entry) the pages must stay */
+			vm_object_clear_flag(ep->mobj, OBJ_ONEMAPPING);
+			VM_OBJECT_WUNLOCK(ep->mobj);
 			ep->moff = e->offset + (off - e->start);
 			ep->msize = size;
 			ep->mprot = (int)(e->protection & VM_PROT_ALL);
 			vm_map_unlock_read(map);
 			(void)perm;
+			if (darwin_debug >= 2)
+				printf("darwinator: %s[%d]: memory entry of %#lx+%#lx: object %p type %d size %ju pages, offset %#lx, eflags %#x, prot %d\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)off, (u_long)size, ep->mobj, ep->mobj->type, (uintmax_t)ep->mobj->size, (u_long)ep->moff, (unsigned)e->eflags, ep->mprot);
 			/* the reply: a complex message with the port (a send right) and the size */
 			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 			r->data = rd = malloc(56, M_DARWIN_IPC, M_WAITOK | M_ZERO);
@@ -2728,10 +2734,12 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			}
 			map = &tp->p_vmspace->vm_map;
 			vm_object_reference(op->mobj);				/* the mapping keeps its own reference */
-			if ((flags & 1) != 0)					/* VM_FLAGS_ANYWHERE */
-				va = 0;
+			if ((flags & 1) != 0)					/* VM_FLAGS_ANYWHERE: above the 4 GB of the zero page of a Mach-O program (the address 0x1000 is not good for a pointer) */
+				va = 0x200000000ULL;
 			rv = vm_map_find(map, op->mobj, op->moff + offset, &va, round_page(size), 0, (flags & 1) != 0 ? VMFS_ANY_SPACE : VMFS_NO_SPACE,
 			    (vm_prot_t)(cur & VM_PROT_ALL), (vm_prot_t)((max | cur) & VM_PROT_ALL), copy ? MAP_COPY_ON_WRITE : MAP_INHERIT_SHARE);
+			if (darwin_debug >= 2)
+				printf("darwinator: %s[%d]: vm_map of an entry: va %#lx size %#lx offset %#lx (entry offset %#lx, entry size %#lx) flags %#x cur %d max %d copy %d -> rv %d\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)va, (u_long)size, (u_long)offset, (u_long)op->moff, (u_long)op->msize, flags, cur, max, copy, rv);
 			if (rv != KERN_SUCCESS) {
 				vm_object_deallocate(op->mobj);
 				mig_reply(t, m, id, rv == KERN_NO_SPACE ? 3 : KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
@@ -2964,7 +2972,7 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 		uint64_t w[40];
 		int wi;
 
-		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax);
+		printf("darwinator: %s[%d] died of signal %d at %#lx (stack %#lx, rax %#lx, fault address %#lx)\n", p->p_comm, p->p_pid, p->p_xsig, (u_long)tdp->td_frame->tf_rip, (u_long)tdp->td_frame->tf_rsp, (u_long)tdp->td_frame->tf_rax, (u_long)tdp->td_frame->tf_addr);
 		if (tdp == curthread) {			/* the frames (rbp chain): the return addresses of the callers */
 			uint64_t fp = tdp->td_frame->tf_rbp, pair[2];
 			int fi;
