@@ -278,16 +278,40 @@ darwin_apfsify(struct darwin_statfs64 *d, int vol)
 		return;
 	strlcpy(d->f_fstypename, "apfs", sizeof(d->f_fstypename));
 	d->f_type = 26; d->f_fssubtype = 1;
-	d->f_fsid[0] = vol == 1 && darwin_two_volumes ? 16777231 : vol == 3 ? 16777226 : 16777225; d->f_fsid[1] = 26;
-	d->f_flags = vol == 1 ? 0x4480d001 : 0x4909000;
-	strlcpy(d->f_mntonname, vol == 1 ? "/" : vol == 3 ? "/System/Volumes/Preboot" : "/System/Volumes/Data", sizeof(d->f_mntonname));
-	strlcpy(d->f_mntfromname, vol == 1 ? "/dev/disk3s4s1" : vol == 3 ? "/dev/disk3s2" : "/dev/disk3s1", sizeof(d->f_mntfromname));
+	/* the volumes of a Mac (macOS 12+ with a sealed system): 1 system "/", 2 data, 3 Preboot, 4 VM, 5 Update, 6 Update/mnt1 */
+	static const struct { uint32_t fsid, flags; const char *on, *from; } v[] = {
+		{ 0, 0, 0, 0 },
+		{ 16777231, 0x4480d001, "/", "/dev/disk3s4s1" },
+		{ 16777225, 0x4909000, "/System/Volumes/Data", "/dev/disk3s1" },
+		{ 16777226, 0x4909000, "/System/Volumes/Preboot", "/dev/disk3s2" },
+		{ 16777229, 0x14909004, "/System/Volumes/VM", "/dev/disk3s6" },
+		{ 16777230, 0x4909000, "/System/Volumes/Update", "/dev/disk3s5" },
+		{ 16777228, 0x4909000, "/System/Volumes/Update/mnt1", "/dev/disk3s4" },
+	};
+
+	if (vol < 1 || vol > 6) vol = 2;
+	d->f_fsid[0] = vol == 1 && !darwin_two_volumes ? 16777225 : v[vol].fsid; d->f_fsid[1] = 26;
+	d->f_flags = v[vol].flags;
+	strlcpy(d->f_mntonname, v[vol].on, sizeof(d->f_mntonname));
+	strlcpy(d->f_mntfromname, v[vol].from, sizeof(d->f_mntfromname));
 }
 
 static bool
 darwin_path_on_system_volume(const char *path)
 {
 	return (strcmp(path, "/") == 0 || strncmp(path, "/System", 7) == 0 || strncmp(path, "/usr", 4) == 0 || strncmp(path, "/bin", 4) == 0 || strncmp(path, "/sbin", 5) == 0);
+}
+
+/* the volume of a Mac that a path is on: 1 system, 2 data, 3 Preboot, 4 VM, 5 Update, 6 Update/mnt1 */
+static int
+darwin_vol_of_path(const char *path)
+{
+	if (strncmp(path, "/System/Volumes/Preboot", 23) == 0) return (3);
+	if (strncmp(path, "/System/Volumes/VM", 18) == 0) return (4);
+	if (strncmp(path, "/System/Volumes/Update/mnt1", 27) == 0) return (6);
+	if (strncmp(path, "/System/Volumes/Update", 22) == 0) return (5);
+	if (strncmp(path, "/System/Volumes/Data", 20) == 0) return (2);
+	return (darwin_path_on_system_volume(path) ? 1 : 2);
 }
 
 int
@@ -386,7 +410,7 @@ darwin_statfs64(struct thread *td, struct darwin_args *uap)
 	if (error == 0 && copyinstr((const char *)uap->a[0], path, sizeof(path), NULL) != 0)
 		strlcpy(path, "/", sizeof(path));
 	if (error == 0)
-		error = darwin_statfs_out_vol(s, (void *)uap->a[1], strncmp(path, "/System/Volumes/Preboot", 23) == 0 ? 3 : darwin_path_on_system_volume(path) ? 1 : 2);
+		error = darwin_statfs_out_vol(s, (void *)uap->a[1], darwin_vol_of_path(path));
 	free(s, M_DARWIN);
 	return (error);
 }
@@ -408,7 +432,7 @@ darwin_fstatfs64(struct thread *td, struct darwin_args *uap)
 
 			vref(vp);
 			if (vn_fullpath(vp, &fullpath, &freepath) == 0 && fullpath != NULL)
-				vol = strncmp(fullpath, "/System/Volumes/Preboot", 23) == 0 ? 3 : darwin_path_on_system_volume(fullpath) ? 1 : 2;
+				vol = darwin_vol_of_path(fullpath);
 			vrele(vp);
 			if (freepath != NULL)
 				free(freepath, M_TEMP);

@@ -95,11 +95,22 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 		maxn = (size_t)(int)uap->a[1] / sizeof(struct darwin_statfs64);
 	if (ubuf == NULL) {
 		error = kern_getfsstat(td, &sb, 0, &count, UIO_SYSSPACE, mode == 1 ? MNT_WAIT : MNT_NOWAIT);
+		if (error == 0 && count > 0 && darwin_two_volumes) {		/* the msdosfs mounts (the EFI partition) are left out: a Mac has none */
+			size_t n2 = 0, k, drop = 0;
+			struct statfs *sb2 = NULL;
+
+			if (kern_getfsstat(td, &sb2, count * sizeof(struct statfs), &n2, UIO_SYSSPACE, MNT_NOWAIT) == 0) {
+				for (k = 0; k < n2; k++)
+					if (strcmp(sb2[k].f_fstypename, "msdosfs") == 0) drop++;
+				free(sb2, M_STATFS);
+			}
+			count -= drop;
+		}
 		if (error == 0)
-			td->td_retval[0] = count + (darwin_two_volumes ? 2 : 0);		/* the root is two volumes */
+			td->td_retval[0] = count + (darwin_two_volumes ? 5 : 0);		/* the root is six volumes */
 		return (error);
 	}
-	error = kern_getfsstat(td, &sb, (maxn > 2 && darwin_two_volumes ? maxn - 2 : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
+	error = kern_getfsstat(td, &sb, (maxn > 5 && darwin_two_volumes ? maxn - 5 : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
 	    mode == 1 ? MNT_WAIT : MNT_NOWAIT);
 	if (error == 0) {
 		size_t j = 0;
@@ -109,11 +120,16 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 
 			if (j >= maxn)
 				break;
+			if (darwin_two_volumes && strcmp(sb[i].f_fstypename, "msdosfs") == 0)
+				continue;
 			error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), two ? 1 : 0);
-			if (error == 0 && two && j < maxn && darwin_two_volumes)
-				error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), 2);
-			if (error == 0 && two && j < maxn && darwin_two_volumes)
-				error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), 3);
+			if (two && darwin_two_volumes) {		/* the other volumes of the container, in the order of a Mac: Preboot, VM, Update, Data, Update/mnt1 */
+				static const int order[] = { 3, 4, 5, 2, 6 };
+				size_t k;
+
+				for (k = 0; k < nitems(order) && error == 0 && j < maxn; k++)
+					error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), order[k]);
+			}
 		}
 		if (error == 0)
 			td->td_retval[0] = j;
@@ -893,8 +909,30 @@ struct darwin_attrlist {
 #define	DA_VOL_DIRCOUNT		0x00000400
 #define	DA_VOL_INFO		0x80000000
 #define	DA_VOL_SUPPORTED	(DA_VOL_INFO | DA_VOL_OBJCOUNT | DA_VOL_FILECOUNT | DA_VOL_DIRCOUNT | DA_VOL_FSTYPE | DA_VOL_SIGNATURE | DA_VOL_MINALLOC | DA_VOL_ALLOCCLUMP | DA_VOL_MOUNTFLAGS | DA_VOL_MOUNTEDDEVICE | DA_VOL_ENCODINGSUSED | DA_VOL_SIZE | DA_VOL_SPACEFREE | DA_VOL_SPACEAVAIL | DA_VOL_IOBLOCKSIZE | DA_VOL_MOUNTPOINT | DA_VOL_NAME | DA_VOL_CAPABILITIES | DA_VOL_UUID | DA_VOL_ATTRIBUTES)
-static const uint8_t da_uuid_system[16] = { 0x2B, 0x58, 0x8F, 0x62, 0x3F, 0x2E, 0x49, 0x10, 0xAC, 0xDC, 0xB6, 0xC1, 0x03, 0x76, 0x68, 0xEB };
-static const uint8_t da_uuid_data[16] = { 0xFF, 0xB5, 0x71, 0x33, 0x80, 0x43, 0x40, 0x2E, 0xB8, 0xA2, 0x2F, 0xE7, 0x03, 0xF2, 0x07, 0x68 };
+
+/* the volumes of the container of a Mac that has a sealed system: 1 system, 2 data, 3 Preboot, 4 VM, 5 Update, 6 Update/mnt1 (the values of a Mac VM) */
+static const struct { const char *on, *name, *dev; uint8_t uuid[16]; uint32_t flags; } da_vols[] = {
+	{ 0, 0, 0, { 0 }, 0 },
+	{ "/", "Untitled", "/dev/disk3s4s1", { 0x2B, 0x58, 0x8F, 0x62, 0x3F, 0x2E, 0x49, 0x10, 0xAC, 0xDC, 0xB6, 0xC1, 0x03, 0x76, 0x68, 0xEB }, 0x4480d001 },
+	{ "/System/Volumes/Data", "Untitled - Data", "/dev/disk3s1", { 0xFF, 0xB5, 0x71, 0x33, 0x80, 0x43, 0x40, 0x2E, 0xB8, 0xA2, 0x2F, 0xE7, 0x03, 0xF2, 0x07, 0x68 }, 0x4909000 },
+	{ "/System/Volumes/Preboot", "Preboot", "/dev/disk3s2", { 0xF7, 0x9C, 0x77, 0xB2, 0x1E, 0x80, 0x4C, 0x02, 0x87, 0x85, 0x0B, 0x99, 0x7A, 0xE7, 0x88, 0x8A }, 0x4909000 },
+	{ "/System/Volumes/VM", "VM", "/dev/disk3s6", { 0x91, 0xAC, 0xE9, 0x1F, 0xEB, 0xBB, 0x46, 0x18, 0xBD, 0x00, 0x5A, 0xB3, 0xFB, 0x85, 0x10, 0x37 }, 0x14909004 },
+	{ "/System/Volumes/Update", "Update", "/dev/disk3s5", { 0x83, 0xD4, 0xE6, 0xC1, 0xA2, 0xF2, 0x4B, 0xE7, 0x97, 0xAF, 0x21, 0xBA, 0x27, 0xD1, 0x20, 0x65 }, 0x4909000 },
+	{ "/System/Volumes/Update/mnt1", "Untitled", "/dev/disk3s4", { 0x10, 0x09, 0x14, 0x7C, 0xD2, 0x05, 0x45, 0x99, 0xA9, 0x07, 0xA2, 0xDE, 0x53, 0x0D, 0xE0, 0x89 }, 0x4909000 },
+};
+
+static const uint32_t da_fsid[7] = { 0, 16777231, 16777225, 16777226, 16777229, 16777230, 16777228 };
+
+static int
+da_vol_of_path(const char *path)
+{
+	if (strncmp(path, "/System/Volumes/Preboot", 23) == 0) return (3);
+	if (strncmp(path, "/System/Volumes/VM", 18) == 0) return (4);
+	if (strncmp(path, "/System/Volumes/Update/mnt1", 27) == 0) return (6);
+	if (strncmp(path, "/System/Volumes/Update", 22) == 0) return (5);
+	if (strncmp(path, "/System/Volumes/Data", 20) == 0) return (2);
+	return (strcmp(path, "/") == 0 || strncmp(path, "/System", 7) == 0 || strncmp(path, "/usr", 4) == 0 || strncmp(path, "/bin", 4) == 0 || strncmp(path, "/sbin", 5) == 0 ? 1 : 2);
+}
 
 static bool
 da_on_system_volume(const char *path)
@@ -961,15 +999,15 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		char *nameref = NULL;
 
 		char *pathref = NULL, *vmpref = NULL, *vnmref = NULL, *vmdref = NULL, *relref = NULL, *nfref = NULL;
-		bool vsysv = false;
+		int vidx = 2;
 
 		if (cmn & DA_CMN_RETURNED) {	/* attribute_set_t: what is in the buffer */
 			PUT32(cmn); PUT32(al.volattr); PUT32(al.dirattr); PUT32(file); PUT32(al.forkattr);
 		}
 		if (cmn & DA_CMN_NAME) { nameref = p; p += 8; }		/* attrreference: offset (from itself), length */
-		if (cmn & DA_CMN_DEVID)		PUT32(darwin_from_dev(sb.st_dev) == 16777225 && strncmp(path, "/System/Volumes/Preboot", 23) == 0 ? 16777226 : darwin_from_dev(sb.st_dev));
+		if (cmn & DA_CMN_DEVID)		PUT32(darwin_from_dev(sb.st_dev) == 16777225 && da_vol_of_path(path) >= 3 ? da_fsid[da_vol_of_path(path)] : darwin_from_dev(sb.st_dev));
 		if (cmn & DA_CMN_FSID) {		/* the fsid of the volume as statfs says it (the pair must be the same, CarbonCore keys its volumes by it) */
-			if (darwin_from_dev(sb.st_dev) == 16777225) { PUT32(strncmp(path, "/System/Volumes/Preboot", 23) == 0 ? 16777226 : 16777225); PUT32(26); }	/* a Mac says the data volume (or Preboot) for the files of the system volume too; only statfs says 16777231 */
+			if (darwin_from_dev(sb.st_dev) == 16777225) { PUT32(da_vol_of_path(path) >= 3 ? da_fsid[da_vol_of_path(path)] : 16777225); PUT32(26); }	/* a Mac says the data volume (or Preboot) for the files of the system volume too; only statfs says 16777231 */
 			else { PUT32(darwin_from_dev(sb.st_dev)); PUT32(0); }
 		}
 		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
@@ -996,7 +1034,8 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_DATAPROT)	PUT32(0);
 		if (al.volattr != 0) {
 			char *mpref = NULL, *nmref = NULL, *mdref = NULL;
-			bool sysv = da_on_system_volume(path);
+			int vi = da_vol_of_path(path);
+			bool sysv = vi == 1;
 
 			if (al.volattr & DA_VOL_FSTYPE)		PUT32(0x1a);			/* APFS */
 			if (al.volattr & DA_VOL_SIGNATURE)	PUT32(0x4244);
@@ -1011,7 +1050,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			if (al.volattr & DA_VOL_DIRCOUNT)	PUT32(200000);
 			if (al.volattr & DA_VOL_MOUNTPOINT)	{ mpref = p; p += 8; }
 			if (al.volattr & DA_VOL_NAME)		{ nmref = p; p += 8; }
-			if (al.volattr & DA_VOL_MOUNTFLAGS)	PUT32(sysv ? 0x4480d001 : 0x4909000);
+			if (al.volattr & DA_VOL_MOUNTFLAGS)	PUT32(da_vols[vi].flags);
 			if (al.volattr & DA_VOL_MOUNTEDDEVICE)	{ mdref = p; p += 8; }
 			if (al.volattr & DA_VOL_ENCODINGSUSED)	PUT64(0x1);
 			if (al.volattr & DA_VOL_CAPABILITIES) {		/* vol_capabilities_attr_t of the APFS volumes of a Mac (taken from one): capabilities[4], valid[4] */
@@ -1019,13 +1058,13 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 
 				memcpy(p, sysv ? cs : cd, 32); p += 32;
 			}
-			if (al.volattr & DA_VOL_UUID)		{ memcpy(p, sysv ? da_uuid_system : da_uuid_data, 16); p += 16; }
+			if (al.volattr & DA_VOL_UUID)		{ memcpy(p, da_vols[vi].uuid, 16); p += 16; }
 			if (al.volattr & DA_VOL_ATTRIBUTES) {		/* vol_attributes_attr_t: the valid and the native attributes (attribute_set_t each) */
 				static const uint32_t va[10] = { 0xffffffff, 0x709fffff, 0x00000007, 0x0000362f, 0x00001ffc, 0x3efffeff, 0x7086fffd, 0x00000007, 0x0000062f, 0x00001ffc };
 
 				memcpy(p, va, 40); p += 40;
 			}
-			vmpref = mpref; vnmref = nmref; vmdref = mdref; vsysv = sysv;
+			vmpref = mpref; vnmref = nmref; vmdref = mdref; vidx = vi;
 		}
 		if (al.dirattr & 1)		PUT32(sb.st_nlink);
 		if (al.dirattr & 2)		PUT32(sb.st_nlink > 2 ? sb.st_nlink - 2 : 0);
@@ -1055,13 +1094,13 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			p += roundup2(namelen, 4);
 		}
 		if (vmpref != NULL) {
-			const char *mp = vsysv ? "/" : "/System/Volumes/Data";
+			const char *mp = da_vols[vidx].on;
 			int32_t off = (int32_t)(p - vmpref); uint32_t l = (uint32_t)strlen(mp) + 1;
 
 			memcpy(vmpref, &off, 4); memcpy(vmpref + 4, &l, 4); memcpy(p, mp, l); p += roundup2(l, 4);
 		}
 		if (vnmref != NULL) {
-			const char *vn = vsysv ? "Macintosh HD" : "Macintosh HD - Data";
+			const char *vn = da_vols[vidx].name;
 			int32_t off = (int32_t)(p - vnmref); uint32_t l = (uint32_t)strlen(vn) + 1;
 
 			memcpy(vnmref, &off, 4); memcpy(vnmref + 4, &l, 4); memcpy(p, vn, l); p += roundup2(l, 4);
@@ -1080,7 +1119,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			memcpy(nfref, &off, 4); memcpy(nfref + 4, &l, 4); memcpy(p, path, l); p += roundup2(l, 4);
 		}
 		if (vmdref != NULL) {
-			const char *dv = vsysv ? "/dev/disk3s4s1" : "/dev/disk3s1";
+			const char *dv = da_vols[vidx].dev;
 			int32_t off = (int32_t)(p - vmdref); uint32_t l = (uint32_t)strlen(dv) + 1;
 
 			memcpy(vmdref, &off, 4); memcpy(vmdref + 4, &l, 4); memcpy(p, dv, l); p += roundup2(l, 4);
