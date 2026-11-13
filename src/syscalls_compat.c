@@ -731,7 +731,6 @@ static const struct {
 	E(229, 5, darwin_enotsup,	"fsetattrlist"),
 	E(242, 4, darwin_enotsup,	"fsctl"),
 	E(245, 4, darwin_enotsup,	"ffsctl"),
-	E(461, 5, darwin_enotsup,	"getattrlistbulk"),
 	E(462, 4, darwin_enotsup,	"clonefileat"),
 	E(479, 4, darwin_enotsup,	"openbyid_np"),
 	E(517, 4, darwin_enotsup,	"fclonefileat"),

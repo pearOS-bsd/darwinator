@@ -12,6 +12,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
+#include <sys/dirent.h>
+#include <sys/unistd.h>
 #include <sys/event.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
@@ -150,7 +152,7 @@ struct dkev {
 	uint32_t	fflags;
 	int64_t		data;
 	uint64_t	udata;
-	uint64_t	ext[3];		/* kevent64 only (ext[2] only from kevent_qos: the expected state of a workloop) */
+	uint64_t	ext[4];		/* kevent64 only (ext[1..3] only from kevent_qos: address, mask and expected value of the state of a workloop) */
 };
 
 struct dkev_arg {
@@ -270,7 +272,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 			if ((error = copyin(a->in, raw, 72)) != 0)
 				return (error);
 			memcpy(&d.ident, raw, 8); memcpy(&d.filter, raw + 8, 2); memcpy(&d.flags, raw + 10, 2); memcpy(&d.udata, raw + 16, 8);
-			memcpy(&d.fflags, raw + 24, 4); memcpy(&d.data, raw + 32, 8); memcpy(d.ext, raw + 40, 24);
+			memcpy(&d.fflags, raw + 24, 4); memcpy(&d.data, raw + 32, 8); memcpy(d.ext, raw + 40, 32);
 		} else if ((error = copyin(a->in, &d, a->size)) != 0)
 			return (error);
 		a->in += a->size;
@@ -318,12 +320,14 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		{
 			/* XNU checks the state of the queue (ext: address of dq_state, mask, expected value) before it takes a request: when the queue has been taken by a thread already the request is stale */
 			uint64_t qs = 0;
-			bool stale = (d.flags & EV_DELETE) == 0 && d.ext[0] != 0 && d.ext[1] != 0 && copyin((void *)(uintptr_t)d.ext[0], &qs, 8) == 0 && (qs & d.ext[1]) != d.ext[2];
+			bool stale = (d.flags & EV_DELETE) == 0 && d.ext[1] != 0 && d.ext[2] != 0 && copyin((void *)(uintptr_t)d.ext[1], &qs, 8) == 0 && (qs & d.ext[2]) != (d.ext[3] & d.ext[2]);
 
+			if (darwin_debug >= 2)
+				printf("darwinator: wl request %s %#lx fflags %#x flags %#x: ext addr %#lx mask %#lx want %#lx state %#lx\n", (d.flags & EV_DELETE) ? "delete" : "add", (u_long)d.ident, d.fflags, d.flags, (u_long)d.ext[1], (u_long)d.ext[2], (u_long)d.ext[3], (u_long)qs);
 			if (stale && darwin_debug >= 2)
-				printf("darwinator: stale thread request for the workloop %#lx: state %#lx mask %#lx want %#lx\n", (u_long)d.ident, (u_long)qs, (u_long)d.ext[1], (u_long)d.ext[2]);
+				printf("darwinator: stale thread request for the workloop %#lx: state %#lx mask %#lx want %#lx\n", (u_long)d.ident, (u_long)qs, (u_long)d.ext[2], (u_long)d.ext[3]);
 			if (!stale)
-				darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0, d.ext[0], d.ext[1], d.ext[2]);
+				darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0, d.ext[1], d.ext[2], d.ext[3]);
 		}
 		if (d.filter == -17 && (d.fflags & (NOTE_WL_SYNC_WAIT | NOTE_WL_SYNC_WAKE)) != 0) {		/* the synchronisation of a workloop: done here (it may sleep); the kqueue gets a change that has no effect */
 			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1]);
@@ -941,6 +945,8 @@ da_on_system_volume(const char *path)
 	return (strcmp(path, "/") == 0 || strncmp(path, "/System", 7) == 0 || strncmp(path, "/usr", 4) == 0 || strncmp(path, "/bin", 4) == 0 || strncmp(path, "/sbin", 5) == 0);
 }
 
+static size_t attr_last_len;			/* the length of what the last attr_fill produced (for getattrlistbulk) */
+
 static int
 attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, const char *path)
 {
@@ -1154,12 +1160,91 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 
 		memcpy(out, &total, 4);
 	}
+	attr_last_len = len;
 	copy = len < bufsize ? len : bufsize;
 	error = copyout(out, (void *)uap->a[2], copy);
 	free(out, M_DARWIN);
 	return (error);
 }
 
+
+/* getattrlistbulk(fd, alist, buffer, size, options): the entries of a directory, each with the attributes (the form of getattrlist, with ATTR_CMN_RETURNED_ATTRS); the count comes back, 0 at the end */
+static int
+darwin_getattrlistbulk(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_args a;
+	struct file *fp;
+	cap_rights_t rights;
+	char dirpath[MAXPATHLEN] = "/", path[MAXPATHLEN];
+	char *kbuf, *fullpath = NULL, *freepath = NULL;
+	size_t bufsize = (size_t)uap->a[3], used = 0, off;
+	int fd = (int)uap->a[0], error, count = 0, kb = 4096;
+	off_t base = 0;
+	ssize_t resid = 0;
+	size_t got;
+	bool full = false;
+	off_t cursor, prevcur;
+
+	if (getvnode(td, fd, cap_rights_init_one(&rights, CAP_FSTAT), &fp) != 0)
+		return (EBADF);
+	{
+		struct vnode *vp = fp->f_vnode;
+
+		vref(vp);
+		if (vn_fullpath(vp, &fullpath, &freepath) == 0 && fullpath != NULL)
+			strlcpy(dirpath, fullpath, sizeof(dirpath));
+		vrele(vp);
+		if (freepath != NULL)
+			free(freepath, M_TEMP);
+		fdrop(fp, td);
+	}
+	kbuf = malloc(kb, M_DARWIN, M_WAITOK);
+	if (kern_lseek(td, fd, 0, SEEK_CUR) == 0) cursor = td->td_uretoff.tdu_off; else cursor = 0;	/* where the unread entries begin */
+	while (!full) {
+		error = kern_getdirentries(td, fd, kbuf, kb, &base, &resid, UIO_SYSSPACE);
+		if (error != 0 || (got = kb - resid) == 0)
+			break;
+		for (off = 0; off + offsetof(struct dirent, d_name) <= got && !full; ) {
+			struct dirent *de = (struct dirent *)(kbuf + off);
+			struct stat sb;
+			size_t elen;
+
+			if (de->d_reclen == 0)
+				break;
+			off += de->d_reclen;
+			prevcur = cursor;
+			cursor = de->d_off;
+			if (de->d_fileno == 0 || (de->d_namlen == 1 && de->d_name[0] == '.') || (de->d_namlen == 2 && de->d_name[0] == '.' && de->d_name[1] == '.'))
+				continue;
+			snprintf(path, sizeof(path), "%s%s%.*s", dirpath, strcmp(dirpath, "/") == 0 ? "" : "/", (int)de->d_namlen, de->d_name);
+			if (kern_statat(td, AT_SYMLINK_NOFOLLOW, AT_FDCWD, path, UIO_SYSSPACE, &sb) != 0)
+				continue;
+			a = *uap;
+			a.a[0] = 0; a.a[1] = uap->a[1]; a.a[2] = uap->a[2] + used; a.a[3] = bufsize - used; a.a[4] = uap->a[4];
+			attr_last_len = 0;
+			error = attr_fill(td, &a, &sb, path);
+			elen = attr_last_len;
+			if (error != 0)
+				goto out;
+			if (elen > bufsize - used) {			/* does not fit: this entry is for the next call (the position goes back to it) */
+				if (count == 0) { error = ERANGE; goto out; }
+				(void)kern_lseek(td, fd, prevcur, SEEK_SET);
+				full = true;
+				break;
+			}
+			used += elen;
+			count++;
+			if (bufsize - used < 64) { full = true; (void)kern_lseek(td, fd, cursor, SEEK_SET); break; }
+		}
+		if (!full && off < got)
+			break;
+	}
+out:
+	free(kbuf, M_DARWIN);
+	if (error == 0)
+		td->td_retval[0] = count;
+	return (error);
+}
 
 static int
 darwin_getattrlist(struct thread *td, struct darwin_args *uap)
@@ -1258,6 +1343,7 @@ static const struct {
 	E(369, 7, darwin_kevent64,	AUE_NULL,		"kevent64"),
 	E(374, 8, darwin_kevent_qos,	AUE_NULL,		"kevent_qos"),
 	E(375, 8, darwin_kevent_id,	AUE_NULL,		"kevent_id"),
+	E(461, 5, darwin_getattrlistbulk,	AUE_NULL,		"getattrlistbulk"),
 	E(46,  3, darwin_sigaction,	AUE_SIGACTION,		"sigaction"),
 	E(53,  2, sys_sigaltstack,	AUE_SIGALTSTACK,	"sigaltstack"),
 	E(52,  1, darwin_sigpending,	AUE_SIGPENDING,		"sigpending"),

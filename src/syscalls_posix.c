@@ -345,7 +345,36 @@ darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t
 		if (fueword32((void *)addr, (int32_t *)&cur) == -1) { sx_xunlock(&ulock_sx); return (EFAULT); }
 		if (cur != (uint32_t)value) { sx_xunlock(&ulock_sx); td->td_retval[0] = 0; return (0); }
 	}
-	error = sx_sleep(ulock_chan(td->td_proc, addr), &ulock_sx, PCATCH, "ulock", timo);
+	if (timo == 0 && darwin_debug >= 1) {		/* a wait for ever: say so when it lasts (who holds the lock?) */
+		int rounds = 0;
+
+		for (;;) {
+			error = sx_sleep(ulock_chan(td->td_proc, addr), &ulock_sx, PCATCH, "ulock", 5 * hz);
+			if (error != EWOULDBLOCK)
+				break;
+			{					/* the word changed and nobody woke us: a lost wakeup (the check makes up for it) */
+				uint64_t cw = 0;
+
+				if (fueword((void *)addr, (long *)&cw) == 0 && (wide ? cw != value : (uint32_t)cw != (uint32_t)value)) {
+					printf("darwinator: %s[%d] tid %d: ulock %#lx changed without a wake: %#lx -> %#lx (lost wakeup)\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_tid, (u_long)addr, (u_long)value, (u_long)cw);
+					error = 0;
+					break;
+				}
+			}
+			if (++rounds == 2) {			/* 10 s */
+				struct thread *t2;
+				uint64_t now = 0;
+
+				(void)fueword((void *)addr, (long *)&now);
+				printf("darwinator: %s[%d] tid %d: ulock stuck for 10 s: op %#x addr %#lx waited on %#lx now %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_tid, op, (u_long)addr, (u_long)value, (u_long)now);
+				PROC_LOCK(td->td_proc);
+				FOREACH_THREAD_IN_PROC(td->td_proc, t2)
+					printf("darwinator:   thread %d: %s\n", t2->td_tid, t2->td_wmesg != NULL ? t2->td_wmesg : "-");
+				PROC_UNLOCK(td->td_proc);
+			}
+		}
+	} else
+		error = sx_sleep(ulock_chan(td->td_proc, addr), &ulock_sx, PCATCH, "ulock", timo);
 	sx_xunlock(&ulock_sx);
 	if (error == EWOULDBLOCK)
 		error = ETIMEDOUT;
