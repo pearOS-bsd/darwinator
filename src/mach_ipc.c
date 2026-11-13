@@ -118,6 +118,8 @@ struct kport {
 	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
 	struct timeout_task *timer;		/* KP_PORT made by mk_timer_create: the expiry sends a message to the port itself */
+	LIST_ENTRY(kport) tlink;		/* every port with a timer is on timers: the module cancels them before it goes away (a callout that fires into unloaded code is a panic) */
+	bool		intimers;
 	struct vm_object *mobj;			/* KP_MEMENT: a memory entry, the pages of an object of the VM that can be mapped into other tasks (mach_make_memory_entry, mach_vm_map) */
 	uint64_t	moff, msize;		/* ... where it starts in the object and how long it is */
 	int		mprot;
@@ -162,6 +164,9 @@ static void wr32(uint8_t *b, size_t off, uint32_t v) { memcpy(b + off, &v, 4); }
 static struct kport *boot_global;
 static pid_t launchd_pid;			/* the process of the launchd: its messages say that the sender is the process 1, which libxpc checks ("bootstrap port must lead to PID 1") */
 static struct sx km_sx;
+static LIST_HEAD(, kport) timers = LIST_HEAD_INITIALIZER(timers);
+static struct mtx timers_mtx;
+MTX_SYSINIT(darwin_timers, &timers_mtx, "darwin mk timers", MTX_DEF);
 static struct mtx kl_mtx;
 MTX_SYSINIT(darwin_kl, &kl_mtx, "darwin mach knotes", MTX_DEF);
 SX_SYSINIT(darwin_mach, &km_sx, "darwin mach ipc");
@@ -200,6 +205,11 @@ kp_unref(struct kport *p)
 	}
 	if (p->fp != NULL)
 		(void)fdrop(p->fp, curthread);
+	if (p->intimers) {
+		mtx_lock(&timers_mtx);
+		if (p->intimers) { LIST_REMOVE(p, tlink); p->intimers = false; }
+		mtx_unlock(&timers_mtx);
+	}
 	if (p->timer != NULL)
 		free(p->timer, M_DARWIN_IPC);
 	if (p->mobj != NULL)
@@ -779,6 +789,19 @@ self_port(struct thread *td, uint32_t name)
 	td->td_retval[0] = name;
 	return (0);
 }
+/* _kernelrpc_mach_vm_purgable_control_trap(target, address, control, int *state): memory is never purgeable here: it is always non-volatile (the state that is asked for or set comes back as the old one, 0) */
+static int
+darwin_vm_purgable_control(struct thread *td, struct darwin_args *uap)
+{
+	int ctl = (int)uap->a[2], zero = 0, kr = KERN_SUCCESS;
+
+	if (ctl == 0 || ctl == 1 || ctl == 3) {			/* VM_PURGABLE_SET_STATE, GET_STATE, SET_STATE_FROM_KERNEL */
+		if (uap->a[3] == 0 || copyout(&zero, (void *)uap->a[3], sizeof(zero)) != 0)
+			kr = KERN_INVALID_ADDRESS;
+	}							/* PURGE_ALL (2): nothing to purge */
+	td->td_retval[0] = (register_t)kr;
+	return (0);
+}
 static int darwin_self_task(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_TASK_SELF)); }
 static int darwin_self_host(struct thread *td, struct darwin_args *uap __unused) { return (self_port(td, NAME_HOST_SELF)); }
 /* thread_self_trap: every thread has a name of its own (libdispatch and libpthread take the name as the id of the thread: with one name for all, dispatch_sync took the owner of a queue for itself) */
@@ -930,6 +953,9 @@ darwin_mk_timer_create(struct thread *td, struct darwin_args *uap __unused)
 		p = kp_new(KP_PORT);
 		p->timer = malloc(sizeof(*p->timer), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 		TIMEOUT_TASK_INIT(taskqueue_thread, p->timer, 0, mk_timer_fire, p);
+		mtx_lock(&timers_mtx);
+		LIST_INSERT_HEAD(&timers, p, tlink); p->intimers = true;
+		mtx_unlock(&timers_mtx);
 		e = ent_add(t, p, MM_MOVE_RECEIVE);
 		p->refs--;
 		if (e == NULL) kp_unref(p); else name = e->name;
@@ -3342,6 +3368,17 @@ darwin_mach_fini(void)
 	(void)kqueue_del_filteropts(EVFILT_MACHPORT_SLOT);
 	EVENTHANDLER_DEREGISTER(process_fork, fork_tag);
 	EVENTHANDLER_DEREGISTER(process_exit, exit_tag);
+	for (;;) {		/* the timers that are armed still: their callouts would fire into code that is gone */
+		struct kport *tp;
+
+		mtx_lock(&timers_mtx);
+		tp = LIST_FIRST(&timers);
+		if (tp != NULL) { LIST_REMOVE(tp, tlink); tp->intimers = false; }
+		mtx_unlock(&timers_mtx);
+		if (tp == NULL)
+			break;
+		taskqueue_drain_timeout(taskqueue_thread, tp->timer);		/* cancels the callout and waits for a task that runs (the port itself is not freed: it may still be in a table) */
+	}
 	for (i = 0; i < KT_N; i++)
 		if (kt_tab[i] != NULL) { free(kt_tab[i], M_DARWIN_IPC); kt_tab[i] = NULL; }
 }
@@ -3496,6 +3533,7 @@ static const struct {
 	const char	*name;
 } darwin_ipc[] = {
 #define	E(num, nargs, fn, name)	{ DARWIN_MACH_BASE + (num), (nargs), (sy_call_t *)(fn), (name) }
+	E(11, 4, darwin_vm_purgable_control,	"_kernelrpc_mach_vm_purgable_control_trap"),
 	E(16, 3, darwin_port_allocate,		"_kernelrpc_mach_port_allocate_trap"),
 	E(18, 2, darwin_port_deallocate,	"_kernelrpc_mach_port_deallocate_trap"),
 	E(19, 4, darwin_port_mod_refs,		"_kernelrpc_mach_port_mod_refs_trap"),
