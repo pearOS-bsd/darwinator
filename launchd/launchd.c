@@ -267,14 +267,14 @@ domain_of(u32 pid)
 }
 
 struct svc { int used, own, pre, claimed; char name[96]; u32 port; };		/* pre: made at the start (the MachServices of a plist without HideUntilCheckIn: look-ups work before the check-in) */
-static struct svc svcs[64];
+static struct svc svcs[256];
 
 static struct svc *
 svc_find(const char *n)
 {
 	int i;
 
-	for (i = 0; i < 64; i++)
+	for (i = 0; i < 256; i++)
 		if (svcs[i].used && same(n, svcs[i].name)) return (&svcs[i]);
 	return (0);
 }
@@ -284,7 +284,7 @@ svc_add(const char *n, u32 port, int own)
 {
 	int i, k;
 
-	for (i = 0; i < 64; i++)
+	for (i = 0; i < 256; i++)
 		if (!svcs[i].used) {
 			for (k = 0; k < 95 && n[k]; k++) svcs[i].name[k] = n[k];
 			svcs[i].name[k] = 0; svcs[i].used = 1; svcs[i].port = port; svcs[i].own = own;
