@@ -6,6 +6,7 @@
 #include <objc/runtime.h>
 #include <objc/message.h>
 #include <stdio.h>
+#include <unistd.h>
 
 extern const char *_Block_signature(void *);
 
@@ -98,6 +99,12 @@ int main(int argc, char **argv)
 			if (s->proto == nil) { logf_([NSString stringWithFormat:@"no protocol %s", svcs[i][1]]); continue; }
 			NSXPCListener *l = [[NSXPCListener alloc] initWithMachServiceName:s->name];
 			l.delegate = s;
+			if (getenv("LSD_FRAMEWORK") || access("/var/db/lsd-store/framework", F_OK) == 0) {		/* the service classes of LaunchServices.framework itself serve the calls (the framework holds the code that lsd runs) */
+				Class fc = NSClassFromString(i == 0 ? @"_LSDReadService" : @"_LSDModifyService");
+				id fs = fc ? [[fc alloc] init] : nil;
+				logf_([NSString stringWithFormat:@"framework service %@ for %@", fs, s->name]);
+				if (fs) { l.delegate = fs; [keep addObject:fs]; }
+			}
 			[l resume];
 			[keep addObject:s]; [keep addObject:l];
 		}
