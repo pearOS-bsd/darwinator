@@ -400,7 +400,7 @@ int cmain(void)
 		  const char *nm = ab + 4 + off; unsigned mode = *(unsigned *)(ab + 12 + 4 + 16); u64 fid = *(u64 *)(ab + 12 + 4 + 16 + 4); u64 dl = *(u64 *)(ab + 12 + 4 + 16 + 4 + 8);
 		  check("getattrlist (name, objtype, modtime, mode, fileid, datalength)", seq(nm, "a") && nl == 2 && type == 1 && (mode & 0777) == 0640 && fid != 0 && dl == 5 && total == 56, (i64)dl); }
 	  else check("getattrlist", 0, r);
-	  al.cmn = 0x80000000u; r = S(SYS_getattrlist, "/tmp/dsc/a", &al, ab, sizeof(ab), 0, 0);
+	  al.cmn = 0x00400000u; r = S(SYS_getattrlist, "/tmp/dsc/a", &al, ab, sizeof(ab), 0, 0);
 	  check("  an attribute that is not supported is EINVAL", r == -22, r);
 	  al.cmn = 1; r = S(SYS_getattrlist, "/tmp/dsc/none", &al, ab, sizeof(ab), 0, 0); check("  a missing file is ENOENT", r == -2, r); }
 
