@@ -101,7 +101,7 @@ def layer(r,depth):
     pod=r.raw(0x58)
     contents=obj(r)
     if contents is not None:		# after the contents: a flags byte (0x03 or 0x23), 1.0f and zero bytes; bit 0x20 adds 3 bytes (found by trying: 25 and 28 bytes in all)
-        cb = r.u8(); r.raw(24 - 1 + (3 if cb & 0x20 else 0))
+        cb = r.u8(); r.raw(24 + (3 if cb & 0x20 else 0))
     subs=arr(r,True,depth)
     v=r.u64()
     o=obj(r)
