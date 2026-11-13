@@ -13,7 +13,43 @@ extern long write(int fd, const void *buf, unsigned long n);
 
 static void out(const char *s) { unsigned long n = 0; while (s[n]) n++; write(2, s, n); }
 extern int open(const char *, int, ...);
+extern int socket(int, int, int);
+extern int connect(int, const void *, unsigned int);
+extern void *signal(int, void *);
 extern int close(int);
+/* the commits also go to wsd (the render server of the window server: src/sls_carender.c) on a stream socket: records u32 type, u32 length, payload (1: a commit message, 2: u32 message number, u32 descriptor and the out-of-line bytes) */
+static int cafd = -1;
+static void ca_connect(void)
+{
+	struct { unsigned char len, family; char path[104]; } sa;
+	const char *p = "/tmp/wsd-ca.sock";
+	unsigned k;
+
+	if (cafd >= 0) return;
+	for (k = 0; k < sizeof(sa); k++) ((char *)&sa)[k] = 0;
+	for (k = 0; p[k]; k++) sa.path[k] = p[k];
+	sa.len = sizeof(sa); sa.family = 1;
+	cafd = socket(1, 1, 0);			/* AF_UNIX, SOCK_STREAM */
+	if (cafd >= 0 && connect(cafd, &sa, sizeof(sa)) != 0) { close(cafd); cafd = -1; }
+}
+static void ca_send(u32 type, const void *a, u32 alen, const void *b, u32 blen)
+{
+	u32 h[2];
+	const char *parts[3]; u32 lens[3]; int i;
+
+	ca_connect();
+	if (cafd < 0) return;
+	h[0] = type; h[1] = alen + blen;
+	parts[0] = (const char *)h; lens[0] = 8; parts[1] = a; lens[1] = alen; parts[2] = b; lens[2] = blen;
+	for (i = 0; i < 3; i++) {
+		u32 done = 0;
+		while (done < lens[i]) {
+			long w = write(cafd, parts[i] + done, lens[i] - done);
+			if (w <= 0) { close(cafd); cafd = -1; return; }	/* wsd went away: the next commit connects again */
+			done += (u32)w;
+		}
+	}
+}
 static void hex(u64 v, int digits) { char b[20]; int i; for (i = 0; i < digits; i++) b[i] = "0123456789abcdef"[(v >> (4 * (digits - 1 - i))) & 15]; b[digits] = 0; out(b); }
 
 /*
@@ -44,6 +80,7 @@ main(void)
 	u32 port = 0, set = 0, p1 = 0, p2 = 0, i, n;
 	int kr = bootstrap_check_in(bootstrap_port, "com.apple.CARenderServer", &port);
 
+	signal(13, (void *)1);			/* SIGPIPE ignored: wsd may go away */
 	out("carender-stub: check-in "); hex((u32)kr, 8); out(" port "); hex(port, 8); out("\n");
 	mach_port_allocate(mach_task_self_, 3 /* PORT_SET */, &set);
 	mach_port_insert_member(mach_task_self_, port, set);
@@ -73,12 +110,14 @@ main(void)
 						nm[12] = '0' + (nmsg / 10) % 10; nm[13] = '0' + nmsg % 10; nm[15] = '0' + k;
 						of = open(nm, 0x601, 0644);
 						if (of >= 0) { write(of, (void *)ad, sz); close(of); }
+						{ u32 hd[2]; hd[0] = nmsg; hd[1] = k; ca_send(2, hd, 8, (void *)ad, sz); }
 						off += 16;
 					} else
 						off += 12;
 				}
 				nmsg++;
 			}
+			ca_send(1, buf, buf[1], 0, 0);
 		}
 		n = buf[1] / 4; if (n > 4000) n = 4000;
 		for (i = 6; i < n; i++) { hex(buf[i], 8); out(i % 8 == 5 ? "\n  " : " "); }
