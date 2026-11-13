@@ -245,6 +245,22 @@ darwin_getdirentries64(struct thread *td, struct darwin_args *uap)
 		return (EINVAL);
 	if (size > 65536)
 		size = 65536;
+	if (darwin_debug >= 1) {
+		struct file *dfp;
+		cap_rights_t drights;
+
+		if (getvnode(td, (int)uap->a[0], cap_rights_init_one(&drights, CAP_FSTAT), &dfp) == 0) {
+			char *fp2 = NULL, *free2 = NULL;
+			struct vnode *dvp = dfp->f_vnode;
+
+			vref(dvp);
+			if (vn_fullpath(dvp, &fp2, &free2) == 0 && fp2 != NULL)
+				printf("darwinator: %s[%d]: getdirentries64 %s\n", td->td_proc->p_comm, td->td_proc->p_pid, fp2);
+			vrele(dvp);
+			if (free2 != NULL) free(free2, M_TEMP);
+			fdrop(dfp, td);
+		}
+	}
 	kbuf = malloc(size, M_DARWIN, M_WAITOK);
 	dbuf = malloc(size, M_DARWIN, M_WAITOK | M_ZERO);
 	error = kern_getdirentries(td, (int)uap->a[0], kbuf, size, &base, &resid, UIO_SYSSPACE);

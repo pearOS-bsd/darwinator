@@ -968,7 +968,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	if (darwin_debug >= 1 && (uap->a[4] & 0x20))
 		printf("darwinator: %s[%d]: getattrlist %s extended: options %#lx common %#x vol %#x dir %#x file %#x fork %#x bufsize %lu\n", td->td_proc->p_comm, td->td_proc->p_pid, path, (u_long)uap->a[4], al.commonattr, al.volattr, al.dirattr, al.fileattr, al.forkattr, (u_long)uap->a[3]);
 	if (cmn & DA_CMN_RETURNED) {			/* the caller takes what there is: the attributes that are not known are left out and the set that came back says which they are */
-		cmn &= DA_CMN_SUPPORTED_EXT;
+		cmn &= DA_CMN_SUPPORTED_EXT & ~DA_CMN_ERROR;		/* ATTR_CMN_ERROR is returned only for an attribute that failed (not when all is well) */
 		al.volattr &= DA_VOL_SUPPORTED;
 		al.dirattr = S_ISDIR(sb.st_mode) ? (al.dirattr & DA_DIR_SUPPORTED) : 0;
 		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
@@ -1198,6 +1198,8 @@ darwin_getattrlistbulk(struct thread *td, struct darwin_args *uap)
 			free(freepath, M_TEMP);
 		fdrop(fp, td);
 	}
+	if (darwin_debug >= 1)
+		printf("darwinator: %s[%d]: getattrlistbulk %s\n", td->td_proc->p_comm, td->td_proc->p_pid, dirpath);
 	kbuf = malloc(kb, M_DARWIN, M_WAITOK);
 	if (kern_lseek(td, fd, 0, SEEK_CUR) == 0) cursor = td->td_uretoff.tdu_off; else cursor = 0;	/* where the unread entries begin */
 	while (!full) {
