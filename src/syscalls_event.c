@@ -930,9 +930,26 @@ static const struct { const char *on, *name, *dev; uint8_t uuid[16]; uint32_t fl
 
 static const uint32_t da_fsid[7] = { 0, 16777231, 16777225, 16777226, 16777229, 16777230, 16777228 };
 
+static int da_mntpoint(const char *path);	/* below da_vols */
+static int
+da_is_root(const char *path)		/* "/", "/..", "/./.." ...: the root */
+{
+	const char *q = path;
+
+	if (path[0] != '/') return (0);
+	while (*q != '\0') {
+		if (*q == '/') { q++; continue; }
+		if (q[0] == '.' && (q[1] == '/' || q[1] == '\0')) { q++; continue; }
+		if (q[0] == '.' && q[1] == '.' && (q[2] == '/' || q[2] == '\0')) { q += 2; continue; }
+		return (0);
+	}
+	return (1);
+}
+
 static int
 da_vol_of_path(const char *path)
 {
+	if (da_is_root(path)) return (1);
 	if (strncmp(path, "/System/Volumes/Preboot", 23) == 0) return (3);
 	if (strncmp(path, "/System/Volumes/VM", 18) == 0) return (4);
 	if (strncmp(path, "/System/Volumes/Update/mnt1", 27) == 0) return (6);
@@ -966,6 +983,17 @@ da_parent_ino(struct thread *td, const char *path)
 	return ((uint64_t)psb.st_ino);
 }
 
+static int
+da_mntpoint(const char *path)		/* the path is the root of a volume of the table */
+{
+	int i;
+
+	if (da_is_root(path)) return (1);
+	for (i = 2; i <= 6; i++)
+		if (strcmp(path, da_vols[i].on) == 0) return (1);
+	return (0);
+}
+
 static size_t attr_last_len;			/* the length of what the last attr_fill produced (for getattrlistbulk) */
 
 static int
@@ -977,7 +1005,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	const char *name;
 	size_t bufsize = (size_t)uap->a[3], len, namelen, copy;
 	uint32_t cmn, file, objtype;
-	int error;
+	int error, fndreq;
 
 	error = copyin((void *)uap->a[1], &al, sizeof(al));
 	if (error != 0)
@@ -995,6 +1023,8 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
 		al.forkattr = (uap->a[4] & 0x20) ? (al.forkattr & DA_CMNEXT_SUPPORTED) : 0;		/* FSOPT_ATTR_CMN_EXTENDED */
 	}
+	fndreq = (cmn & DA_CMN_RETURNED) && (cmn & DA_CMN_FNDRINFO);	/* (APFS gives no Finder info here: the Mac leaves it out of the set that comes back, but the 32 bytes are there, zero) */
+	if (fndreq) cmn &= ~DA_CMN_FNDRINFO;
 	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || ((al.dirattr & ~DA_DIR_SUPPORTED) || (al.dirattr && !S_ISDIR(sb.st_mode) && !(cmn & DA_CMN_RETURNED))) || (al.forkattr & ~((uap->a[4] & 0x20) ? DA_CMNEXT_SUPPORTED : 0u)) || (file & ~DA_FILE_SUPPORTED)) {
 		if (darwin_debug >= 1)
 			printf("darwinator: %s[%d]: getattrlist %s: attributes not supported: common %#x (of which %#x), volume %#x, dir %#x, file %#x, fork %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, path, cmn, cmn & ~DA_CMN_SUPPORTED, al.volattr, al.dirattr, file, al.forkattr);
@@ -1006,6 +1036,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		return (EINVAL);			/* file attributes of a directory */
 	name = strrchr(path, '/');
 	name = (name != NULL && name[1] != '\0') ? name + 1 : path;
+	if (da_is_root(path)) name = "Untitled";	/* the root (also "/.."): the name of the volume, as on a Mac */
 	namelen = strlen(name) + 1;
 	out = malloc(4 + 512 + MAXPATHLEN + roundup2(namelen, 4) + 8, M_DARWIN, M_WAITOK | M_ZERO);
 	p = out + 4;				/* the length comes first */
@@ -1045,7 +1076,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_MODTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_CHGTIME)	PUTTS(sb.st_ctim);
 		if (cmn & DA_CMN_ACCTIME)	PUTTS(sb.st_atim);
-		if (cmn & DA_CMN_FNDRINFO)	{ memset(p, 0, 32); p += 32; }		/* the Finder info: 32 bytes, nothing set */
+		if ((cmn & DA_CMN_FNDRINFO) || fndreq)	{ memset(p, 0, 32); p += 32; }		/* the Finder info: 32 bytes, nothing set */
 		if (cmn & DA_CMN_OWNERID)	PUT32(sb.st_uid);
 		if (cmn & DA_CMN_GRPID)		PUT32(sb.st_gid);
 		if (cmn & DA_CMN_ACCESSMASK)	PUT32(sb.st_mode);
@@ -1093,9 +1124,9 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			}
 			vmpref = mpref; vnmref = nmref; vmdref = mdref; vidx = vi;
 		}
-		if (al.dirattr & 1)		PUT32(sb.st_nlink);
+		if (al.dirattr & 1)		PUT32(da_mntpoint(path) ? 1 : sb.st_nlink);
 		if (al.dirattr & 2)		PUT32(sb.st_nlink > 2 ? sb.st_nlink - 2 : 0);
-		if (al.dirattr & 4)		PUT32(0);
+		if (al.dirattr & 4)		PUT32(da_mntpoint(path) ? 1 : 0);		/* DIR_MNTSTATUS_MNTPOINT: the root of a volume (the Finder stops climbing there) */
 		if (file & DA_FILE_LINKCOUNT)	PUT32(sb.st_nlink);
 		if (file & DA_FILE_TOTALSIZE)	PUT64(sb.st_size);
 		if (file & DA_FILE_ALLOCSIZE)	PUT64(sb.st_blocks * 512);

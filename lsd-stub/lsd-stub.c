@@ -15,6 +15,7 @@ extern unsigned long xpc_dictionary_get_uint64(xpc_object_t d, const char *k);
 extern void xpc_dictionary_set_uint64(xpc_object_t d, const char *k, unsigned long v);
 extern void xpc_dictionary_set_int64(xpc_object_t d, const char *k, long v);
 extern void xpc_dictionary_set_bool(xpc_object_t d, const char *k, int v);
+extern void xpc_dictionary_set_data(xpc_object_t d, const char *k, const void *v, unsigned long n);
 extern void xpc_dictionary_set_value(xpc_object_t d, const char *k, xpc_object_t v);
 extern xpc_object_t xpc_dictionary_create(const char *const *keys, const xpc_object_t *values, unsigned long count);
 extern xpc_object_t xpc_shmem_create(void *region, unsigned long length);
@@ -97,6 +98,17 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 	}	/* the answers of an NSXPC message (no "replysig" reply) crash libxpc of the Mac: not answering is the only thing that works here */
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
 		long cmd = xpc_dictionary_get_int64(m, "command");
+
+		if (streq(svc, "com.apple.pluginkit.pkd") && xpc_dictionary_get_string(m, "request") != 0) {
+			/* PlugInKit: {"matches": {key: data}}; the data is a bplist15 of an empty list of plug-ins (the answer of the pkd of the Mac to a match with no result, found with a program) */
+			static const unsigned char bp[23] = { 'b','p','l','i','s','t','1','5', 0x13, 0x17, 0,0,0,0,0,0, 0x80, 0x12, 0,0,0,0, 0xa0 };
+			xpc_object_t mt = xpc_dictionary_create(0, 0, 0);
+
+			xpc_dictionary_set_data(mt, "ECF19A18-7AA6-4141-B4DC-A2E5123B2B5C", bp, sizeof(bp));
+			xpc_dictionary_set_value(r, "matches", mt);
+			xpc_connection_send_message(peer, r);
+			return;
+		}
 
 		if (streq(svc, "com.apple.runningboard") && xpc_dictionary_get_string(m, "rbs_selector") != 0) {
 			/* RunningBoard: the answer to the handshake (the shape found by asking the runningboardd of the Mac with a program): the response with the handle of the calling process.  Anything else: no answer, and the connection ends (the client is told) */
