@@ -345,7 +345,13 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 				uint64_t ea = w->req[k].eaddr, em = w->req[k].emask, ev = w->req[k].evalue;
 
 				mtx_unlock(&wq_mtx);
-				if (copyin((void *)(uintptr_t)ea, &qs, 8) == 0 && (qs & em) != (ev & em)) {
+				if (copyin((void *)(uintptr_t)ea, &qs, 8) == 0 && (qs & 0xfffffffcULL) != 0 && (qs & 1) != 0) {
+					/* the queue is owned by a thread that does a dispatch_sync on it (the owner is in the lock bits of dq_state: NOTE_WL_DISCOVER_OWNER makes XNU read it): as XNU does, the request is not served while somebody owns the workloop;
+					 * it stays, and the thread that looks again (the pool polls) takes it when the owner has gone (libdispatch aborts when it gets the queue locked by another thread and not enqueued any more) */
+					mtx_lock(&wq_mtx);
+					continue;
+				}
+				if (qs != 0 && (qs & em) != (ev & em)) {
 					if (darwin_debug >= 2)
 						printf("darwinator: %s[%d]: the request of the workloop %#lx is stale (state %#lx mask %#lx want %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)w->req[k].id, (u_long)qs, (u_long)em, (u_long)ev);
 					mtx_lock(&wq_mtx);
