@@ -78,8 +78,17 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 
 		/* a service whose clients wait for the answer (the fonts): an empty NSXPC answer (the client reports an error and goes on) */
 		if (nsxpc && (nr = xpc_dictionary_create_reply(m)) != 0) {
+			/* the reply of NSXPC: only "root", the archive of the arguments of the reply block (found with a real NSXPC service: this is (nil, nil)) */
+			static const unsigned char nilnil[36] = { 0x62,0x70,0x6c,0x69,0x73,0x74,0x31,0x37, 0xa0,0x23,0,0,0,0,0,0, 0,0xe0,0x76,0x76,0x40,0x3f,0x40,0x40, 0,0xa0,0x23,0,0,0,0,0, 0,0,0xe0,0xe0 };
+
+			static const unsigned char boolno[35] = { 0x62,0x70,0x6c,0x69,0x73,0x74,0x31,0x37, 0xa0,0x22,0,0,0,0,0,0, 0,0xe0,0x75,0x76,0x40,0x3f,0x63,0, 0xa0,0x22,0,0,0,0,0,0, 0,0x11,0 };	/* a reply block with one BOOL: NO */
+			const char *sig = xpc_dictionary_get_string(m, "replysig");
+
+			if (sig != 0 && streq(sig, "v12@?0c8"))
+				xpc_dictionary_set_value(nr, "root", xpc_data_create(boolno, sizeof(boolno)));
+			else
+				xpc_dictionary_set_value(nr, "root", xpc_data_create(nilnil, sizeof(nilnil)));
 			xpc_dictionary_set_uint64(nr, "sequence", xpc_dictionary_get_uint64(m, "sequence"));
-			xpc_dictionary_set_uint64(nr, "f", 0);
 			xpc_connection_send_message(peer, nr);
 			{ out("lsd-stub: empty NSXPC answer sent for "); out(svc); out("\n"); }
 		} else
