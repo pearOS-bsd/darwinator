@@ -466,10 +466,10 @@ main(int argc, char **argv, char **envp)
 		static const char *dflt[] = { "/usr/sbin/notifyd", 0 };
 		const char **progs = dflt;
 		int i, n = argc > 1 ? argc - 1 : 1;
-		static const char *given[16];
+		static const char *given[40];
 
 		if (argc > 1) {
-			for (i = 0; i < argc - 1 && i < 15; i++) given[i] = argv[i + 1];
+			for (i = 0; i < argc - 1 && i < 39; i++) given[i] = argv[i + 1];
 			given[i] = 0; progs = given;
 		}
 		for (i = 0; i < n && progs[i]; i++) {
