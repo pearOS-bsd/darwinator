@@ -254,7 +254,7 @@ main(int argc, char **argv)
 	for (i = 1; i < (argc > 1 ? argc : 2); i++) {
 		xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[i] : "com.apple.coreservices.launchservicesd", q, 1);
 		const char *nm = argc > 1 ? argv[i] : "";
-		int nsx = streq(nm, "com.apple.fonts") || streq(nm, "com.apple.carboncore.csnameddata") || streq(nm, "com.apple.lsd.mapdb") || streq(nm, "com.apple.analyticsd") || streq(nm, "com.apple.bird") || streq(nm, "com.apple.bird.token") || streq(nm, "com.apple.metadata.mds") || streq(nm, "com.apple.quicklook.ThumbnailsAgent") || streq(nm, "com.apple.quicklook.QuickLookUIService");	/* the services whose clients wait for an NSXPC answer */
+		int nsx = streq(nm, "com.apple.fonts") || streq(nm, "com.apple.carboncore.csnameddata") || streq(nm, "com.apple.lsd.mapdb") || streq(nm, "com.apple.analyticsd") || streq(nm, "com.apple.bird") || streq(nm, "com.apple.bird.token") || streq(nm, "com.apple.metadata.mds") || streq(nm, "com.apple.quicklook.ThumbnailsAgent") || streq(nm, "com.apple.quicklook.QuickLookUIService") || streq(nm, "com.apple.widget-observation");	/* the services whose clients wait for an NSXPC answer */
 
 		xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
 			out("lsd-stub: a connection\n");
