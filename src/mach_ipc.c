@@ -2906,6 +2906,53 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			}
 		}
 		break;
+	case 4813:				/* mach_vm_remap(target, *address, size, mask, flags, src_task, src_address, copy, inheritance) -> address, cur, max: here always a copy of the pages (libobjc's trampolines: a page of code seen at other addresses) */
+	case 3813:				/* vm_remap: the same */
+		{
+			struct proc *tp = dest->kind == KP_TASK && dest->kp != NULL ? dest->kp : td->td_proc;
+			struct kport *sp = m->ncarry == 1 ? m->carry[0].port : NULL;
+			uint64_t addr = m->size >= 56 ? rd64(d, 48) : 0, size = m->size >= 64 ? rd64(d, 56) : 0, srcaddr = m->size >= 84 ? rd64(d, 76) : 0;
+			uint32_t flags = m->size >= 76 ? rd32(d, 72) : 0;
+			uint8_t *kb;
+			int error, prot = 0, maxprot = 0;
+			struct vm_map *map;
+			vm_map_entry_t ent;
+
+			if (m->size < 92 || sp == NULL || sp->kind != KP_TASK || (sp->kp != NULL && sp->kp != td->td_proc) || tp != td->td_proc || size == 0 || size > (4U << 20)) {
+				mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
+				break;
+			}
+			size = round_page(size);
+			map = &tp->p_vmspace->vm_map;
+			vm_map_lock_read(map);
+			if (vm_map_lookup_entry(map, trunc_page(srcaddr), &ent)) { prot = ent->protection & VM_PROT_ALL; maxprot = ent->max_protection & VM_PROT_ALL; }
+			vm_map_unlock_read(map);
+			if (prot == 0) { mig_reply(t, m, id, KERN_INVALID_ADDRESS, NULL, NULL, 0, NULL, 0); break; }
+			kb = malloc(size, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			sx_xunlock(&km_sx);
+			error = copyin((void *)(uintptr_t)trunc_page(srcaddr), kb, size);
+			if (error == 0 && (flags & 1) != 0)
+				error = user_alloc(td, size, &addr);
+			if (error == 0)
+				error = copyout(kb, (void *)(uintptr_t)addr, size);
+			if (error == 0 && (prot & VM_PROT_WRITE) == 0) {
+				struct mprotect_args ma = { .addr = (void *)(uintptr_t)addr, .len = size, .prot = prot & 7 };
+
+				error = sys_mprotect(td, &ma);
+			}
+			sx_xlock(&km_sx);
+			free(kb, M_DARWIN_IPC);
+			if (darwin_debug >= 1)
+				printf("darwinator: %s[%d]: vm_remap of %#lx (%#lx bytes, prot %d) to %#lx flags %#x: error %d\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)srcaddr, (u_long)size, prot, (u_long)addr, flags, error);
+			if (error != 0) { mig_reply(t, m, id, KERN_INVALID_ADDRESS, NULL, NULL, 0, NULL, 0); break; }
+			{
+				uint8_t out[16];
+
+				memcpy(out, &addr, 8); wr32(out, 8, (uint32_t)prot); wr32(out, 12, (uint32_t)maxprot);
+				mig_reply_data(m, id, 0, out, 16);
+			}
+		}
+		break;
 	case 3409:				/* task_get_special_port(task, which): the reply carries a send right */
 		which = m->size >= 36 ? rd32(d, 32) : 99;
 		if (which == 4 && boot_global != NULL && !boot_global->dead && (t->special[4] == NULL || t->special[4]->kind == KP_BOOTSTRAP || t->special[4]->dead)) {
