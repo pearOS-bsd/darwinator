@@ -1,3 +1,4 @@
+import re
 import struct,sys
 d=open('ca.bin','rb').read()
 msgs=[];p=0
@@ -99,6 +100,7 @@ def layer(r,depth):
     fl=r.u32()
     pod=r.raw(0x58)
     contents=obj(r)
+    if contents is not None: r.raw(28)		# found in captures: 1, 0x23, 1.0f and 20 zero bytes follow the contents of a layer (not decoded yet)
     subs=arr(r,True,depth)
     v=r.u64()
     o=obj(r)
@@ -128,12 +130,18 @@ def parse(m,verbose=True):
         for _ in range(struct.unpack_from('<I',m,0x18)[0]):
             st+=16 if m[st+11]==1 else 12		# an out-of-line descriptor has 16 bytes, a port 12
     r=R(m[st:]); flags=r.u32(); ctx=r.u32(); ts=r.f64()
-    out=[]
+    out=[]; last2=-1
     while r.left()>0:
         op=r.u8()
         if op==0: out.append(('end',)); break
         elif op==1: out.append(('delete',r.u64(),r.u32()))
-        elif op==2: out.append(('set_object',r.u64(),r.u32(),obj(r),r.u32()))
+        elif op==2:
+            last2=r.p-1
+            try: out.append(('set_object',r.u64(),r.u32(),obj(r),r.u32()))
+            except Exception:
+                mm=re.compile(rb'\x02.{4}\x29\x03\x05\x28.{4}\x1e',re.S).search(r.b,last2+1)
+                if not mm: raise
+                r.p=mm.start()
         elif op==3: out.append(('update_layer',r.u64()))
         elif op==7: out.append(('layer_id',r.u64()))
         elif op==9:
@@ -147,6 +155,9 @@ def parse(m,verbose=True):
         elif op==0x25: out.append(('port',))
         elif op==0x1f: out.append(('op1f',r.u8()))
         else:
+            # a layer with contents (an Image) has more bytes than decoded here: go on at the next record (02 + id + slot + 1e)
+            mm=re.compile(rb'\x02.{4}\x29\x03\x05\x28.{4}\x1e',re.S).search(r.b,last2+1) if last2>=0 else None
+            if mm: r.p=mm.start(); continue
             out.append(('UNKNOWN op',op,r.b[r.p-1:r.p+40].hex())); break
     return out,r.left()
 def _dbg2():
