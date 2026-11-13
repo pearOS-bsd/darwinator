@@ -959,7 +959,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	cmn = al.commonattr;
 	file = al.fileattr;
 	if (darwin_debug >= 1 && (uap->a[4] & 0x20))
-		printf("darwinator: %s[%d]: getattrlist extended: options %#lx common %#x vol %#x dir %#x file %#x fork %#x bufsize %lu\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)uap->a[4], al.commonattr, al.volattr, al.dirattr, al.fileattr, al.forkattr, (u_long)uap->a[3]);
+		printf("darwinator: %s[%d]: getattrlist %s extended: options %#lx common %#x vol %#x dir %#x file %#x fork %#x bufsize %lu\n", td->td_proc->p_comm, td->td_proc->p_pid, path, (u_long)uap->a[4], al.commonattr, al.volattr, al.dirattr, al.fileattr, al.forkattr, (u_long)uap->a[3]);
 	if (cmn & DA_CMN_RETURNED) {			/* the caller takes what there is: the attributes that are not known are left out and the set that came back says which they are */
 		cmn &= DA_CMN_SUPPORTED_EXT;
 		al.volattr &= DA_VOL_SUPPORTED;
