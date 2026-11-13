@@ -864,12 +864,13 @@ struct darwin_attrlist {
 #define	DA_CMN_MODTIME		0x00000400
 #define	DA_CMN_CHGTIME		0x00000800
 #define	DA_CMN_ACCTIME		0x00001000
+#define	DA_CMN_FNDRINFO		0x00004000
 #define	DA_CMN_OWNERID		0x00008000
 #define	DA_CMN_GRPID		0x00010000
 #define	DA_CMN_ACCESSMASK	0x00020000
 #define	DA_CMN_FLAGS		0x00040000
 #define	DA_CMN_FILEID		0x02000000
-#define	DA_CMN_SUPPORTED	(DA_CMN_NAME | DA_CMN_DEVID | DA_CMN_FSID | DA_CMN_OBJTYPE | DA_CMN_OBJTAG | DA_CMN_OBJID | DA_CMN_PAROBJID | DA_CMN_SCRIPT | \
+#define	DA_CMN_SUPPORTED	(DA_CMN_NAME | DA_CMN_DEVID | DA_CMN_FSID | DA_CMN_OBJTYPE | DA_CMN_OBJTAG | DA_CMN_OBJID | DA_CMN_PAROBJID | DA_CMN_SCRIPT | DA_CMN_FNDRINFO | DA_CMN_PARENTID | \
 	DA_CMN_CRTIME | DA_CMN_MODTIME | DA_CMN_CHGTIME | DA_CMN_ACCTIME | DA_CMN_OWNERID | DA_CMN_GRPID | \
 	DA_CMN_ACCESSMASK | DA_CMN_FLAGS | DA_CMN_FILEID)
 #define	DA_CMN_GENCOUNT		0x00080000
@@ -947,6 +948,24 @@ da_on_system_volume(const char *path)
 }
 
 SYSCTL_INT(_kern_darwinator, OID_AUTO, wl_stale_check, CTLFLAG_RW, &darwin_wl_stale_check, 0, "drop the thread requests of workloops whose state changed (as XNU: ESTALE); 0: off");
+/* the inode of the parent directory of a path (2 for the root, as on a Mac) */
+static uint64_t
+da_parent_ino(struct thread *td, const char *path)
+{
+	char pp[MAXPATHLEN];
+	struct stat psb;
+	char *sl;
+
+	if (path[0] != '/' || strcmp(path, "/") == 0)
+		return (2);			/* a Mac says 2 (its own id) for the parent of the root */
+	strlcpy(pp, path, sizeof(pp));
+	sl = strrchr(pp, '/');
+	if (sl == pp) pp[1] = 0; else if (sl != NULL) *sl = 0;
+	if (kern_statat(td, 0, AT_FDCWD, pp, UIO_SYSSPACE, &psb) != 0)
+		return (2);
+	return ((uint64_t)psb.st_ino);
+}
+
 static size_t attr_last_len;			/* the length of what the last attr_fill produced (for getattrlistbulk) */
 
 static int
@@ -1020,12 +1039,13 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
 		if (cmn & DA_CMN_OBJTAG)	PUT32(0);
 		if (cmn & DA_CMN_OBJID)		{ PUT32(sb.st_ino); PUT32(sb.st_gen); }
-		if (cmn & DA_CMN_PAROBJID)	{ PUT32(2); PUT32(0); }		/* the parent: as PARENTID, not looked up */
+		if (cmn & DA_CMN_PAROBJID)	{ PUT32((uint32_t)da_parent_ino(td, path)); PUT32(0); }		/* the parent: as PARENTID, not looked up */
 		if (cmn & DA_CMN_SCRIPT)	PUT32(0);			/* the text encoding: MacRoman */
 		if (cmn & DA_CMN_CRTIME)	PUTTS(sb.st_mtim);		/* the files of a Mac's system were made as they are: the creation time is the modification time (a copy keeps the second, not the birth) */
 		if (cmn & DA_CMN_MODTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_CHGTIME)	PUTTS(sb.st_ctim);
 		if (cmn & DA_CMN_ACCTIME)	PUTTS(sb.st_atim);
+		if (cmn & DA_CMN_FNDRINFO)	{ memset(p, 0, 32); p += 32; }		/* the Finder info: 32 bytes, nothing set */
 		if (cmn & DA_CMN_OWNERID)	PUT32(sb.st_uid);
 		if (cmn & DA_CMN_GRPID)		PUT32(sb.st_gid);
 		if (cmn & DA_CMN_ACCESSMASK)	PUT32(sb.st_mode);
@@ -1034,7 +1054,7 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_DOCID)		PUT32(0);
 		if (cmn & DA_CMN_USERACCESS)	PUT32(7);
 		if (cmn & DA_CMN_FILEID)	PUT64(sb.st_ino);
-		if (cmn & DA_CMN_PARENTID)	PUT64(2);
+		if (cmn & DA_CMN_PARENTID)	PUT64(da_parent_ino(td, path));
 		if (cmn & DA_CMN_FULLPATH)	{ pathref = p; p += 8; }
 		if (cmn & DA_CMN_ADDEDTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_ERROR)		PUT32(0);
