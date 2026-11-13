@@ -5,5 +5,5 @@ install-name:    '/usr/lib/libSystem.B.dylib'
 current-version: 1351
 exports:
   - targets:         [ x86_64-macos ]
-    symbols:         [ _write, dyld_stub_binder, _bootstrap_port, _bootstrap_check_in, _mach_msg, ]
+    symbols:         [ _write, _open, _close, dyld_stub_binder, _bootstrap_port, _bootstrap_check_in, _mach_msg, _mach_task_self_, _mach_port_allocate, _mach_port_insert_right, _mach_port_insert_member ]
 ...

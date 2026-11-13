@@ -107,6 +107,20 @@ main(void)
 			kr = mach_msg(ack, 1, 24, 0, 0, 0, 0);
 			out("carender-stub: commit acknowledged "); hex((u32)kr, 8); out("\n");
 		}
+		if (buf[5] == 0x9d10 && buf[2] != 0) {			/* CASCreateFencePort: the answer carries a send right to a new port (a fence: nothing waits on it here) */
+			u32 fp = 0, fm[16];
+
+			mach_port_allocate(mach_task_self_, 1, &fp);
+			mach_port_insert_right(mach_task_self_, fp, fp, 20);
+			mach_port_insert_member(mach_task_self_, fp, set);
+			for (i = 0; i < 16; i++) fm[i] = 0;
+			fm[0] = 0x80000012; fm[1] = 0x34; fm[2] = buf[2]; fm[5] = 0x9d10 + 100;
+			fm[6] = 1; fm[7] = fp; fm[8] = 0; fm[9] = 0x00130000;
+			fm[10] = 0; fm[11] = 1;						/* NDR */
+			fm[12] = 0;							/* the return code */
+			mach_msg(fm, 1, 0x34, 0, 0, 0, 0);
+			out("carender-stub: fence port made\n");
+		}
 		if (buf[5] == 0x9d0a) { answer_register(buf, p1, p2, 1, 1, 0); out("carender-stub: answered the register\n"); }
 	}
 }

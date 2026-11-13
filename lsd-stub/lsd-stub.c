@@ -81,7 +81,9 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 			xpc_dictionary_set_uint64(nr, "sequence", xpc_dictionary_get_uint64(m, "sequence"));
 			xpc_dictionary_set_uint64(nr, "f", 0);
 			xpc_connection_send_message(peer, nr);
-		}
+			{ out("lsd-stub: empty NSXPC answer sent for "); out(svc); out("\n"); }
+		} else
+			{ out("lsd-stub: NO answer to an NSXPC message of "); out(svc); out(" (not in the NSXPC list)\n"); }
 		return;
 	}	/* the answers of an NSXPC message (no "replysig" reply) crash libxpc of the Mac: not answering is the only thing that works here */
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
@@ -231,7 +233,7 @@ main(int argc, char **argv)
 	for (i = 1; i < (argc > 1 ? argc : 2); i++) {
 		xpc_object_t svc = xpc_connection_create_mach_service(argc > 1 ? argv[i] : "com.apple.coreservices.launchservicesd", q, 1);
 		const char *nm = argc > 1 ? argv[i] : "";
-		int nsx = streq(nm, "com.apple.fonts") || streq(nm, "com.apple.carboncore.csnameddata") || streq(nm, "com.apple.lsd.mapdb") || streq(nm, "com.apple.analyticsd") || streq(nm, "com.apple.bird") || streq(nm, "com.apple.bird.token") || streq(nm, "com.apple.metadata.mds") || streq(nm, "com.apple.SystemConfiguration.configd");	/* the services whose clients wait for an NSXPC answer */
+		int nsx = streq(nm, "com.apple.fonts") || streq(nm, "com.apple.carboncore.csnameddata") || streq(nm, "com.apple.lsd.mapdb") || streq(nm, "com.apple.analyticsd") || streq(nm, "com.apple.bird") || streq(nm, "com.apple.bird.token") || streq(nm, "com.apple.metadata.mds") || streq(nm, "com.apple.quicklook.ThumbnailsAgent") || streq(nm, "com.apple.quicklook.QuickLookUIService");	/* the services whose clients wait for an NSXPC answer */
 
 		xpc_connection_set_event_handler(svc, ^(xpc_object_t peer) {
 			out("lsd-stub: a connection\n");
