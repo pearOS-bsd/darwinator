@@ -141,6 +141,8 @@ get_reply(int fd, u32 pid, u32 reply_remote)
 				u32 entry = 0;
 				void *mem = mmap(0, 0x1000, 3, 0x1002 /* MAP_ANON | MAP_PRIVATE */, -1, 0);
 
+				if ((long)mem != -1) *(volatile char *)mem = 0;		/* the pages of an untouched anonymous mapping have no object yet: the memory entry needs one */
+
 				if ((long)mem != -1 && mach_make_memory_entry_64(mach_task_self_, &sz, (u64)(unsigned long)mem, 3, &entry, 0) == 0) {
 					*(u32 *)d = entry; d[10] = 17;
 					out("wsbridge:   second port of the connection: a memory entry "); outx(entry); out("\n");

@@ -2729,6 +2729,8 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			int rv;
 
 			if (m->size < 100 || op == NULL || op->kind != KP_MEMENT || op->mobj == NULL || size == 0 || offset + size > op->msize || tp->p_vmspace == NULL) {
+				if (darwin_debug >= 1)
+					printf("darwinator: %s[%d]: vm_map of an entry refused: msg size %u, port %p kind %d, size %#lx offset %#lx, entry size %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, m->size, op, op ? op->kind : -1, (u_long)size, (u_long)offset, op ? (u_long)op->msize : 0);
 				mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
 				break;
 			}
