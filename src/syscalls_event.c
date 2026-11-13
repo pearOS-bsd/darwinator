@@ -402,6 +402,11 @@ darwin_kev_copyout(void *argp, struct kevent *kevp, int count)
 					d.flags = a->chg[q].flags | EV_ERROR;
 					break;
 				}
+			if (kevp[i].data == ENOENT && (d.flags & EV_DELETE) != 0) {	/* a delete of a note that is gone already (a port that died takes its notes with it): libdispatch aborts ("Unregistration failed") on the error, the Mac says nothing */
+				if (a->errors_only)
+					continue;
+				d.data = 0;
+			}
 		}
 		if (kevp[i].filter == EVFILT_EMPTY)		/* EVFILT_MACHPORT: the notes are made with EV_UDATA_SPECIFIC by libdispatch (the flag has no counterpart here, so it is not kept): an event comes back with it, else libdispatch takes a one-shot note as one without it and deletes it again (ENOENT crashed it) */
 			d.flags |= 0x0100;
