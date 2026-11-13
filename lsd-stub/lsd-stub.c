@@ -99,6 +99,17 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
 		long cmd = xpc_dictionary_get_int64(m, "command");
 
+		if (streq(svc, "com.apple.pasteboard.1") && xpc_dictionary_get_string(m, "com.apple.pboard.message") != 0) {
+			/* the pasteboard server: the answer of the one of the Mac to "create" (found with a program): the change count, the generation, whether we own it, a uuid */
+			static const unsigned char u[16] = { 0x4c, 0xfb, 0x29, 0x07, 0x91, 0x27, 0x41, 0xd7, 0x85, 0x41, 0x3f, 0x3a, 0x41, 0x7b, 0x0b, 0x19 };
+
+			xpc_dictionary_set_uint64(r, "com.apple.pboard.change", 1);
+			xpc_dictionary_set_uint64(r, "com.apple.pboard.generation", 1);
+			xpc_dictionary_set_bool(r, "com.apple.pboard.isOwner", 0);
+			xpc_dictionary_set_value(r, "com.apple.pboard.uuid", xpc_uuid_create(u));
+			xpc_connection_send_message(peer, r);
+			return;
+		}
 		if (streq(svc, "com.apple.pluginkit.pkd") && xpc_dictionary_get_string(m, "request") != 0) {
 			/* PlugInKit: {"matches": {key: data}}; the data is a bplist15 of an empty list of plug-ins (the answer of the pkd of the Mac to a match with no result, found with a program) */
 			static const unsigned char bp[23] = { 'b','p','l','i','s','t','1','5', 0x13, 0x17, 0,0,0,0,0,0, 0x80, 0x12, 0,0,0,0, 0xa0 };
