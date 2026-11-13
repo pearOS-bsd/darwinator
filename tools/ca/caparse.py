@@ -123,7 +123,10 @@ def layer(r,depth):
     return dict(t='layer',fl=fl,pod=pod,contents=contents,subs=subs,v=v,o=o,ext=ext,e=e)
 def parse(m,verbose=True):
     st=0x1c
-    if struct.unpack_from('<I',m,0)[0]&0x80000000: st=0x1c+12*struct.unpack_from('<I',m,0x18)[0]
+    if struct.unpack_from('<I',m,0)[0]&0x80000000:
+        st=0x1c
+        for _ in range(struct.unpack_from('<I',m,0x18)[0]):
+            st+=16 if m[st+11]==1 else 12		# an out-of-line descriptor has 16 bytes, a port 12
     r=R(m[st:]); flags=r.u32(); ctx=r.u32(); ts=r.f64()
     out=[]
     while r.left()>0:
