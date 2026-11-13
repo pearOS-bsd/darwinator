@@ -249,8 +249,18 @@ darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
 			if (i < 0) { i = free_i; sw_tab[i].used = true; sw_tab[i].tid = tid; }
 			sw_tab[i].state = 0;
 			while (sw_tab[i].state == 0 && sw_tab[i].used) {
-				if (msleep(sw_tab, &sw_mtx, PCATCH, "wlsync", hz / 4) == EINTR)
-					break;
+				int e = msleep(sw_tab, &sw_mtx, PCATCH, "wlsync", hz / 4);
+
+				if (e == EINTR || e == ERESTART) {
+					/* a signal (or a stop of the process for a debugger) is not a wake: kevent_id would return as if the owner had passed the queue on, and libdispatch would run on with a queue that
+					 * somebody else owns (its wake of this waiter later found a context that was gone: "Invalid wlh").  Only the end of the process leaves the wait. */
+					struct proc *p = curthread->td_proc;
+
+					if (darwin_debug >= 1)
+						printf("darwinator: %s[%d]: workloop wait interrupted (%d)\n", p->p_comm, p->p_pid, e);
+					if ((p->p_flag & (P_WEXIT | P_SINGLE_EXIT)) != 0 || SIGISMEMBER(p->p_siglist, SIGKILL) || SIGISMEMBER(curthread->td_siglist, SIGKILL))
+						break;
+				}
 			}
 			if (sw_tab[i].state == 1) sw_tab[i].state = 3;			/* woken: the knote of the owner stays */
 			else sw_tab[i].used = false;					/* cancelled or interrupted */
