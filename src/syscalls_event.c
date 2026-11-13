@@ -15,6 +15,11 @@
 #include <sys/event.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
+#include <sys/sysctl.h>
+#include <sys/filedesc.h>
+#include <sys/capsicum.h>
+#include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -44,9 +49,23 @@ darwin_to_dev(int32_t d)
 	return (makedev((d >> 24) & 0xff, d & 0xffffff));
 }
 
+/* the device of the root file system is what a Mac says for its data volume (16777225 = 0x1000009), the number that the fsid of the statfs of that volume has: CarbonCore finds the volume of a file by it */
 int32_t
 darwin_from_dev(dev_t d)
 {
+	static dev_t root_dev = NODEV;
+	static bool root_known;
+
+	if (!root_known) {
+		struct stat sb;
+
+		if (kern_statat(curthread, 0, AT_FDCWD, "/", UIO_SYSSPACE, &sb) == 0) {
+			root_dev = sb.st_dev;
+			root_known = true;
+		}
+	}
+	if (root_known && d == root_dev)
+		return (16777225);
 	return ((int32_t)((major(d) & 0xff) << 24 | (minor(d) & 0xffffff)));
 }
 
@@ -58,6 +77,10 @@ darwin_mknod(struct thread *td, struct darwin_args *uap)
 }
 
 /* ---- getfsstat64(buf, bufsize, flags): the count, or the structures that fit ---- */
+
+SYSCTL_DECL(_kern_darwinator);
+int darwin_two_volumes = 1;
+SYSCTL_INT(_kern_darwinator, OID_AUTO, two_volumes, CTLFLAG_RW, &darwin_two_volumes, 0, "getfsstat shows the root as a system and a data volume");
 
 static int
 darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
@@ -72,10 +95,10 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 	if (ubuf == NULL) {
 		error = kern_getfsstat(td, &sb, 0, &count, UIO_SYSSPACE, mode == 1 ? MNT_WAIT : MNT_NOWAIT);
 		if (error == 0)
-			td->td_retval[0] = count + 1;		/* the root is two volumes */
+			td->td_retval[0] = count + (darwin_two_volumes ? 2 : 0);		/* the root is two volumes */
 		return (error);
 	}
-	error = kern_getfsstat(td, &sb, (maxn > 1 ? maxn - 1 : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
+	error = kern_getfsstat(td, &sb, (maxn > 2 && darwin_two_volumes ? maxn - 2 : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
 	    mode == 1 ? MNT_WAIT : MNT_NOWAIT);
 	if (error == 0) {
 		size_t j = 0;
@@ -86,8 +109,10 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 			if (j >= maxn)
 				break;
 			error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), two ? 1 : 0);
-			if (error == 0 && two && j < maxn)
+			if (error == 0 && two && j < maxn && darwin_two_volumes)
 				error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), 2);
+			if (error == 0 && two && j < maxn && darwin_two_volumes)
+				error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), 3);
 		}
 		if (error == 0)
 			td->td_retval[0] = j;
@@ -813,6 +838,17 @@ struct darwin_attrlist {
 #define	DA_CMN_SUPPORTED	(DA_CMN_NAME | DA_CMN_DEVID | DA_CMN_FSID | DA_CMN_OBJTYPE | DA_CMN_OBJTAG | DA_CMN_OBJID | \
 	DA_CMN_CRTIME | DA_CMN_MODTIME | DA_CMN_CHGTIME | DA_CMN_ACCTIME | DA_CMN_OWNERID | DA_CMN_GRPID | \
 	DA_CMN_ACCESSMASK | DA_CMN_FLAGS | DA_CMN_FILEID)
+#define	DA_CMN_GENCOUNT		0x00080000
+#define	DA_CMN_DOCID		0x00100000
+#define	DA_CMN_USERACCESS	0x00200000
+#define	DA_CMN_PARENTID		0x04000000
+#define	DA_CMN_FULLPATH		0x08000000
+#define	DA_CMN_ADDEDTIME	0x10000000
+#define	DA_CMN_ERROR		0x20000000
+#define	DA_CMN_DATAPROT		0x40000000
+#define	DA_CMN_RETURNED		0x80000000
+#define	DA_CMN_SUPPORTED_EXT	(DA_CMN_SUPPORTED | DA_CMN_GENCOUNT | DA_CMN_DOCID | DA_CMN_USERACCESS | DA_CMN_PARENTID | DA_CMN_FULLPATH | DA_CMN_ADDEDTIME | DA_CMN_ERROR | DA_CMN_DATAPROT | DA_CMN_RETURNED)
+#define	DA_DIR_SUPPORTED	0x00000007	/* link count, entry count, mount status */
 #define	DA_FILE_LINKCOUNT	0x00000001
 #define	DA_FILE_TOTALSIZE	0x00000002
 #define	DA_FILE_ALLOCSIZE	0x00000004
@@ -825,15 +861,23 @@ struct darwin_attrlist {
 /* the attributes of a volume (ATTR_VOL_*): LaunchServices tells the volume of a file by its UUID, and drops what it cannot place.  The UUIDs are those of a Mac's
  * system volume (what is under /System, /usr, /bin, /sbin and the root) and data volume (the rest), so that a LaunchServices database made on a Mac fits */
 #define	DA_VOL_FSTYPE		0x00000001
+#define	DA_VOL_SIGNATURE	0x00000002
 #define	DA_VOL_SIZE		0x00000004
 #define	DA_VOL_SPACEFREE	0x00000008
 #define	DA_VOL_SPACEAVAIL	0x00000010
+#define	DA_VOL_MINALLOC		0x00000020
+#define	DA_VOL_ALLOCCLUMP	0x00000040
 #define	DA_VOL_IOBLOCKSIZE	0x00000080
 #define	DA_VOL_MOUNTPOINT	0x00001000
 #define	DA_VOL_NAME		0x00002000
+#define	DA_VOL_MOUNTFLAGS	0x00004000
+#define	DA_VOL_MOUNTEDDEVICE	0x00008000
+#define	DA_VOL_ENCODINGSUSED	0x00010000
+#define	DA_VOL_CAPABILITIES	0x00020000
 #define	DA_VOL_UUID		0x00040000
+#define	DA_VOL_ATTRIBUTES	0x40000000
 #define	DA_VOL_INFO		0x80000000
-#define	DA_VOL_SUPPORTED	(DA_VOL_INFO | DA_VOL_FSTYPE | DA_VOL_SIZE | DA_VOL_SPACEFREE | DA_VOL_SPACEAVAIL | DA_VOL_IOBLOCKSIZE | DA_VOL_MOUNTPOINT | DA_VOL_NAME | DA_VOL_UUID)
+#define	DA_VOL_SUPPORTED	(DA_VOL_INFO | DA_VOL_FSTYPE | DA_VOL_SIGNATURE | DA_VOL_MINALLOC | DA_VOL_ALLOCCLUMP | DA_VOL_MOUNTFLAGS | DA_VOL_MOUNTEDDEVICE | DA_VOL_ENCODINGSUSED | DA_VOL_SIZE | DA_VOL_SPACEFREE | DA_VOL_SPACEAVAIL | DA_VOL_IOBLOCKSIZE | DA_VOL_MOUNTPOINT | DA_VOL_NAME | DA_VOL_CAPABILITIES | DA_VOL_UUID | DA_VOL_ATTRIBUTES)
 static const uint8_t da_uuid_system[16] = { 0x2B, 0x58, 0x8F, 0x62, 0x3F, 0x2E, 0x49, 0x10, 0xAC, 0xDC, 0xB6, 0xC1, 0x03, 0x76, 0x68, 0xEB };
 static const uint8_t da_uuid_data[16] = { 0xFF, 0xB5, 0x71, 0x33, 0x80, 0x43, 0x40, 0x2E, 0xB8, 0xA2, 0x2F, 0xE7, 0x03, 0xF2, 0x07, 0x68 };
 
@@ -861,16 +905,28 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		return (EINVAL);
 	cmn = al.commonattr;
 	file = al.fileattr;
-	if ((cmn & ~DA_CMN_SUPPORTED) || (al.volattr & ~DA_VOL_SUPPORTED) || al.dirattr || al.forkattr || (file & ~DA_FILE_SUPPORTED))
+	if (cmn & DA_CMN_RETURNED) {			/* the caller takes what there is: the attributes that are not known are left out and the set that came back says which they are */
+		cmn &= DA_CMN_SUPPORTED_EXT;
+		al.volattr &= DA_VOL_SUPPORTED;
+		if (al.volattr != 0 && (al.volattr & DA_VOL_INFO) == 0)
+			al.volattr = 0;
+		al.dirattr = S_ISDIR(sb.st_mode) ? (al.dirattr & DA_DIR_SUPPORTED) : 0;
+		file = S_ISDIR(sb.st_mode) ? 0 : (file & DA_FILE_SUPPORTED);
+		al.forkattr = 0;
+	}
+	if ((cmn & ~DA_CMN_SUPPORTED_EXT) || (al.volattr & ~DA_VOL_SUPPORTED) || (al.dirattr && !(cmn & DA_CMN_RETURNED)) || al.forkattr || (file & ~DA_FILE_SUPPORTED)) {
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: getattrlist %s: attributes not supported: common %#x (of which %#x), volume %#x, dir %#x, file %#x, fork %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, path, cmn, cmn & ~DA_CMN_SUPPORTED, al.volattr, al.dirattr, file, al.forkattr);
 		return (EINVAL);
-	if (al.volattr != 0 && ((al.volattr & DA_VOL_INFO) == 0 || file != 0))
+	}
+	if (al.volattr != 0 && ((al.volattr & DA_VOL_INFO) == 0 || (file != 0 && !(cmn & DA_CMN_RETURNED))))
 		return (EINVAL);
-	if (S_ISDIR(sb.st_mode) && file != 0)
+	if (S_ISDIR(sb.st_mode) && file != 0 && !(cmn & DA_CMN_RETURNED))
 		return (EINVAL);			/* file attributes of a directory */
 	name = strrchr(path, '/');
 	name = (name != NULL && name[1] != '\0') ? name + 1 : path;
 	namelen = strlen(name) + 1;
-	out = malloc(4 + 512 + roundup2(namelen, 4) + 8, M_DARWIN, M_WAITOK | M_ZERO);
+	out = malloc(4 + 512 + MAXPATHLEN + roundup2(namelen, 4) + 8, M_DARWIN, M_WAITOK | M_ZERO);
 	p = out + 4;				/* the length comes first */
 #define	PUT32(v)	do { uint32_t t_ = (uint32_t)(v); memcpy(p, &t_, 4); p += 4; } while (0)
 #define	PUT64(v)	do { uint64_t t_ = (uint64_t)(v); memcpy(p, &t_, 8); p += 8; } while (0)
@@ -887,9 +943,18 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 	{
 		char *nameref = NULL;
 
+		char *pathref = NULL, *vmpref = NULL, *vnmref = NULL, *vmdref = NULL;
+		bool vsysv = false;
+
+		if (cmn & DA_CMN_RETURNED) {	/* attribute_set_t: what is in the buffer */
+			PUT32(cmn); PUT32(al.volattr); PUT32(al.dirattr); PUT32(file); PUT32(al.forkattr);
+		}
 		if (cmn & DA_CMN_NAME) { nameref = p; p += 8; }		/* attrreference: offset (from itself), length */
-		if (cmn & DA_CMN_DEVID)		PUT32(darwin_from_dev(sb.st_dev));
-		if (cmn & DA_CMN_FSID)		{ PUT32(darwin_from_dev(sb.st_dev)); PUT32(0); }
+		if (cmn & DA_CMN_DEVID)		PUT32(darwin_from_dev(sb.st_dev) == 16777225 && strncmp(path, "/System/Volumes/Preboot", 23) == 0 ? 16777226 : darwin_from_dev(sb.st_dev));
+		if (cmn & DA_CMN_FSID) {		/* the fsid of the volume as statfs says it (the pair must be the same, CarbonCore keys its volumes by it) */
+			if (darwin_from_dev(sb.st_dev) == 16777225) { PUT32(strncmp(path, "/System/Volumes/Preboot", 23) == 0 ? 16777226 : 16777225); PUT32(26); }	/* a Mac says the data volume (or Preboot) for the files of the system volume too; only statfs says 16777231 */
+			else { PUT32(darwin_from_dev(sb.st_dev)); PUT32(0); }
+		}
 		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
 		if (cmn & DA_CMN_OBJTAG)	PUT32(0);
 		if (cmn & DA_CMN_OBJID)		{ PUT32(sb.st_ino); PUT32(sb.st_gen); }
@@ -901,32 +966,48 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_GRPID)		PUT32(sb.st_gid);
 		if (cmn & DA_CMN_ACCESSMASK)	PUT32(sb.st_mode);
 		if (cmn & DA_CMN_FLAGS)		PUT32(sb.st_flags);
+		if (cmn & DA_CMN_GENCOUNT)	PUT32(sb.st_gen);
+		if (cmn & DA_CMN_DOCID)		PUT32(0);
+		if (cmn & DA_CMN_USERACCESS)	PUT32(7);
 		if (cmn & DA_CMN_FILEID)	PUT64(sb.st_ino);
+		if (cmn & DA_CMN_PARENTID)	PUT64(2);
+		if (cmn & DA_CMN_FULLPATH)	{ pathref = p; p += 8; }
+		if (cmn & DA_CMN_ADDEDTIME)	PUTTS(sb.st_birthtim);
+		if (cmn & DA_CMN_ERROR)		PUT32(0);
+		if (cmn & DA_CMN_DATAPROT)	PUT32(0);
 		if (al.volattr != 0) {
-			char *mpref = NULL, *nmref = NULL;
+			char *mpref = NULL, *nmref = NULL, *mdref = NULL;
 			bool sysv = da_on_system_volume(path);
 
 			if (al.volattr & DA_VOL_FSTYPE)		PUT32(0x1a);			/* APFS */
+			if (al.volattr & DA_VOL_SIGNATURE)	PUT32(0x4244);
 			if (al.volattr & DA_VOL_SIZE)		PUT64((uint64_t)500 << 30);
 			if (al.volattr & DA_VOL_SPACEFREE)	PUT64((uint64_t)100 << 30);
 			if (al.volattr & DA_VOL_SPACEAVAIL)	PUT64((uint64_t)100 << 30);
+			if (al.volattr & DA_VOL_MINALLOC)	PUT64(4096);
+			if (al.volattr & DA_VOL_ALLOCCLUMP)	PUT64(4096);
 			if (al.volattr & DA_VOL_IOBLOCKSIZE)	PUT32(4096);
 			if (al.volattr & DA_VOL_MOUNTPOINT)	{ mpref = p; p += 8; }
 			if (al.volattr & DA_VOL_NAME)		{ nmref = p; p += 8; }
+			if (al.volattr & DA_VOL_MOUNTFLAGS)	PUT32(sysv ? 0x4480d001 : 0x4909000);
+			if (al.volattr & DA_VOL_MOUNTEDDEVICE)	{ mdref = p; p += 8; }
+			if (al.volattr & DA_VOL_ENCODINGSUSED)	PUT64(0x1);
+			if (al.volattr & DA_VOL_CAPABILITIES) {		/* vol_capabilities_attr_t of the APFS volumes of a Mac (taken from one): capabilities[4], valid[4] */
+				static const uint32_t cs[8] = { 0x039b6edf, 0x01ad6fc7, 0, 0, 0x07ffffff, 0x01ffffff, 0, 0 }, cd[8] = { 0x019b6edf, 0x01af6fc7, 0, 0, 0x07ffffff, 0x01ffffff, 0, 0 };
+
+				memcpy(p, sysv ? cs : cd, 32); p += 32;
+			}
 			if (al.volattr & DA_VOL_UUID)		{ memcpy(p, sysv ? da_uuid_system : da_uuid_data, 16); p += 16; }
-			if (mpref != NULL) {
-				const char *mp = sysv ? "/" : "/System/Volumes/Data";
-				int32_t off = (int32_t)(p - mpref); uint32_t l = (uint32_t)strlen(mp) + 1;
+			if (al.volattr & DA_VOL_ATTRIBUTES) {		/* vol_attributes_attr_t: the valid and the native attributes (attribute_set_t each) */
+				static const uint32_t va[10] = { 0xffffffff, 0x709fffff, 0x00000007, 0x0000362f, 0x00001ffc, 0x3efffeff, 0x7086fffd, 0x00000007, 0x0000062f, 0x00001ffc };
 
-				memcpy(mpref, &off, 4); memcpy(mpref + 4, &l, 4); memcpy(p, mp, l); p += roundup2(l, 4);
+				memcpy(p, va, 40); p += 40;
 			}
-			if (nmref != NULL) {
-				const char *vn = sysv ? "Macintosh HD" : "Macintosh HD - Data";
-				int32_t off = (int32_t)(p - nmref); uint32_t l = (uint32_t)strlen(vn) + 1;
-
-				memcpy(nmref, &off, 4); memcpy(nmref + 4, &l, 4); memcpy(p, vn, l); p += roundup2(l, 4);
-			}
+			vmpref = mpref; vnmref = nmref; vmdref = mdref; vsysv = sysv;
 		}
+		if (al.dirattr & 1)		PUT32(sb.st_nlink);
+		if (al.dirattr & 2)		PUT32(sb.st_nlink > 2 ? sb.st_nlink - 2 : 0);
+		if (al.dirattr & 4)		PUT32(0);
 		if (file & DA_FILE_LINKCOUNT)	PUT32(sb.st_nlink);
 		if (file & DA_FILE_TOTALSIZE)	PUT64(sb.st_size);
 		if (file & DA_FILE_ALLOCSIZE)	PUT64(sb.st_blocks * 512);
@@ -941,6 +1022,33 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			memcpy(nameref + 4, &l, 4);
 			memcpy(p, name, namelen);
 			p += roundup2(namelen, 4);
+		}
+		if (vmpref != NULL) {
+			const char *mp = vsysv ? "/" : "/System/Volumes/Data";
+			int32_t off = (int32_t)(p - vmpref); uint32_t l = (uint32_t)strlen(mp) + 1;
+
+			memcpy(vmpref, &off, 4); memcpy(vmpref + 4, &l, 4); memcpy(p, mp, l); p += roundup2(l, 4);
+		}
+		if (vnmref != NULL) {
+			const char *vn = vsysv ? "Macintosh HD" : "Macintosh HD - Data";
+			int32_t off = (int32_t)(p - vnmref); uint32_t l = (uint32_t)strlen(vn) + 1;
+
+			memcpy(vnmref, &off, 4); memcpy(vnmref + 4, &l, 4); memcpy(p, vn, l); p += roundup2(l, 4);
+		}
+		if (vmdref != NULL) {
+			const char *dv = vsysv ? "/dev/disk3s4s1" : "/dev/disk3s1";
+			int32_t off = (int32_t)(p - vmdref); uint32_t l = (uint32_t)strlen(dv) + 1;
+
+			memcpy(vmdref, &off, 4); memcpy(vmdref + 4, &l, 4); memcpy(p, dv, l); p += roundup2(l, 4);
+		}
+		if (pathref != NULL) {
+			int32_t off = (int32_t)(p - pathref);
+			uint32_t l = (uint32_t)strlen(path) + 1;
+
+			memcpy(pathref, &off, 4);
+			memcpy(pathref + 4, &l, 4);
+			memcpy(p, path, l);
+			p += roundup2(l, 4);
 		}
 	}
 	len = p - out;
@@ -991,10 +1099,25 @@ darwin_fgetattrlist(struct thread *td, struct darwin_args *uap)
 {
 	struct darwin_args a = *uap;
 	struct stat sb;
+	char fpath[MAXPATHLEN] = "?";
+	struct file *fp;
+	cap_rights_t rights;
 	int error = kern_fstat(td, (int)uap->a[0], &sb);
 
+	if (error == 0 && getvnode(td, (int)uap->a[0], cap_rights_init_one(&rights, CAP_FSTAT), &fp) == 0) {	/* the name and the full path come from the path of the vnode when it has one */
+		char *fullpath = NULL, *freepath = NULL;
+		struct vnode *vp = fp->f_vnode;
+
+		vref(vp);
+		if (vn_fullpath(vp, &fullpath, &freepath) == 0 && fullpath != NULL)
+			strlcpy(fpath, fullpath, sizeof(fpath));
+		vrele(vp);
+		if (freepath != NULL)
+			free(freepath, M_TEMP);
+		fdrop(fp, td);
+	}
 	a.a[0] = 0; a.a[1] = uap->a[1]; a.a[2] = uap->a[2]; a.a[3] = uap->a[3]; a.a[4] = uap->a[4];
-	return (error != 0 ? error : attr_fill(td, &a, &sb, "?"));
+	return (error != 0 ? error : attr_fill(td, &a, &sb, fpath));
 }
 /* sendto to an AF_INET6 address: the family byte of the program's sockaddr is 30; it is FreeBSD's 28 for the duration of the call (and put back) */
 static int

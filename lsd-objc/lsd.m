@@ -7,6 +7,7 @@
 #include <objc/message.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
 extern const char *_Block_signature(void *);
 
@@ -85,12 +86,57 @@ static void logf_(NSString *s) { fprintf(stderr, "lsd-objc: %s\n", [s UTF8String
 }
 @end
 
+@interface Guard : NSObject <NSXPCListenerDelegate> { @public id inner; NSString *name; } @end
+@implementation Guard
+- (BOOL)listener:(NSXPCListener *)l shouldAcceptNewConnection:(NSXPCConnection *)c
+{
+	@try {
+		BOOL r = [(id<NSXPCListenerDelegate>)inner listener:l shouldAcceptNewConnection:c];
+		logf_([NSString stringWithFormat:@"%@: framework service accepted: %d", name, r]);
+		return r;
+	} @catch (NSException *e) {
+		logf_([NSString stringWithFormat:@"%@: framework service threw %@: %@\n%@", name, e.name, e.reason, e.callStackSymbols]);
+		return NO;
+	}
+}
+@end
+
+static void uncaught(NSException *e) { logf_([NSString stringWithFormat:@"UNCAUGHT %@: %@\n%@", e.name, e.reason, e.callStackSymbols]); }
+
 int main(int argc, char **argv)
 {
+	if ((getenv("LSD_TRACE_EXC") || access("/var/db/lsd-store/trace", F_OK) == 0) && !getenv("OBJC_PRINT_EXCEPTION_THROW")) { setenv("OBJC_PRINT_EXCEPTION_THROW", "YES", 1); execv(argv[0], argv); }	/* the runtime reads the variable when it starts */
+	NSSetUncaughtExceptionHandler(uncaught);
 	@autoreleasepool {
 		storePath = [NSString stringWithUTF8String:getenv("LSD_STORE") ?: "/var/db/lsd-store/store.csstore"];
 		const char *svcs[][2] = { { "com.apple.lsd.mapdb", "_LSDReadProtocol" }, { "com.apple.lsd.modifydb", "_LSDModifyProtocol" } };
 		NSMutableArray *keep = [NSMutableArray array];
+
+		if (getenv("LSD_FRAMEWORK") || access("/var/db/lsd-store/framework", F_OK) == 0) {	/* the framework's service classes refuse to run outside the daemon: _LSAssertRunningInServer looks at this flag */
+			id defs = ((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"_LSDefaults"), NSSelectorFromString(@"sharedInstance"));
+			((void (*)(id, SEL, char))objc_msgSend)(defs, NSSelectorFromString(@"setServer:"), 1);
+			logf_([NSString stringWithFormat:@"isServer %d", ((char (*)(id, SEL))objc_msgSend)(defs, NSSelectorFromString(@"isServer"))]);
+			{	/* the server's database context: the daemon makes it before it serves (_LSServer_SetDatabaseExecutionContext is not exported: the address is the one of the cache of the Mac that pearOS maps -- 0x7ff803480cc4 in the cache, +0x1940c000 where the cache is mapped here) */
+				void (*setctx)(id) = (void (*)(id))dlsym(RTLD_DEFAULT, "_LSServer_SetDatabaseExecutionContext");
+				id ctx = ((id (*)(id, SEL))objc_msgSend)([NSClassFromString(@"LSDBExecutionContext") alloc], NSSelectorFromString(@"_init"));
+
+				if (setctx == NULL) setctx = (void (*)(id))0x7ff81c88ccc4;
+				logf_([NSString stringWithFormat:@"execution context %@, setter %p", ctx, setctx]);
+				if (ctx) setctx(ctx);
+				[keep addObject:ctx ?: (id)[NSNull null]];
+			}
+			if (access("/var/db/lsd-store/seed", F_OK) == 0) {	/* seed the database: the builder of the framework scans the system for applications */
+				dispatch_queue_t ioq = dispatch_queue_create("lsd-objc.io", DISPATCH_QUEUE_SERIAL);
+				id b = ((id (*)(id, SEL, id))objc_msgSend)([NSClassFromString(@"LSDatabaseBuilder") alloc], NSSelectorFromString(@"initWithIOQueue:"), ioq);
+
+				logf_([NSString stringWithFormat:@"builder %@", b]);
+				@try {
+					((void (*)(id, SEL, const char *))objc_msgSend)(b, NSSelectorFromString(@"createAndSeedLocalDatabase:"), "/var/db/lsd-store/local.csstore");
+					logf_(@"seeded (createAndSeedLocalDatabase)");
+				} @catch (NSException *e) { logf_([NSString stringWithFormat:@"seeding threw %@ %@", e.name, e.reason]); }
+				[keep addObject:b];
+			}
+		}
 
 		for (int i = 0; i < 2; i++) {
 			Service *s = [Service new];
@@ -101,9 +147,9 @@ int main(int argc, char **argv)
 			l.delegate = s;
 			if (getenv("LSD_FRAMEWORK") || access("/var/db/lsd-store/framework", F_OK) == 0) {		/* the service classes of LaunchServices.framework itself serve the calls (the framework holds the code that lsd runs) */
 				Class fc = NSClassFromString(i == 0 ? @"_LSDReadService" : @"_LSDModifyService");
-				id fs = fc ? [[fc alloc] init] : nil;
+				id fs = fc ? ((id (*)(id, SEL, id))objc_msgSend)([fc alloc], NSSelectorFromString(@"initWithXPCListener:"), l) : nil;
 				logf_([NSString stringWithFormat:@"framework service %@ for %@", fs, s->name]);
-				if (fs) { l.delegate = fs; [keep addObject:fs]; }
+				if (fs) { Guard *g = [Guard new]; g->inner = fs; g->name = s->name; l.delegate = g; [keep addObject:g]; [keep addObject:fs]; }
 			}
 			[l resume];
 			[keep addObject:s]; [keep addObject:l];
