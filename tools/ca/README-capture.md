@@ -33,3 +33,12 @@ the bar and the icons that the preferences name on the layers that the Dock sent
     python3 cadraw.py ca.bin /tmp/cadock.ppm 1280 800 --icons=ControlCenter.icns,Dock.icns   # then wsshow /tmp/cadock.ppm 0 0 5
 
 docs/screenshot-dock-bar-wsd.png is a wsshot of wsd with that picture.
+
+## Real icons from IconServices (2026-11-13)
+With `sysctl kern.darwinator.fast_sleep_ms=5` (IOSurface sleeps 241 s for IOSurfaceRoot), the IOSurfaceRoot node of the IOKit registry,
+and mmap(MAP_ANON) ignoring the VM-tag "fd" (ColorSync), the real `iconservicesagent` renders icons and the real Dock puts them in its commits
+as out-of-line data (Image type 0x17: RGBAh 128x128 with 5 mip levels = 174592 bytes, or 8 bit BGRA).  `carender-stub` keeps them as
+`/tmp/ca-ool-<n>-<k>.bin`; `cadraw.py ca.bin out.ppm 1280 800 --ool=/tmp` paints them on the 56x56 slots of the bar (Finder, two "?" for
+applications that are not in the LaunchServices database, Trash) and `wsshow` puts the picture on the screen of wsd (`WS_SOCKET=/tmp/wsd.sock`).
+Screenshot: docs/screenshot-dock-real-icons-wsd.png.  parse(): a layer with an Image has bytes that are not decoded yet (26 more than assumed), so the
+records are found again by their form (02 + id ending 29030528 + slot + 1e).
