@@ -410,6 +410,15 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 			w->mgr = 1;			/* claimed before the look: two threads that look at once would both find events and both become the manager (libdispatch: "Locking the manager should not fail") */
 		mtx_unlock(&wq_mtx);
 		claimed = n == 0;
+		if (!claimed && darwin_debug >= 1 && (quiet % 500) == 499) {		/* the event manager has been out for long: who is it? */
+			int q;
+
+			mtx_lock(&wq_mtx);
+			for (q = 0; q < WQ_MAX_THREADS; q++)
+				if (w->thr[q].used && w->thr[q].ismgr)
+					printf("darwinator: %s[%d]: the event manager is thread %d (tid %d), out for a long time (wait: %s)\n", td->td_proc->p_comm, td->td_proc->p_pid, q, w->thr[q].td != NULL ? (int)w->thr[q].td->td_tid : -1, w->thr[q].td != NULL && w->thr[q].td->td_wmesg != NULL ? w->thr[q].td->td_wmesg : "-");
+			mtx_unlock(&wq_mtx);
+		}
 		error = claimed ? darwin_wq_kevent(td, -1, 0, 0, kevent_list, WQ_KEVENT_LIST_LEN, data_buf, &davail, &count) : 0;
 		if (claimed && !(error == 0 && count > 0)) {		/* nothing: the claim goes back */
 			mtx_lock(&wq_mtx);
