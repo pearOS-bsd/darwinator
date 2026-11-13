@@ -2440,6 +2440,56 @@ io_req_string(struct kmsg *m, uint32_t at)
 	return (tmp);
 }
 
+
+/*
+ * io_registry_entry_get_property_bin_buf (2889): the value of a property of a node in OSSerialize's binary form (IOKit's kOSSerializeBinarySignature 0xd3 and one word for each object:
+ * type | length, the last object of a collection has 0x80000000; symbols and strings are NUL terminated and padded to 4).  Only what a Mac program asks the disks for is known.
+ */
+struct ioser { uint8_t *b; size_t n; };
+static void ios_w32(struct ioser *s, uint32_t v) { memcpy(s->b + s->n, &v, 4); s->n += 4; }
+static void
+ios_str(struct ioser *s, uint32_t type, const char *str, bool last)
+{
+	size_t l = strlen(str) + 1;
+
+	ios_w32(s, type | (uint32_t)l | (last ? 0x80000000u : 0));
+	memset(s->b + s->n, 0, roundup2(l, 4)); memcpy(s->b + s->n, str, l - 1); s->n += roundup2(l, 4);
+}
+static void ios_bool(struct ioser *s, bool v, bool last) { ios_w32(s, 0x0b000000u | (v ? 1 : 0) | (last ? 0x80000000u : 0)); }
+static void ios_dict(struct ioser *s, uint32_t count, bool last) { ios_w32(s, 0x01000000u | count | (last ? 0x80000000u : 0)); }
+
+static size_t
+io_property_bin(int node, const char *key, uint8_t *out)
+{
+	struct ioser s = { out, 0 };
+	bool media = io_nodes[node].bsd != NULL;
+
+	ios_w32(&s, 0xd3);
+	if (strcmp(key, "Removable") == 0 || strcmp(key, "Ejectable") == 0 || strcmp(key, "Open") == 0 || strcmp(key, "Removable-Media") == 0) {
+		if (!media) return (0);
+		ios_bool(&s, false, true);
+	} else if (strcmp(key, "Writable") == 0 || strcmp(key, "Leaf") == 0) {
+		if (!media) return (0);
+		ios_bool(&s, true, true);
+	} else if (strcmp(key, "Whole") == 0) {
+		if (!media) return (0);
+		ios_bool(&s, strcmp(io_nodes[node].bsd, "disk3") == 0, true);
+	} else if (strcmp(key, "BSD Name") == 0) {
+		if (!media) return (0);
+		ios_str(&s, 0x09000000u, io_nodes[node].bsd, true);
+	} else if (strcmp(key, "Protocol Characteristics") == 0) {
+		ios_dict(&s, 2, true);
+		ios_str(&s, 0x08000000u, "Physical Interconnect", false); ios_str(&s, 0x09000000u, "Virtual Interface", false);
+		ios_str(&s, 0x08000000u, "Physical Interconnect Location", false); ios_str(&s, 0x09000000u, "Internal", true);
+	} else if (strcmp(key, "IOMediaIcon") == 0) {
+		ios_dict(&s, 2, true);
+		ios_str(&s, 0x08000000u, "CFBundleIdentifier", false); ios_str(&s, 0x09000000u, "com.apple.iokit.IOStorageFamily", false);
+		ios_str(&s, 0x08000000u, "IOBundleResourceFile", false); ios_str(&s, 0x09000000u, "Internal.icns", true);
+	} else
+		return (0);
+	return (s.n);
+}
+
 static void
 io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 {
@@ -2477,6 +2527,75 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 		np = kp_new(KP_IOOBJ); np->kpid = n;
 		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
 		kp_unref(np);
+		return;
+	}
+	case 2833: {					/* io_registry_entry_create_iterator(entry, plane, options, *iterator): the entries below (kIORegistryIterateRecursively 1: all of them) or above (kIORegistryIterateParents 2) */
+		uint32_t at, cnt, opts;
+		int stack[IO_NNODES], sp = 0, k;
+
+		if (node < 0 || m->size < 52) break;
+		at = 32; cnt = rd32(m->data, at + 4); at += 8 + roundup2(cnt, 4);
+		opts = at + 4 <= m->size ? rd32(m->data, at) : 0;
+		n = 0;
+		if (opts & 2) {
+			for (k = io_nodes[node].parent; k >= 0 && n < 16; k = io_nodes[k].parent) list[n++] = k;
+		} else {
+			stack[sp++] = node;
+			while (sp > 0 && n < 16) {
+				int cur = stack[--sp];
+
+				for (k = IO_NNODES - 1; k >= 0; k--)
+					if (io_nodes[k].parent == cur && k != cur) {
+						if (cur == node || (opts & 1)) { stack[sp++] = k; }
+					}
+				if (cur != node) list[n++] = cur;
+			}
+		}
+		np = io_new_iter(list, n);
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	}
+	case 2889: {					/* io_registry_entry_get_property_bin_buf(entry, plane, name, options, buf, *bufsize, *properties): the serialized value is written to buf (or the reply says it does not fit) */
+		uint8_t val[512];
+		char key[128];
+		size_t len;
+		uint32_t at, cnt, bsz_off;
+		uint64_t ubuf, usize;
+		struct kmsg *r;
+		uint8_t *rd;
+		int error;
+
+		if (node < 0 || m->size < 56) break;
+		at = 32; cnt = rd32(m->data, at + 4); at += 8 + roundup2(cnt, 4);		/* the plane */
+		if (at + 8 > m->size) break;
+		cnt = rd32(m->data, at + 4);
+		if (cnt == 0 || cnt > sizeof(key) || at + 8 + cnt > m->size) break;
+		memcpy(key, m->data + at + 8, cnt); key[cnt - 1] = 0;
+		at += 8 + roundup2(cnt, 4) + 4;			/* the options */
+		bsz_off = at + 8;
+		if (bsz_off + 8 > m->size) break;
+		ubuf = rd64(m->data, at); usize = rd64(m->data, bsz_off);
+		len = io_property_bin(node, key, val);
+		if (darwin_debug >= 1)
+			printf("darwinator: IOKit: property \"%s\" of %s: %s (%zu bytes, buffer %lu)\n", key, io_nodes[node].name, len ? "known" : "not found", len, (u_long)usize);
+		if (len == 0) { mig_reply(t, m, id, (int)0xe00002f0 /* kIOReturnNotFound */, NULL, NULL, 0, NULL, 0); return; }
+		if (len > usize || ubuf == 0) { mig_reply(t, m, id, (int)0xe00002bc /* kIOReturnNoSpace */, NULL, NULL, 0, NULL, 0); return; }
+		error = t->p == curproc ? copyout(val, (void *)(uintptr_t)ubuf, len) : (proc_writemem(curthread, t->p, (vm_offset_t)ubuf, val, len) == (ssize_t)len ? 0 : EFAULT);
+		if (error != 0) { mig_reply(t, m, id, (int)0xe00002c2 /* kIOReturnBadArgument */, NULL, NULL, 0, NULL, 0); return; }
+		if (m->reply.port == NULL || m->reply.port->dead) return;
+		r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		r->data = rd = malloc(72, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		r->size = 64;
+		wr32(rd, 0, MACH_MSGH_BITS_COMPLEX | MM_MOVE_SEND_ONCE);
+		wr32(rd, 4, 64); wr32(rd, 20, id + 100); wr32(rd, 24, 1);
+		r->ool[0].type = 1; r->ool[0].off = 28; r->ool[0].size = 0; r->ool[0].data = NULL; r->nool = 1;
+		rd[28 + 11] = 1;				/* an out-of-line descriptor of no bytes: the value is in the buffer of the caller */
+		wr32(rd, 52, 0);				/* the return code */
+		{ uint64_t l64 = len; memcpy(rd + 56, &l64, 8); }	/* bufsize: the length of the value */
+		TAILQ_INSERT_TAIL(&m->reply.port->q, r, link);
+		m->reply.port->qn++; kq_post(m->reply.port);
+		wakeup(m->reply.port);
 		return;
 	}
 	case 2832: case 2890:				/* io_service_wait_quiet(service, wait_time): nothing is busy */
