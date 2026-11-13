@@ -81,6 +81,7 @@ darwin_mknod(struct thread *td, struct darwin_args *uap)
 /* ---- getfsstat64(buf, bufsize, flags): the count, or the structures that fit ---- */
 
 SYSCTL_DECL(_kern_darwinator);
+int darwin_wl_stale_check = 1;
 #define	DA_CMNEXT_SUPPORTED	0x7fcu		/* ATTR_CMNEXT_: relpath 4, privatesize 8, linkid 0x10, nofirmlinkpath 0x20, realdevid 0x40, realfsid 0x80, cloneid 0x100, ext flags 0x200, recursive gencount 0x400 */
 int darwin_two_volumes = 1;
 SYSCTL_INT(_kern_darwinator, OID_AUTO, two_volumes, CTLFLAG_RW, &darwin_two_volumes, 0, "getfsstat shows the root as a system and a data volume");
@@ -320,7 +321,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		{
 			/* XNU checks the state of the queue (ext: address of dq_state, mask, expected value) before it takes a request: when the queue has been taken by a thread already the request is stale */
 			uint64_t qs = 0;
-			bool stale = (d.flags & EV_DELETE) == 0 && d.ext[1] != 0 && d.ext[2] != 0 && copyin((void *)(uintptr_t)d.ext[1], &qs, 8) == 0 && (qs & d.ext[2]) != (d.ext[3] & d.ext[2]);
+			bool stale = darwin_wl_stale_check && (d.flags & EV_DELETE) == 0 && d.ext[1] != 0 && d.ext[2] != 0 && copyin((void *)(uintptr_t)d.ext[1], &qs, 8) == 0 && (qs & d.ext[2]) != (d.ext[3] & d.ext[2]);
 
 			if (darwin_debug >= 2)
 				printf("darwinator: wl request %s %#lx fflags %#x flags %#x: ext addr %#lx mask %#lx want %#lx state %#lx\n", (d.flags & EV_DELETE) ? "delete" : "add", (u_long)d.ident, d.fflags, d.flags, (u_long)d.ext[1], (u_long)d.ext[2], (u_long)d.ext[3], (u_long)qs);
@@ -945,6 +946,7 @@ da_on_system_volume(const char *path)
 	return (strcmp(path, "/") == 0 || strncmp(path, "/System", 7) == 0 || strncmp(path, "/usr", 4) == 0 || strncmp(path, "/bin", 4) == 0 || strncmp(path, "/sbin", 5) == 0);
 }
 
+SYSCTL_INT(_kern_darwinator, OID_AUTO, wl_stale_check, CTLFLAG_RW, &darwin_wl_stale_check, 0, "drop the thread requests of workloops whose state changed (as XNU: ESTALE); 0: off");
 static size_t attr_last_len;			/* the length of what the last attr_fill produced (for getattrlistbulk) */
 
 static int

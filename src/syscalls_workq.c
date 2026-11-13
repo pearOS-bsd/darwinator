@@ -31,6 +31,7 @@
 #include <bsm/audit_kevents.h>
 
 #include "darwinator.h"
+extern int darwin_wl_stale_check;
 
 #define	WQOPS_THREAD_RETURN		0x004
 #define	WQOPS_QUEUE_NEWSPISUPP		0x010
@@ -323,7 +324,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		}
 		/* a thread request of a workloop that nobody serves */
 		for (k = 0; k < 16; k++) {
-			if (w->req[k].id != 0 && w->req[k].eaddr != 0 && w->req[k].emask != 0) {		/* the queue was taken (or emptied) since the request: the state is not the one that the request was made for (libdispatch aborts: "Invalid wlh state") */
+			if (darwin_wl_stale_check && w->req[k].id != 0 && w->req[k].eaddr != 0 && w->req[k].emask != 0) {		/* the queue was taken (or emptied) since the request: the state is not the one that the request was made for (libdispatch aborts: "Invalid wlh state") */
 				uint64_t qs = 0;
 				uint64_t ea = w->req[k].eaddr, em = w->req[k].emask, ev = w->req[k].evalue;
 
