@@ -369,9 +369,21 @@ darwin_proc_info(struct thread *td, struct darwin_args *uap)
 	}
 }
 
+
+/* proc_info_extended_id(callnum, pid, flavor, flags, arg, buffer, buffersize, uniqueid): proc_info with the flags and the unique id of the process that is meant (libproc checks it: a pid that was reused); the id is not checked here */
+static int
+darwin_proc_info_ext(struct thread *td, struct darwin_args *uap)
+{
+	struct darwin_args u2 = *uap;
+
+	u2.a[3] = uap->a[4]; u2.a[4] = uap->a[5]; u2.a[5] = uap->a[6];
+	return (darwin_proc_info(td, &u2));
+}
 void
 darwin_proc_syscalls_init(void)
 {
 	darwin_sysent[336] = (struct sysent){ .sy_narg = 6, .sy_call = (sy_call_t *)darwin_proc_info, .sy_auevent = AUE_PROCINFO, .sy_thrcnt = SY_THR_STATIC };
 	darwin_syscallnames[336] = "proc_info";
+	darwin_sysent[545] = (struct sysent){ .sy_narg = 8, .sy_call = (sy_call_t *)darwin_proc_info_ext, .sy_auevent = AUE_PROCINFO, .sy_thrcnt = SY_THR_STATIC };
+	darwin_syscallnames[545] = "proc_info_extended_id";
 }

@@ -2139,6 +2139,30 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, error == 0 ? 0 : 1, NULL, 0);
 			return (true);
 		}
+	case 4807:					/* mach_vm_copy(task, source, size, dest) */
+	case 3808:					/* vm_copy: the same */
+		{
+			uint64_t src, size, dst, off = 0;
+			uint8_t *kb;
+			int error = 0;
+
+			if (m->size < 56) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+			src = rd64(d, 32); size = rd64(d, 40); dst = rd64(d, 48);
+			kb = malloc(1 << 16, M_DARWIN_IPC, M_WAITOK);
+			sx_xunlock(&km_sx);
+			while (off < size && error == 0) {
+				size_t n = MIN((uint64_t)(1 << 16), size - off);
+
+				error = p == td->td_proc ? copyin((void *)(uintptr_t)(src + off), kb, n) : proc_readmem(td, p, (vm_offset_t)(src + off), kb, n) == (ssize_t)n ? 0 : EFAULT;
+				if (error == 0)
+					error = p == td->td_proc ? copyout(kb, (void *)(uintptr_t)(dst + off), n) : proc_writemem(td, p, (vm_offset_t)(dst + off), kb, n) == (ssize_t)n ? 0 : EFAULT;
+				off += n;
+			}
+			sx_xlock(&km_sx);
+			free(kb, M_DARWIN_IPC);
+			mig_reply_data(m, id, error == 0 ? 0 : 1 /* KERN_INVALID_ADDRESS */, NULL, 0);
+			return (true);
+		}
 	case 1000:					/* clock_get_time(clock, *cur_time): a mach_timespec_t (two 32 bit numbers); the clock port has the calendar clock (kpid 1) or the system clock (0) */
 		{
 			struct timespec ts;
