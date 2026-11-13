@@ -1079,8 +1079,8 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (al.forkattr & 0x8)		PUT64(sb.st_size);			/* PRIVATESIZE */
 		if (al.forkattr & 0x10)		PUT64(sb.st_ino);			/* LINKID */
 		if (al.forkattr & 0x20)		{ nfref = p; p += 8; }
-		if (al.forkattr & 0x40)		PUT32(darwin_from_dev(sb.st_dev));	/* REALDEVID */
-		if (al.forkattr & 0x80)		{ PUT32(darwin_from_dev(sb.st_dev)); PUT32(darwin_from_dev(sb.st_dev) == 16777225 ? 26 : 0); }	/* REALFSID */
+		if (al.forkattr & 0x40)		PUT32(da_fsid[da_vol_of_path(path)]);	/* REALDEVID: the device of the volume that really holds the file (the system volume for /usr, the data volume for /Users) */
+		if (al.forkattr & 0x80)		{ PUT32(da_fsid[da_vol_of_path(path)]); PUT32(26); }	/* REALFSID */
 		if (al.forkattr & 0x100)	PUT64(0);				/* CLONEID */
 		if (al.forkattr & 0x200)	PUT64(0);				/* EXT_FLAGS */
 		if (al.forkattr & 0x400)	PUT64(0);				/* RECURSIVE_GENCOUNT */
