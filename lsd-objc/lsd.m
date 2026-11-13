@@ -3,6 +3,7 @@
  * Built on a Mac with the Xcode tools (clang -fobjc-arc -framework Foundation lsd.m), run on pearOS where the libraries come from the cache.
  * Environment: LSD_STORE = the csstore file that the clients map (a database that was made by a Mac for the same applications). */
 #import <Foundation/Foundation.h>
+#import <CoreServices/CoreServices.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
 #include <stdio.h>
@@ -68,6 +69,8 @@ static void logf_(NSString *s) { fprintf(stderr, "lsd-objc: %s\n", [s UTF8String
 			if (store) ((void(*)(id, SEL, char))objc_msgSend)(store, NSSelectorFromString(@"setReadOnly:"), 1);
 			logf_([NSString stringWithFormat:@"store %@ (%@)", store, e]);
 			((__bridge void (^)(id, id, id, char, id))blk)(store, node, nil, 0, nil);
+		} else if ([sel isEqualToString:@"getServerStatusWithCompletionHandler:"]) {	/* the status of the server (a Mac's lsd says 256) */
+			((__bridge void (^)(unsigned))blk)(256);
 		} else if (other == 0 && nobj == 2)		/* v@? then one object (an @? counts one): (nil) */
 			((__bridge void (^)(id))blk)(nil);
 		else if (other == 0 && nobj == 3)
@@ -124,6 +127,26 @@ int main(int argc, char **argv)
 				logf_([NSString stringWithFormat:@"execution context %@, setter %p", ctx, setctx]);
 				if (ctx) setctx(ctx);
 				[keep addObject:ctx ?: (id)[NSNull null]];
+			}
+			if (access("/var/db/lsd-store/register", F_OK) == 0) {	/* register the bundles that are listed in the file (one path a line): in the server the calls of LaunchServices work on the database directly */
+				NSString *lst = [NSString stringWithContentsOfFile:@"/var/db/lsd-store/register" encoding:NSUTF8StringEncoding error:nil];
+
+				dispatch_semaphore_t done = dispatch_semaphore_create(0);
+				NSArray *paths = [lst componentsSeparatedByString:@"\n"];
+				id ctx2 = keep.lastObject;
+
+				for (id o in keep) if ([o isKindOfClass:NSClassFromString(@"LSDBExecutionContext")]) ctx2 = o;
+				void (^work)(id, NSError *) = ^(id c, NSError *err) {
+					logf_([NSString stringWithFormat:@"write context %@ (%@)", c, err]);
+					for (NSString *pth in paths) {
+						if (pth.length == 0) continue;
+						OSStatus rs = LSRegisterURL((__bridge CFURLRef)[NSURL fileURLWithPath:pth isDirectory:YES], true);
+						logf_([NSString stringWithFormat:@"register %@ -> %d", pth, (int)rs]);
+					}
+					dispatch_semaphore_signal(done);
+				};
+				((void (*)(id, SEL, id))objc_msgSend)(ctx2, NSSelectorFromString(@"performAsyncWrite:"), work);
+				dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
 			}
 			if (access("/var/db/lsd-store/seed", F_OK) == 0) {	/* seed the database: the builder of the framework scans the system for applications */
 				dispatch_queue_t ioq = dispatch_queue_create("lsd-objc.io", DISPATCH_QUEUE_SERIAL);

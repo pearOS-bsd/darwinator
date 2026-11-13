@@ -420,6 +420,36 @@ darwin_fstatfs64(struct thread *td, struct darwin_args *uap)
 	return (error);
 }
 
+/* ---- fsgetpath(buf, bufsize, *fsid, objid): the path of a file by its file id (the one that getattrlist and stat give); the root file system has them all ---- */
+static int
+darwin_fsgetpath(struct thread *td, struct darwin_args *uap)
+{
+	struct mount *mp = rootvnode->v_mount;
+	struct vnode *vp;
+	char *fullpath = NULL, *freepath = NULL;
+	size_t bufsize = (size_t)uap->a[1], l;
+	int error;
+
+	if (bufsize == 0)
+		return (EINVAL);
+	if ((error = VFS_VGET(mp, (ino_t)uap->a[3], LK_SHARED, &vp)) != 0)
+		return (error == EOPNOTSUPP ? ENOTSUP : (error == ENOENT || error == ESTALE ? ENOENT : error));
+	error = vn_fullpath(vp, &fullpath, &freepath);
+	vput(vp);
+	if (error == 0) {
+		l = strlen(fullpath) + 1;
+		if (l > bufsize)
+			error = ERANGE;
+		else
+			error = copyout(fullpath, (void *)uap->a[0], l);
+		if (error == 0)
+			td->td_retval[0] = l;
+	}
+	if (freepath != NULL)
+		free(freepath, M_TEMP);
+	return (error);
+}
+
 /* ---- sigprocmask(how, *set, *oset): Darwin's sigset_t is 32 bits ---- */
 
 int
@@ -864,6 +894,7 @@ static const struct {
 	E(344, 4, darwin_getdirentries64, AUE_GETDIRENTRIES,	"getdirentries64"),
 	E(345, 2, darwin_statfs64,	AUE_STATFS,		"statfs64"),
 	E(346, 2, darwin_fstatfs64,	AUE_FSTATFS,		"fstatfs64"),
+	E(427, 4, darwin_fsgetpath,	AUE_NULL,		"fsgetpath"),
 	E(157, 2, darwin_statfs_old,	AUE_STATFS,		"statfs"),
 	E(158, 2, darwin_fstatfs_old,	AUE_FSTATFS,		"fstatfs"),
 	/* memory, signals, waiting */
