@@ -133,7 +133,7 @@ struct dkev {
 	uint32_t	fflags;
 	int64_t		data;
 	uint64_t	udata;
-	uint64_t	ext[2];		/* kevent64 only */
+	uint64_t	ext[3];		/* kevent64 only (ext[2] only from kevent_qos: the expected state of a workloop) */
 };
 
 struct dkev_arg {
@@ -253,7 +253,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 			if ((error = copyin(a->in, raw, 72)) != 0)
 				return (error);
 			memcpy(&d.ident, raw, 8); memcpy(&d.filter, raw + 8, 2); memcpy(&d.flags, raw + 10, 2); memcpy(&d.udata, raw + 16, 8);
-			memcpy(&d.fflags, raw + 24, 4); memcpy(&d.data, raw + 32, 8); memcpy(d.ext, raw + 40, 16);
+			memcpy(&d.fflags, raw + 24, 4); memcpy(&d.data, raw + 32, 8); memcpy(d.ext, raw + 40, 24);
 		} else if ((error = copyin(a->in, &d, a->size)) != 0)
 			return (error);
 		a->in += a->size;
@@ -298,7 +298,16 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		kevp[i].ext[0] = d.ext[0];
 		kevp[i].ext[1] = d.ext[1];
 		if (d.filter == -17 && (d.fflags & 0x1) != 0 && ((d.flags & EV_DELETE) != 0 || (d.flags & EV_DISABLE) == 0))			/* NOTE_WL_THREAD_REQUEST: a thread for the workloop (or back with EV_DELETE); with EV_DISABLE (and NOTE_WL_UPDATE_QOS) it is only an update of the QoS of a request that exists */
-			darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0);
+		{
+			/* XNU checks the state of the queue (ext: address of dq_state, mask, expected value) before it takes a request: when the queue has been taken by a thread already the request is stale */
+			uint64_t qs = 0;
+			bool stale = (d.flags & EV_DELETE) == 0 && d.ext[0] != 0 && d.ext[1] != 0 && copyin((void *)(uintptr_t)d.ext[0], &qs, 8) == 0 && (qs & d.ext[1]) != d.ext[2];
+
+			if (stale && darwin_debug >= 2)
+				printf("darwinator: stale thread request for the workloop %#lx: state %#lx mask %#lx want %#lx\n", (u_long)d.ident, (u_long)qs, (u_long)d.ext[1], (u_long)d.ext[2]);
+			if (!stale)
+				darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0);
+		}
 		if (d.filter == -17 && (d.fflags & (NOTE_WL_SYNC_WAIT | NOTE_WL_SYNC_WAKE)) != 0) {		/* the synchronisation of a workloop: done here (it may sleep); the kqueue gets a change that has no effect */
 			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1]);
 
@@ -827,6 +836,8 @@ struct darwin_attrlist {
 #define	DA_CMN_OBJTYPE		0x00000008
 #define	DA_CMN_OBJTAG		0x00000010
 #define	DA_CMN_OBJID		0x00000020
+#define	DA_CMN_PAROBJID		0x00000080
+#define	DA_CMN_SCRIPT		0x00000100
 #define	DA_CMN_CRTIME		0x00000200
 #define	DA_CMN_MODTIME		0x00000400
 #define	DA_CMN_CHGTIME		0x00000800
@@ -836,7 +847,7 @@ struct darwin_attrlist {
 #define	DA_CMN_ACCESSMASK	0x00020000
 #define	DA_CMN_FLAGS		0x00040000
 #define	DA_CMN_FILEID		0x02000000
-#define	DA_CMN_SUPPORTED	(DA_CMN_NAME | DA_CMN_DEVID | DA_CMN_FSID | DA_CMN_OBJTYPE | DA_CMN_OBJTAG | DA_CMN_OBJID | \
+#define	DA_CMN_SUPPORTED	(DA_CMN_NAME | DA_CMN_DEVID | DA_CMN_FSID | DA_CMN_OBJTYPE | DA_CMN_OBJTAG | DA_CMN_OBJID | DA_CMN_PAROBJID | DA_CMN_SCRIPT | \
 	DA_CMN_CRTIME | DA_CMN_MODTIME | DA_CMN_CHGTIME | DA_CMN_ACCTIME | DA_CMN_OWNERID | DA_CMN_GRPID | \
 	DA_CMN_ACCESSMASK | DA_CMN_FLAGS | DA_CMN_FILEID)
 #define	DA_CMN_GENCOUNT		0x00080000
@@ -877,8 +888,11 @@ struct darwin_attrlist {
 #define	DA_VOL_CAPABILITIES	0x00020000
 #define	DA_VOL_UUID		0x00040000
 #define	DA_VOL_ATTRIBUTES	0x40000000
+#define	DA_VOL_OBJCOUNT		0x00000100
+#define	DA_VOL_FILECOUNT	0x00000200
+#define	DA_VOL_DIRCOUNT		0x00000400
 #define	DA_VOL_INFO		0x80000000
-#define	DA_VOL_SUPPORTED	(DA_VOL_INFO | DA_VOL_FSTYPE | DA_VOL_SIGNATURE | DA_VOL_MINALLOC | DA_VOL_ALLOCCLUMP | DA_VOL_MOUNTFLAGS | DA_VOL_MOUNTEDDEVICE | DA_VOL_ENCODINGSUSED | DA_VOL_SIZE | DA_VOL_SPACEFREE | DA_VOL_SPACEAVAIL | DA_VOL_IOBLOCKSIZE | DA_VOL_MOUNTPOINT | DA_VOL_NAME | DA_VOL_CAPABILITIES | DA_VOL_UUID | DA_VOL_ATTRIBUTES)
+#define	DA_VOL_SUPPORTED	(DA_VOL_INFO | DA_VOL_OBJCOUNT | DA_VOL_FILECOUNT | DA_VOL_DIRCOUNT | DA_VOL_FSTYPE | DA_VOL_SIGNATURE | DA_VOL_MINALLOC | DA_VOL_ALLOCCLUMP | DA_VOL_MOUNTFLAGS | DA_VOL_MOUNTEDDEVICE | DA_VOL_ENCODINGSUSED | DA_VOL_SIZE | DA_VOL_SPACEFREE | DA_VOL_SPACEAVAIL | DA_VOL_IOBLOCKSIZE | DA_VOL_MOUNTPOINT | DA_VOL_NAME | DA_VOL_CAPABILITIES | DA_VOL_UUID | DA_VOL_ATTRIBUTES)
 static const uint8_t da_uuid_system[16] = { 0x2B, 0x58, 0x8F, 0x62, 0x3F, 0x2E, 0x49, 0x10, 0xAC, 0xDC, 0xB6, 0xC1, 0x03, 0x76, 0x68, 0xEB };
 static const uint8_t da_uuid_data[16] = { 0xFF, 0xB5, 0x71, 0x33, 0x80, 0x43, 0x40, 0x2E, 0xB8, 0xA2, 0x2F, 0xE7, 0x03, 0xF2, 0x07, 0x68 };
 
@@ -961,6 +975,8 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
 		if (cmn & DA_CMN_OBJTAG)	PUT32(0);
 		if (cmn & DA_CMN_OBJID)		{ PUT32(sb.st_ino); PUT32(sb.st_gen); }
+		if (cmn & DA_CMN_PAROBJID)	{ PUT32(2); PUT32(0); }		/* the parent: as PARENTID, not looked up */
+		if (cmn & DA_CMN_SCRIPT)	PUT32(0);			/* the text encoding: MacRoman */
 		if (cmn & DA_CMN_CRTIME)	PUTTS(sb.st_mtim);		/* the files of a Mac's system were made as they are: the creation time is the modification time (a copy keeps the second, not the birth) */
 		if (cmn & DA_CMN_MODTIME)	PUTTS(sb.st_mtim);
 		if (cmn & DA_CMN_CHGTIME)	PUTTS(sb.st_ctim);
@@ -990,6 +1006,9 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 			if (al.volattr & DA_VOL_MINALLOC)	PUT64(4096);
 			if (al.volattr & DA_VOL_ALLOCCLUMP)	PUT64(4096);
 			if (al.volattr & DA_VOL_IOBLOCKSIZE)	PUT32(4096);
+			if (al.volattr & DA_VOL_OBJCOUNT)	PUT32(1200000);
+			if (al.volattr & DA_VOL_FILECOUNT)	PUT32(1000000);
+			if (al.volattr & DA_VOL_DIRCOUNT)	PUT32(200000);
 			if (al.volattr & DA_VOL_MOUNTPOINT)	{ mpref = p; p += 8; }
 			if (al.volattr & DA_VOL_NAME)		{ nmref = p; p += 8; }
 			if (al.volattr & DA_VOL_MOUNTFLAGS)	PUT32(sysv ? 0x4480d001 : 0x4909000);
