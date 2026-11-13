@@ -89,16 +89,16 @@ darwin_setregs(struct thread *td, struct image_params *imgp, uintptr_t stack)
 static void
 darwin_set_syscall_retval(struct thread *td, int error)
 {
-	if (darwin_debug >= 3 && error == ENOENT && td->td_proc->p_sysent == &darwin_sysvec) {	/* the files that a program looks for and that are not there */
+	if (darwin_debug >= 3 && (error == ENOENT || error == ENOTDIR) && td->td_proc->p_sysent == &darwin_sysvec) {	/* the files that a program looks for and that are not there */
 		char path[200] = "";
 		size_t done;
 		unsigned c = td->td_sa.original_code & 0xffffff;
 		void *pp = (void *)td->td_sa.args[(c == 463 || c == 470) ? 1 : 0];
 
-		if ((td->td_sa.original_code >> 24) == 2 && (c == 5 || c == 33 || c == 338 || c == 340 || c == 398 || c == 274 || c == 463 || c == 470 || c == 58 || c == 190 || c == 191 || c == 462 || c == 461))
+		if ((td->td_sa.original_code >> 24) == 2 && (c == 5 || c == 33 || c == 338 || c == 340 || c == 398 || c == 274 || c == 463 || c == 470 || c == 58 || c == 190 || c == 191 || c == 462 || c == 461 || c == 220 || c == 344 || c == 345 || c == 33))
 			(void)copyinstr(pp, path, sizeof(path), &done);
 		if (path[0] != 0)
-			printf("darwinator: %s[%d]: ENOENT %u %s\n", td->td_proc->p_comm, td->td_proc->p_pid, c, path);
+			printf("darwinator: %s[%d]: %s %u %s\n", td->td_proc->p_comm, td->td_proc->p_pid, error == ENOENT ? "ENOENT" : "ENOTDIR", c, path);
 	}
 	native_set_syscall_retval(td, error > 0 ? darwin_errno(error) : error);
 }
