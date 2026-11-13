@@ -40,7 +40,7 @@ _Static_assert(sizeof(struct smap) == 48, "shared_file_mapping_slide_np");
 #define	SMAP_SLIDE	0x20
 
 #define	SR_N	64
-static struct { struct vmspace *vms; uint64_t start; } sr_tab[SR_N];
+static struct { struct vmspace *vms; uint64_t start; bool attached; } sr_tab[SR_N];		/* attached: the shared cache of the first process is mapped in this address space (a later check without a start does not map it again) */
 static struct mtx sr_mtx;
 static bool sr_inited;
 
@@ -111,6 +111,7 @@ srg_mapin(vm_map_t map, struct srg_map *g)
 	rv = vm_map_find(map, g->obj, g->off, &va, round_page(g->size), 0, VMFS_NO_SPACE, g->prot, g->maxprot | g->prot, MAP_COPY_ON_WRITE);
 	if (rv != KERN_SUCCESS) {
 		vm_object_deallocate(g->obj);
+		printf("darwinator: %s[%d]: cache sharing: cannot map %#lx +%#lx (%d)\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)g->va, (u_long)g->size, rv);
 		return (ENOMEM);
 	}
 	return (0);
@@ -232,6 +233,21 @@ darwin_shared_region_check_np(struct thread *td, struct darwin_args *uap)
 		}
 		return (0);
 	}
+	if (start == 0 && darwin_share_cache && srg_ready) {		/* mapped by us already (dyld said "unmapped" with NULL and asks again): the same start, nothing is mapped twice */
+		mtx_lock(&sr_mtx);
+		for (i = 0; i < SR_N; i++)
+			if (sr_tab[i].vms == vms && sr_tab[i].attached) {
+				vm_map_entry_t e0;
+				bool there;
+
+				vm_map_lock_read(&vms->vm_map);
+				there = vm_map_lookup_entry(&vms->vm_map, srg_start, &e0);		/* (the table is keyed by the address of the vmspace, which a later process can have again) */
+				vm_map_unlock_read(&vms->vm_map);
+				if (there) sr_tab[i].start = start = srg_start; else { sr_tab[i].attached = false; sr_tab[i].start = 0; }
+				break;
+			}
+		mtx_unlock(&sr_mtx);
+	}
 	if (start == 0 && darwin_share_cache && srg_ready) {
 		int ae = srg_attach(td);
 		if (darwin_debug)
@@ -241,7 +257,7 @@ darwin_shared_region_check_np(struct thread *td, struct darwin_args *uap)
 		start = srg_start;
 		mtx_lock(&sr_mtx);
 		for (i = 0; i < SR_N; i++)
-			if (sr_tab[i].vms == vms || sr_tab[i].start == 0) { sr_tab[i].vms = vms; sr_tab[i].start = start; break; }
+			if (sr_tab[i].vms == vms || sr_tab[i].start == 0) { sr_tab[i].vms = vms; sr_tab[i].start = start; sr_tab[i].attached = true; break; }
 		mtx_unlock(&sr_mtx);
 	}
 noattach:
@@ -440,7 +456,7 @@ darwin_shared_region_map_and_slide_2_np(struct thread *td, struct darwin_args *u
 			if (sr_tab[i].vms == vms || sr_tab[i].start == 0) { n = i; break; }
 		if (n < 0)
 			n = (int)(((uintptr_t)vms >> 8) % SR_N);
-		sr_tab[n].vms = vms; sr_tab[n].start = first;
+		sr_tab[n].vms = vms; sr_tab[n].start = first; sr_tab[n].attached = true;		/* (its own mapping or the shared one: either way the cache is there) */
 		mtx_unlock(&sr_mtx);
 		srg_capture(td, maps, nm, common_slide, first);
 	}

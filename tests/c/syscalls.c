@@ -438,7 +438,7 @@ int cmain(void)
 	  r = S(SYS_ulock_wake, 1, &lockword, 0, 0, 0, 0); check("ulock_wake with nobody waiting", r == 0, r); }
 	{ i64 tid = S(SYS_thread_selfid, 0, 0, 0, 0, 0, 0); check("thread_selfid", tid > 0, tid); check("__pthread_kill (signal 0 to this thread)", S(SYS_pthread_kill, tid, 0, 0, 0, 0, 0) == 0, 0); }
 	{ unsigned cs = 7; r = S(SYS_csops, 0, 0, &cs, 4, 0, 0); check("csops (status)", r == 0 && cs == 0, cs); }
-	check("shared_region_check_np is ENOMEM (no shared region)", S(SYS_shared_region_check_np, &buf, 0, 0, 0, 0, 0) == -12, 0);
+	{ long r_ = S(SYS_shared_region_check_np, &buf, 0, 0, 0, 0, 0); check("shared_region_check_np: ENOMEM (no shared region yet) or the shared cache of an earlier process", r_ == -12 || r_ == 0, 0); }
 
 	/* threads: bsdthread_register, bsdthread_create (the registers of the new thread), bsdthread_terminate */
 	{ i64 base = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0), top; static volatile unsigned dummy = 1;
