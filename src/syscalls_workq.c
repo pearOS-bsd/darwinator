@@ -84,7 +84,7 @@ struct wqp {
 	int		wantqos_oc;
 	int		nthreads;
 	struct { int64_t id; lwpid_t tid; } wl[WQ_NREQ];		/* the workloops that a thread works for now: one thread at a time for each */
-	struct { int64_t id; uint64_t udata; uint32_t qos; } req[WQ_NREQ];	/* thread requests of workloops (libdispatch wakes a serial queue with one) */
+	struct { int64_t id; uint64_t udata; uint32_t qos; uint64_t eaddr, emask, evalue; } req[WQ_NREQ];	/* thread requests of workloops (libdispatch wakes a serial queue with one) */
 	struct wqthr	thr[WQ_MAX_THREADS];
 };
 
@@ -323,6 +323,20 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		}
 		/* a thread request of a workloop that nobody serves */
 		for (k = 0; k < 16; k++) {
+			if (w->req[k].id != 0 && w->req[k].eaddr != 0 && w->req[k].emask != 0) {		/* the queue was taken (or emptied) since the request: the state is not the one that the request was made for (libdispatch aborts: "Invalid wlh state") */
+				uint64_t qs = 0;
+				uint64_t ea = w->req[k].eaddr, em = w->req[k].emask, ev = w->req[k].evalue;
+
+				mtx_unlock(&wq_mtx);
+				if (copyin((void *)(uintptr_t)ea, &qs, 8) == 0 && (qs & em) != ev) {
+					if (darwin_debug >= 2)
+						printf("darwinator: %s[%d]: the request of the workloop %#lx is stale (state %#lx mask %#lx want %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)w->req[k].id, (u_long)qs, (u_long)em, (u_long)ev);
+					mtx_lock(&wq_mtx);
+					if (w->req[k].eaddr == ea) w->req[k].id = 0;
+					continue;
+				}
+				mtx_lock(&wq_mtx);
+			}
 			if (w->req[k].id != 0 && !wl_busy(w, w->req[k].id) && wl_claim(w, w->req[k].id, td->td_tid)) {
 				int64_t rid = w->req[k].id;
 				uint64_t udata = w->req[k].udata, kqid = (uint64_t)rid;
@@ -367,6 +381,8 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 				uint64_t kqid = (uint64_t)ids[k];
 				t->parked = 0;
 
+				if (darwin_debug >= 2)
+					printf("darwinator: %s[%d]: a thread serves %d event(s) of the workloop %#lx (no thread request)\n", td->td_proc->p_comm, td->td_proc->p_pid, count, (u_long)kqid);
 				(void)copyout(&kqid, (void *)(kevent_list - 8), sizeof(kqid));
 				t->bound = ids[k];
 				top = (data_buf + davail) & ~0xfULL;
@@ -548,7 +564,7 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
  * workloop after it.  The check of the queue state (ext[0..2]) that XNU makes is not made: a thread may come for a queue that has no more work, which dispatch accepts.
  */
 void
-darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, bool add)
+darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, bool add, uint64_t eaddr, uint64_t emask, uint64_t evalue)
 {
 	struct wqp *w;
 	uint64_t wqstart, pthsize;
@@ -564,13 +580,13 @@ darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, b
 	w->wqstart = wqstart; w->pthsize = pthsize;
 	for (i = 0; i < WQ_NREQ; i++) {
 		if (w->req[i].id == id) {
-			if (add) { w->req[i].udata = udata; w->req[i].qos = qos; } else w->req[i].id = 0;
+			if (add) { w->req[i].udata = udata; w->req[i].qos = qos; w->req[i].eaddr = eaddr; w->req[i].emask = emask; w->req[i].evalue = evalue; } else w->req[i].id = 0;
 			freei = -2;
 			break;
 		}
 		if (w->req[i].id == 0 && freei == -1) freei = i;
 	}
-	if (add && freei >= 0) { w->req[freei].id = id; w->req[freei].udata = udata; w->req[freei].qos = qos; }
+	if (add && freei >= 0) { w->req[freei].id = id; w->req[freei].udata = udata; w->req[freei].qos = qos; w->req[freei].eaddr = eaddr; w->req[freei].emask = emask; w->req[freei].evalue = evalue; }
 	if (add) {
 		for (i = 0; i < WQ_MAX_THREADS; i++)
 			if (w->thr[i].used && w->thr[i].td != NULL) {

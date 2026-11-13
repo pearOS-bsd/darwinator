@@ -316,6 +316,13 @@ darwin_flistxattr(struct thread *td, struct darwin_args *uap)
 #define	ULF_WAKE_ALL		0x00000100
 #define	ULF_NO_ERRNO		0x01000000
 
+/* the sleep channel of a user address: the same address (libobjc's runtimeLock, the shared cache) is in every Mac process, so the process is part of the key: a wakeup_one in the Dock must not wake a thread of the Finder (the wake was lost: the Finder stayed asleep) */
+static void *
+ulock_chan(struct proc *p, uint64_t addr)
+{
+	return ((void *)(uintptr_t)(addr ^ ((uint64_t)p->p_pid << 47)));
+}
+
 /* an sx lock, not a mutex: reading the user's word can fault, and a fault sleeps */
 static struct sx ulock_sx;
 SX_SYSINIT(darwin_ulock, &ulock_sx, "darwin ulock");
@@ -338,7 +345,7 @@ darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t
 		if (fueword32((void *)addr, (int32_t *)&cur) == -1) { sx_xunlock(&ulock_sx); return (EFAULT); }
 		if (cur != (uint32_t)value) { sx_xunlock(&ulock_sx); td->td_retval[0] = 0; return (0); }
 	}
-	error = sx_sleep((void *)(uintptr_t)addr, &ulock_sx, PCATCH, "ulock", timo);
+	error = sx_sleep(ulock_chan(td->td_proc, addr), &ulock_sx, PCATCH, "ulock", timo);
 	sx_xunlock(&ulock_sx);
 	if (error == EWOULDBLOCK)
 		error = ETIMEDOUT;
@@ -381,9 +388,9 @@ darwin_ulock_wake(struct thread *td, struct darwin_args *uap)
 
 	sx_xlock(&ulock_sx);
 	if (op & ULF_WAKE_ALL)
-		wakeup((void *)uap->a[1]);
+		wakeup(ulock_chan(td->td_proc, uap->a[1]));
 	else
-		wakeup_one((void *)uap->a[1]);
+		wakeup_one(ulock_chan(td->td_proc, uap->a[1]));
 	sx_xunlock(&ulock_sx);
 	td->td_retval[0] = 0;
 	return (0);

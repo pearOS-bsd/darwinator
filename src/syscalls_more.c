@@ -176,7 +176,23 @@ darwin_ioctl(struct thread *td, struct darwin_args *uap)
 	struct termios t;
 	u_long fcom;
 
+	if (darwin_debug >= 1 && (com & 0xffff00) == 0x187300)
+		printf("darwinator: %s[%d]: ioctl %#lx on fd %d\n", td->td_proc->p_comm, td->td_proc->p_pid, com, fd);
 	switch (com) {
+	case 0x80187301: {			/* FSEVENTS_CLONE (/dev/fsevents): {event list, number of events, queue depth, int *fd}: a clone to read the events from; here a pipe whose write end stays open: no event ever comes */
+		struct { uint64_t list; int32_t nev, depth; uint64_t fdp; } fa;
+		int fds[2];
+
+		if ((error = copyin((void *)uap->a[2], &fa, sizeof(fa))) != 0)
+			return (error);
+		if ((error = kern_pipe(td, fds, 0, NULL, NULL)) != 0)
+			return (error);
+		error = copyout(&fds[0], (void *)(uintptr_t)fa.fdp, sizeof(int));
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: FSEVENTS_CLONE: fd %d (error %d)\n", td->td_proc->p_comm, td->td_proc->p_pid, fds[0], error);
+		td->td_retval[0] = 0;
+		return (error);
+	}
 	case DARWIN_TIOCGETA:
 		error = kern_ioctl(td, fd, TIOCGETA, (caddr_t)&t);
 		if (error == 0) {

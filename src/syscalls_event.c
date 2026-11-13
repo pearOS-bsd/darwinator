@@ -107,10 +107,10 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 			count -= drop;
 		}
 		if (error == 0)
-			td->td_retval[0] = count + (darwin_two_volumes ? 5 : 0);		/* the root is six volumes */
+			td->td_retval[0] = count + (darwin_two_volumes == 2 ? 1 : darwin_two_volumes ? 5 : 0);		/* the root is six volumes (two with two_volumes=2: system and data) */
 		return (error);
 	}
-	error = kern_getfsstat(td, &sb, (maxn > 5 && darwin_two_volumes ? maxn - 5 : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
+	error = kern_getfsstat(td, &sb, (maxn > 5 && darwin_two_volumes ? maxn - (darwin_two_volumes == 2 ? 1 : 5) : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
 	    mode == 1 ? MNT_WAIT : MNT_NOWAIT);
 	if (error == 0) {
 		size_t j = 0;
@@ -124,11 +124,12 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 				continue;
 			error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), two ? 1 : 0);
 			if (two && darwin_two_volumes) {		/* the other volumes of the container, in the order of a Mac: Preboot, VM, Update, Data, Update/mnt1 */
-				static const int order[] = { 3, 4, 5, 2, 6 };
-				size_t k;
+				static const int order[] = { 3, 4, 5, 2, 6 }, order2[] = { 2 };
+				const int *ord = darwin_two_volumes == 2 ? order2 : order;
+				size_t k, nord = darwin_two_volumes == 2 ? nitems(order2) : nitems(order);
 
-				for (k = 0; k < nitems(order) && error == 0 && j < maxn; k++)
-					error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), order[k]);
+				for (k = 0; k < nord && error == 0 && j < maxn; k++)
+					error = darwin_statfs_out_vol(&sb[i], ubuf + j++ * sizeof(struct darwin_statfs64), ord[k]);
 			}
 		}
 		if (error == 0)
@@ -322,7 +323,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 			if (stale && darwin_debug >= 2)
 				printf("darwinator: stale thread request for the workloop %#lx: state %#lx mask %#lx want %#lx\n", (u_long)d.ident, (u_long)qs, (u_long)d.ext[1], (u_long)d.ext[2]);
 			if (!stale)
-				darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0);
+				darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0, d.ext[0], d.ext[1], d.ext[2]);
 		}
 		if (d.filter == -17 && (d.fflags & (NOTE_WL_SYNC_WAIT | NOTE_WL_SYNC_WAKE)) != 0) {		/* the synchronisation of a workloop: done here (it may sleep); the kqueue gets a change that has no effect */
 			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1]);
@@ -1103,18 +1104,33 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 
 			memcpy(vnmref, &off, 4); memcpy(vnmref + 4, &l, 4); memcpy(p, vn, l); p += roundup2(l, 4);
 		}
-		if (relref != NULL) {
-			const char *rp = path[0] == '/' ? path + 1 : path;		/* relative to the volume */
-			int32_t off = (int32_t)(p - relref);
-			uint32_t l = (uint32_t)strlen(rp) + 1;
+		if (relref != NULL || nfref != NULL) {
+			/* RELPATH: the path in its volume, with the slash ("/" for the root of the volume); NOFIRMLINKPATH: where it really is (the data volume mounts under /System/Volumes/Data, a firmlink makes /Users show on "/") */
+			char rbuf[MAXPATHLEN], nbuf[MAXPATHLEN + 32];
+			int pvi = da_vol_of_path(path);
+			const char *pre = pvi > 1 ? da_vols[pvi].on : "";
+			size_t pl = strlen(pre);
 
-			memcpy(relref, &off, 4); memcpy(relref + 4, &l, 4); memcpy(p, rp, l); p += roundup2(l, 4);
-		}
-		if (nfref != NULL) {
-			int32_t off = (int32_t)(p - nfref);
-			uint32_t l = (uint32_t)strlen(path) + 1;
+			if (pvi > 1 && strncmp(path, pre, pl) == 0 && (path[pl] == '/' || path[pl] == 0)) {
+				strlcpy(rbuf, path[pl] ? path + pl : "/", sizeof(rbuf));
+				strlcpy(nbuf, path, sizeof(nbuf));
+			} else {
+				strlcpy(rbuf, path, sizeof(rbuf));
+				if (pvi == 2) { strlcpy(nbuf, "/System/Volumes/Data", sizeof(nbuf)); if (strcmp(path, "/") != 0) strlcat(nbuf, path, sizeof(nbuf)); }
+				else strlcpy(nbuf, path, sizeof(nbuf));
+			}
+			if (relref != NULL) {
+				int32_t off = (int32_t)(p - relref);
+				uint32_t l = (uint32_t)strlen(rbuf) + 1;
 
-			memcpy(nfref, &off, 4); memcpy(nfref + 4, &l, 4); memcpy(p, path, l); p += roundup2(l, 4);
+				memcpy(relref, &off, 4); memcpy(relref + 4, &l, 4); memcpy(p, rbuf, l); p += roundup2(l, 4);
+			}
+			if (nfref != NULL) {
+				int32_t off = (int32_t)(p - nfref);
+				uint32_t l = (uint32_t)strlen(nbuf) + 1;
+
+				memcpy(nfref, &off, 4); memcpy(nfref + 4, &l, 4); memcpy(p, nbuf, l); p += roundup2(l, 4);
+			}
 		}
 		if (vmdref != NULL) {
 			const char *dv = da_vols[vidx].dev;

@@ -76,6 +76,16 @@ darwin_oflags(int d)
 static int
 darwin_open(struct thread *td, struct darwin_args *uap)
 {
+	char path[32];
+
+	/* /dev/fsevents (coreservicesd's file watch): a descriptor that takes the FSEVENTS_CLONE ioctl (see darwin_ioctl); /dev/null is its body */
+	if (copyinstr((const char *)uap->a[0], path, sizeof(path), NULL) == 0 && strcmp(path, "/dev/fsevents") == 0) {
+		int error = kern_openat(td, AT_FDCWD, "/dev/null", UIO_SYSSPACE, O_RDWR, 0);
+
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: /dev/fsevents opened: error %d fd %ld\n", td->td_proc->p_comm, td->td_proc->p_pid, error, (long)td->td_retval[0]);
+		return (error);
+	}
 	return (kern_openat(td, AT_FDCWD, (const char *)uap->a[0], UIO_USERSPACE, darwin_oflags((int)uap->a[1]), (int)uap->a[2]));
 }
 
@@ -129,13 +139,32 @@ darwin_stat_out(struct thread *td, const struct stat *sb, void *ubuf)
 	return (copyout(&d, ubuf, sizeof(d)));
 }
 
+/* the volumes of the Mac under /System/Volumes have their own st_dev (Preboot 16777226, VM 16777229, Update 16777230, Update/mnt1 16777228): CarbonCore finds a volume by the device of a path */
+static void
+darwin_stat_dev_fix(const char *upath, void *ubuf)
+{
+	char path[MAXPATHLEN];
+	int32_t dev = 0;
+
+	if (copyinstr(upath, path, sizeof(path), NULL) != 0 || strncmp(path, "/System/Volumes/", 16) != 0)
+		return;
+	if (strncmp(path + 16, "Preboot", 7) == 0) dev = 16777226;
+	else if (strncmp(path + 16, "VM", 2) == 0) dev = 16777229;
+	else if (strncmp(path + 16, "Update/mnt1", 11) == 0) dev = 16777228;
+	else if (strncmp(path + 16, "Update", 6) == 0) dev = 16777230;
+	if (dev != 0)
+		(void)copyout(&dev, ubuf, sizeof(dev));
+}
+
 static int
 darwin_stat64(struct thread *td, struct darwin_args *uap)
 {
 	struct stat sb;
 	int error = kern_statat(td, 0, AT_FDCWD, (const char *)uap->a[0], UIO_USERSPACE, &sb);
 
-	return (error != 0 ? error : darwin_stat_out(td, &sb, (void *)uap->a[1]));
+	if (error == 0 && (error = darwin_stat_out(td, &sb, (void *)uap->a[1])) == 0)
+		darwin_stat_dev_fix((const char *)uap->a[0], (void *)uap->a[1]);
+	return (error);
 }
 
 static int
@@ -144,7 +173,9 @@ darwin_lstat64(struct thread *td, struct darwin_args *uap)
 	struct stat sb;
 	int error = kern_statat(td, AT_SYMLINK_NOFOLLOW, AT_FDCWD, (const char *)uap->a[0], UIO_USERSPACE, &sb);
 
-	return (error != 0 ? error : darwin_stat_out(td, &sb, (void *)uap->a[1]));
+	if (error == 0 && (error = darwin_stat_out(td, &sb, (void *)uap->a[1])) == 0)
+		darwin_stat_dev_fix((const char *)uap->a[0], (void *)uap->a[1]);
+	return (error);
 }
 
 static int
