@@ -213,7 +213,7 @@ timer_fflags_from_darwin(uint32_t f)
 #define	NOTE_WL_SYNC_WAIT	0x4
 #define	NOTE_WL_SYNC_WAKE	0x8
 #define	NOTE_WL_END_OWNERSHIP	0x20
-#define	SW_N	128
+#define	SW_N	1024
 static struct { bool used; uint64_t tid; int state; } sw_tab[SW_N];		/* state: 0 waiting, 1 woken (it has not run yet), 2 a wake that came first, 3 owner (woken and running), 4 cancelled */
 static struct mtx sw_mtx;
 MTX_SYSINIT(darwin_sw_mtx, &sw_mtx, "darwin wl sync", MTX_DEF);
@@ -221,6 +221,26 @@ MTX_SYSINIT(darwin_sw_mtx, &sw_mtx, "darwin wl sync", MTX_DEF);
 /* returns 0, or ENOENT for an end that finds no waiter */
 int darwin_wl_trace;
 SYSCTL_INT(_kern_darwinator, OID_AUTO, wl_trace, CTLFLAG_RW, &darwin_wl_trace, 0, "log the workloop synchronisation (NOTE_WL_SYNC_WAIT/WAKE, END_OWNERSHIP)");
+
+static int
+darwin_wl_dump_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	int v = 0, e, i, n = 0;
+
+	e = sysctl_handle_int(oidp, &v, 0, req);
+	if (e != 0 || req->newptr == NULL)
+		return (e);
+	mtx_lock(&sw_mtx);
+	for (i = 0; i < SW_N; i++)
+		if (sw_tab[i].used) {
+			n++;
+			printf("darwinator: wl entry %d: ident %#lx state %d\n", i, (u_long)sw_tab[i].tid, sw_tab[i].state);
+		}
+	mtx_unlock(&sw_mtx);
+	printf("darwinator: wl table: %d entries\n", n);
+	return (0);
+}
+SYSCTL_PROC(_kern_darwinator, OID_AUTO, wl_dump, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, NULL, 0, darwin_wl_dump_sysctl, "I", "write: print the table of workloop waiters");
 
 static int
 darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
