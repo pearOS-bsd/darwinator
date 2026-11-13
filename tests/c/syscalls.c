@@ -679,7 +679,9 @@ int cmain(void)
 	{ u64 guard = 0x1234; i64 g = S(SYS_guarded_open, "/tmp/dsc/gx", &guard, 1, O_WRONLY | O_CREAT, 0600, 0); check("guarded_open_np", g >= 0, g); if (g >= 0) check("guarded_close_np", S(SYS_guarded_close, g, &guard, 0, 0, 0, 0) == 0, 0); S(SYS_unlink, "/tmp/dsc/gx", 0, 0, 0, 0, 0); }
 	check("clonefileat is ENOTSUP (45): programs go on with a copy", S(SYS_clonefileat, -2, "/tmp/dsc/a", -2, "/tmp/dsc/cl", 0, 0) == -45, 0);
 	check("exchangedata is ENOTSUP", S(SYS_exchangedata, "/tmp/dsc/a", "/tmp/dsc/a", 0, 0, 0, 0) == -45, 0);
-	check("getattrlistbulk is ENOTSUP", S(SYS_getattrlistbulk, 0, 0, 0, 0, 0, 0) == -45, 0);
+	{ i64 dfd = S(SYS_open, "/tmp/dsc", O_RDONLY, 0, 0, 0, 0); unsigned int al[5] = { 0x00000005, 0x80000001, 0, 0, 0 }; char bb[4096]; i64 nb;
+	  nb = dfd >= 0 ? S(SYS_getattrlistbulk, dfd, al, bb, sizeof(bb), 0, 0) : -1; check("getattrlistbulk gives the entries of a directory", nb >= 2, nb);
+	  if (dfd >= 0) { nb = S(SYS_getattrlistbulk, dfd, al, bb, sizeof(bb), 0, 0); check("getattrlistbulk gives 0 at the end", nb == 0, nb); S(SYS_close, dfd, 0, 0, 0, 0, 0); } }
 	check("ptrace PT_DENY_ATTACH is accepted", S(SYS_ptrace, 31, 0, 0, 0, 0, 0) == 0, 0);
 	check("kdebug_trace is accepted", S(SYS_kdebug_trace, 0, 0, 0, 0, 0, 0) == 0, 0);
 	{ i64 shm = S(SYS_shm_open, "/dsc_shm", 2 | O_CREAT, 0600, 0, 0, 0); check("shm_open", shm >= 0, shm); if (shm >= 0) S(SYS_close, shm, 0, 0, 0, 0, 0); check("shm_unlink", S(SYS_shm_unlink, "/dsc_shm", 0, 0, 0, 0, 0) == 0, 0); }
