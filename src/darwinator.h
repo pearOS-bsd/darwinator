@@ -69,6 +69,7 @@ int32_t	darwin_from_dev(dev_t);
 struct statfs;
 struct stat;
 int	darwin_statfs_out(const struct statfs *, void *);
+int	darwin_statfs_out_vol(const struct statfs *, void *, int);
 int	darwin_sigprocmask(struct thread *, struct darwin_args *);
 int	darwin_stat_out(struct thread *, const struct stat *, void *);
 int	darwin_msgflags_pub(int);

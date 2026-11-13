@@ -268,8 +268,28 @@ out:
 
 /* ---- statfs64, fstatfs64 ---- */
 
+/* a ufs/zfs file system of this system is shown as the two APFS volumes of a Mac (system "/" and data "/System/Volumes/Data"): vol 1 system, 2 data, 0 as it is */
+static void
+darwin_apfsify(struct darwin_statfs64 *d, int vol)
+{
+	if (vol == 0 || strcmp(d->f_fstypename, "devfs") == 0 || strcmp(d->f_fstypename, "msdosfs") == 0)
+		return;
+	strlcpy(d->f_fstypename, "apfs", sizeof(d->f_fstypename));
+	d->f_type = 26; d->f_fssubtype = 1;
+	d->f_fsid[0] = vol == 1 ? 16777231 : 16777225; d->f_fsid[1] = 26;
+	d->f_flags = vol == 1 ? 0x4480d001 : 0x4909000;
+	strlcpy(d->f_mntonname, vol == 1 ? "/" : "/System/Volumes/Data", sizeof(d->f_mntonname));
+	strlcpy(d->f_mntfromname, vol == 1 ? "/dev/disk3s4s1" : "/dev/disk3s1", sizeof(d->f_mntfromname));
+}
+
+static bool
+darwin_path_on_system_volume(const char *path)
+{
+	return (strcmp(path, "/") == 0 || strncmp(path, "/System", 7) == 0 || strncmp(path, "/usr", 4) == 0 || strncmp(path, "/bin", 4) == 0 || strncmp(path, "/sbin", 5) == 0);
+}
+
 int
-darwin_statfs_out(const struct statfs *s, void *ubuf)
+darwin_statfs_out_vol(const struct statfs *s, void *ubuf, int vol)
 {
 	struct darwin_statfs64 *d;
 	int error;
@@ -290,9 +310,16 @@ darwin_statfs_out(const struct statfs *s, void *ubuf)
 	strlcpy(d->f_fstypename, s->f_fstypename, sizeof(d->f_fstypename));
 	strlcpy(d->f_mntonname, s->f_mntonname, sizeof(d->f_mntonname));
 	strlcpy(d->f_mntfromname, s->f_mntfromname, sizeof(d->f_mntfromname));
+	darwin_apfsify(d, vol);
 	error = copyout(d, ubuf, sizeof(*d));
 	free(d, M_DARWIN);
 	return (error);
+}
+
+int
+darwin_statfs_out(const struct statfs *s, void *ubuf)
+{
+	return (darwin_statfs_out_vol(s, ubuf, 0));
 }
 
 /* statfs/fstatfs (157, 158): the old struct statfs of the real Mac (tools/macprobe/probe3): short otype, oflags; 8 byte bsize iosize blocks bfree bavail files ffree at 8..63;
@@ -350,9 +377,12 @@ darwin_statfs64(struct thread *td, struct darwin_args *uap)
 {
 	struct statfs *s = malloc(sizeof(*s), M_DARWIN, M_WAITOK | M_ZERO);
 	int error = kern_statfs(td, (const char *)uap->a[0], UIO_USERSPACE, s);
+	char path[MAXPATHLEN];
 
+	if (error == 0 && copyinstr((const char *)uap->a[0], path, sizeof(path), NULL) != 0)
+		strlcpy(path, "/", sizeof(path));
 	if (error == 0)
-		error = darwin_statfs_out(s, (void *)uap->a[1]);
+		error = darwin_statfs_out_vol(s, (void *)uap->a[1], darwin_path_on_system_volume(path) ? 1 : 2);
 	free(s, M_DARWIN);
 	return (error);
 }
@@ -362,9 +392,26 @@ darwin_fstatfs64(struct thread *td, struct darwin_args *uap)
 {
 	struct statfs *s = malloc(sizeof(*s), M_DARWIN, M_WAITOK | M_ZERO);
 	int error = kern_fstatfs(td, (int)uap->a[0], s);
+	int vol = 2;
 
-	if (error == 0)
-		error = darwin_statfs_out(s, (void *)uap->a[1]);
+	if (error == 0) {		/* the path of the vnode tells the volume */
+		struct file *fp;
+		cap_rights_t rights;
+
+		if (getvnode(td, (int)uap->a[0], cap_rights_init_one(&rights, CAP_FSTAT), &fp) == 0) {
+			char *fullpath = NULL, *freepath = NULL;
+			struct vnode *vp = fp->f_vnode;
+
+			vref(vp);
+			if (vn_fullpath(vp, &fullpath, &freepath) == 0 && fullpath != NULL)
+				vol = darwin_path_on_system_volume(fullpath) ? 1 : 2;
+			vrele(vp);
+			if (freepath != NULL)
+				free(freepath, M_TEMP);
+			fdrop(fp, td);
+		}
+		error = darwin_statfs_out_vol(s, (void *)uap->a[1], vol);
+	}
 	free(s, M_DARWIN);
 	return (error);
 }
