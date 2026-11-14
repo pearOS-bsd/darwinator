@@ -57,7 +57,9 @@ static uint64_t srg_start;
 static bool srg_ready;
 static struct sx srg_sx;
 static int darwin_share_cache = 1;
+static int darwin_use_cache = 1;			/* 0: the dyld cache is refused (dyld goes on without it and loads every framework from the disk: a root with our own frameworks) */
 SYSCTL_DECL(_kern_darwinator);
+SYSCTL_INT(_kern_darwinator, OID_AUTO, use_cache, CTLFLAG_RW, &darwin_use_cache, 0, "0: the shared region of the dyld cache is refused, the frameworks come from the disk");
 SYSCTL_INT(_kern_darwinator, OID_AUTO, share_cache, CTLFLAG_RW, &darwin_share_cache, 0, "the processes share the pages of the dyld cache that nobody writes (the first one makes the shared objects)");
 
 /* the object is shared by many mappings now: when the mapping that made it goes away its pages must stay (else the pages of an object that has one mapping are freed with it) */
@@ -241,6 +243,8 @@ darwin_shared_region_check_np(struct thread *td, struct darwin_args *uap)
 	for (i = 0; i < SR_N; i++)
 		if (sr_tab[i].vms == vms && sr_tab[i].start != 0) { start = sr_tab[i].start; break; }
 	mtx_unlock(&sr_mtx);
+	if (!darwin_use_cache)
+		return (ENOMEM);
 	if (uap->a[0] == 0) {			/* NULL: dyld has unmapped the region */
 		if (start != 0) {
 			mtx_lock(&sr_mtx);
@@ -383,6 +387,8 @@ darwin_shared_region_map_and_slide_2_np(struct thread *td, struct darwin_args *u
 	uint64_t first = 0, common_slide = 0;
 	int error, n;
 
+	if (!darwin_use_cache)
+		return (EPERM);
 	if (nf == 0 || nf > 32 || nm == 0 || nm > 256)
 		return (EINVAL);
 	files = malloc(nf * sizeof(*files), M_DARWIN, M_WAITOK);
