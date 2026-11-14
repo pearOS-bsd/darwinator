@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/ptrace.h>
 #include <sys/signalvar.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysent.h>
@@ -127,6 +128,39 @@ wq_get(struct proc *p, bool create)
 	memset(&wqs[freei], 0, sizeof(wqs[freei]));
 	wqs[freei].p = p; wqs[freei].pid = p->p_pid;
 	return (&wqs[freei]);
+}
+
+/* debugging: the thread requests that wait and the workloops that threads work for (sysctl kern.darwinator.wl_dump), with the state word of each queue read now */
+void
+darwin_wq_dump_all(void)
+{
+	struct { struct proc *p; pid_t pid; int64_t id; uint64_t ea, em, ev; lwpid_t tid; } snap[64];
+	int n = 0, i, k;
+
+	mtx_lock(&wq_mtx);
+	for (i = 0; i < (int)nitems(wqs) && n < 60; i++) {
+		if (wqs[i].p == NULL) continue;
+		for (k = 0; k < WQ_NREQ && n < 62; k++)
+			if (wqs[i].req[k].id != 0) { snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].req[k].id; snap[n].ea = wqs[i].req[k].eaddr; snap[n].em = wqs[i].req[k].emask; snap[n].ev = wqs[i].req[k].evalue; snap[n].tid = 0; n++; }
+		for (k = 0; k < WQ_NREQ && n < 62; k++)
+			if (wqs[i].wl[k].id != 0) { snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].wl[k].id; snap[n].ea = 0; snap[n].em = 0; snap[n].ev = 0; snap[n].tid = wqs[i].wl[k].tid; n++; }
+	}
+	mtx_unlock(&wq_mtx);
+	for (i = 0; i < n; i++) {
+		uint64_t qs = 0;
+		struct proc *p = pfind(snap[i].pid);
+
+		if (p != NULL && p == snap[i].p && snap[i].ea != 0) {
+			_PHOLD(p); PROC_UNLOCK(p);
+			(void)proc_readmem(curthread, p, (vm_offset_t)snap[i].ea, &qs, 8);
+			PRELE(p);
+		} else if (p != NULL)
+			PROC_UNLOCK(p);
+		if (snap[i].tid != 0)
+			printf("darwinator: wl bound   pid %d wl %#lx served by tid %d\n", snap[i].pid, (u_long)snap[i].id, snap[i].tid);
+		else
+			printf("darwinator: wl request pid %d wl %#lx state %#lx mask %#lx want %#lx\n", snap[i].pid, (u_long)snap[i].id, (u_long)qs, (u_long)snap[i].em, (u_long)snap[i].ev);
+	}
 }
 
 void
@@ -351,7 +385,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 					mtx_lock(&wq_mtx);
 					continue;
 				}
-				if (qs != 0 && (qs & em) != (ev & em)) {
+				if (qs != 0 && (qs & em & ~0x700000000ULL) != (ev & em & ~0x700000000ULL)) {
 					if (darwin_debug >= 2)
 						printf("darwinator: %s[%d]: the request of the workloop %#lx is stale (state %#lx mask %#lx want %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)w->req[k].id, (u_long)qs, (u_long)em, (u_long)ev);
 					mtx_lock(&wq_mtx);

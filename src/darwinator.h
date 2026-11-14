@@ -84,6 +84,7 @@ int	darwin_fileport_makeport(struct thread *, struct darwin_args *);
 int	darwin_fileport_makefd(struct thread *, struct darwin_args *);
 void	darwin_misc_syscalls_init(void);		/* syscalls_misc.c */
 void	darwin_dyld_syscalls_fini(void);
+void	darwin_wq_dump_all(void);
 void	darwin_dyld_syscalls_init(void);		/* syscalls_dyld.c */
 void	darwin_proc_syscalls_init(void);		/* syscalls_proc.c */
 int	darwin_sysctl_proc(struct thread *, int *, u_int, void *, void *, bool);
