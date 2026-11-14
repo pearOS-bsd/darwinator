@@ -65,10 +65,9 @@ int main(int argc, char **argv)
 		id conf = [[lis class] respondsToSelector:@selector(listenerWithConfiguration:handler:)] ? [NSClassFromString(@"BSServiceConnectionListenerConfiguration") performSelector:NSSelectorFromString(@"configurationWithDomain:service:") withObject:dom withObject:svc] : nil;
 		L(@"configuration %@", conf);
 		static id listener;
-		void (^hand)(id, id, id) = ^(id a1, id a2, id a3) {
-			L(@"handler %@ %@ %@", [a1 class], [a2 class], [a3 class]);
-			id c = [a1 isKindOfClass:NSClassFromString(@"BSServiceConnection")] ? a1 : [a2 isKindOfClass:NSClassFromString(@"BSServiceConnection")] ? a2 : a3;
-			[srv listener:nil didReceiveConnection:c withContext:nil];
+		void (^hand)(id, id) = ^(id l, id c) {
+			L(@"handler %@ %@", [l class], [c class]);
+			[srv listener:l didReceiveConnection:c withContext:nil];
 		};
 		listener = ((id (*)(id, SEL, id, id))objc_msgSend)(lis, NSSelectorFromString(@"listenerWithConfiguration:handler:"), conf, hand);
 		L(@"listener made %@", listener);
