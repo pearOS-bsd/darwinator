@@ -83,6 +83,11 @@ wsd_socket(u32 pid)
 	}
 	for (i = 0; i < 64; i++)
 		if (clients[i].fd == 0) { clients[i].pid = pid; clients[i].fd = fd; break; }
+	{						/* the hello: wsd knows the peer of the socket (this program), not the client whose requests go over it */
+		u32 hello[7] = { 0, 28, 0, 0, 0, 0x50494400, pid };
+
+		send(fd, hello, 28, 0);
+	}
 	return (fd);
 }
 
