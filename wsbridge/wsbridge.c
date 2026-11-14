@@ -226,7 +226,21 @@ send_complex(int fd)
 			u32 name = *(u32 *)(dg + off);
 			int sv[2];
 
-			if (nfds >= 8) return (-1);
+			if (nfds >= 8 && rq.h.id != 32000) return (-1);
+			if (rq.h.id == 32000) {
+				/* NewConnectionPort: the first port is the notification port of the client (a receive right of its own that it gives a send right to), the second a task token: the event channel is for the first; wsd gets the
+				 * end that it writes to, and what it writes goes to that port (poll_events): the client wakes and pulls the datagrams with GetPortStreamOutofline */
+				if (i == 0) {
+					if (socketpair(1, 5, 0, sv) != 0) return (-1);
+					fds[nfds++] = sv[1];
+					for (k = 0; k < 64; k++)
+						if (evch[k].fd == 0) { evch[k].fd = sv[0]; evch[k].port = name; break; }
+					out("wsbridge:   event channel for the notification port "); outx(name); out("\n");
+				}
+				*(u32 *)d = 1;
+				off += 12;
+				continue;
+			}
 			if (nfds == 0)
 				fds[nfds++] = fd;			/* the first port stands for this connection */
 			else {
@@ -260,7 +274,7 @@ send_complex(int fd)
 		mh.iov = &iov; mh.iovlen = 1; mh.control = ctl; mh.controllen = (16 + 4 * nfds + 7) & ~7u;
 	}
 	n = sendmsg(fd, &mh, 0);
-	for (k = 1; k < nfds; k++) close(fds[k]);			/* the ends that went to wsd */
+	for (k = (rq.h.id == 32000 ? 0 : 1); k < nfds; k++) close(fds[k]);			/* the ends that went to wsd */
 	return (n == (long)tail ? 0 : -1);
 }
 
