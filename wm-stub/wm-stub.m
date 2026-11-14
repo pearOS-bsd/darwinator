@@ -63,7 +63,7 @@ static int (*p_torder)(void *, uint32_t, int, uint32_t);
 static int (*p_tcommit)(void *, int);
 typedef struct { double x, y, w, h; } WRect;
 static WRect (*p_dbounds)(uint32_t); static uint32_t (*p_mainid)(void);
-static int (*p_newrgn)(const WRect *, void **), (*p_setshape)(int, uint32_t, float, float, void *), (*p_relrgn)(void *);
+static int (*p_newrgn)(const WRect *, void **), (*p_setshape)(int, uint32_t, void *), (*p_relrgn)(void *);
 static NSMutableDictionary *frames;		/* window identifier -> NSValue of the frame (AppKit's: the origin is the lower left) */
 static NSMutableDictionary *wids;		/* window identifier (UUID) -> CGWindowID */
 static void sls_init(void)
@@ -85,10 +85,10 @@ static void apply_frame(NSString *u)
 	[fv getValue:&f];
 	if (f.w < 1 || f.h < 1) return;
 	double H = p_dbounds && p_mainid ? p_dbounds(p_mainid()).h : 800;
-	WRect r = { 0, 0, f.w, f.h }; void *rg = NULL;
+	WRect r = { f.x, H - (f.y + f.h), f.w, f.h }; void *rg = NULL;		/* the shape is in screen coordinates (the origin at the top left) */
 	int rc = p_newrgn(&r, &rg);
-	if (rc == 0 && rg) { rc = p_setshape(p_cid(), [w unsignedIntValue], (float)f.x, (float)(H - (f.y + f.h)), rg); if (p_relrgn) p_relrgn(rg); }
-	L(@"frame window %@: %g,%g %gx%g (screen height %g) -> %d", w, f.x, H - (f.y + f.h), f.w, f.h, H, rc);
+	if (rc == 0 && rg) { rc = p_setshape(p_cid(), [w unsignedIntValue], rg); if (p_relrgn) p_relrgn(rg); }
+	L(@"frame window %@: %g,%g %gx%g (screen height %g) region rc -> %d", w, f.x, H - (f.y + f.h), f.w, f.h, H, rc);
 }
 static void apply_action(id a)
 {
