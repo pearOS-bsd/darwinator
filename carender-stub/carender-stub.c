@@ -7,6 +7,7 @@ extern int bootstrap_check_in(u32 bp, const char *name, u32 *port);
 extern int mach_msg(void *msg, int opt, u32 ssz, u32 rsz, u32 rname, u32 to, u32 notify);
 extern int mach_port_allocate(u32 task, u32 right, u32 *name);
 extern int mach_port_insert_right(u32 task, u32 name, u32 poly, u32 how);
+extern int mach_port_destroy(u32 task, u32 name);
 extern int mach_port_insert_member(u32 task, u32 name, u32 pset);
 extern u32 mach_task_self_;
 extern long write(int fd, const void *buf, unsigned long n);
@@ -72,6 +73,8 @@ answer_register(u32 *buf, u32 p1, u32 p2, u32 n1, u32 n2, u32 last)
 	rep[19] = last;
 	mach_msg(rep, 1, 0x50, 0, 0, 0, 0);
 }
+
+static u32 fences[64], nfence;
 
 int
 main(void)
@@ -144,12 +147,32 @@ main(void)
 					out("carender-stub: answered "); hex(buf[5], 8); out("\n");
 				}
 		}
-		if (buf[5] == 0x9c42 && (buf[0] & 0x80000000) && buf[6] >= 1 && ((buf[9] >> 16) & 0xff) == 0x12) {	/* a commit with a send-once right (the Dock waits on it): an empty message to it */
-			u32 ack[6];
+		if (buf[5] == 0x9c42 && (buf[0] & 0x80000000) && buf[6] >= 1) {	/* a commit with a send-once right among its descriptors (the client waits on it: no new commit before the answer): an empty message to it.  The descriptors are 12 bytes (port) or 16 (out of line memory) */
+			u32 k, off = 7;		/* word index of the first descriptor */
 
-			ack[0] = 0x12; ack[1] = 24; ack[2] = buf[7]; ack[3] = 0; ack[4] = 0; ack[5] = 0;
-			kr = mach_msg(ack, 1, 24, 0, 0, 0, 0);
-			out("carender-stub: commit acknowledged "); hex((u32)kr, 8); out("\n");
+
+			for (k = 0; k < buf[6] && off + 3 <= 64; k++) {
+				u32 type = (buf[off + 2] >> 24) & 0xff, disp = (buf[off + 2] >> 16) & 0xff;
+
+				if (type == 0 && disp == 0x12) {
+					u32 ack[6], kr2;
+
+					ack[0] = 0x12; ack[1] = 24; ack[2] = buf[off]; ack[3] = 0; ack[4] = 0; ack[5] = 0;
+					kr2 = mach_msg(ack, 1, 24, 0, 0, 0, 0);
+					out("carender-stub: commit acknowledged "); hex((u32)kr2, 8); out("\n");
+				}
+				if (type == 0 && disp == 0x11) {		/* a fence that this stub made comes back with a commit: it is done (the client learns it when the port dies: its commit waits for that before it goes on) */
+					u32 n;
+
+					int mine = 0;
+
+					for (n = 0; n < nfence; n++)
+						if (fences[n] == buf[off]) mine = 1, fences[n] = 0;
+					out(mine ? "carender-stub: fence completed " : "carender-stub: port of a commit released "); hex(buf[off], 8); out("\n");
+					mach_port_destroy(mach_task_self_, buf[off]);		/* the right is given up: a client that waits for the last sender to go (or for the dead name) goes on */
+				}
+				off += type == 1 ? 4 : 3;
+			}
 		}
 		if (buf[5] == 0x9d10 && buf[2] != 0) {			/* CASCreateFencePort: the answer carries a send right to a new port (a fence: nothing waits on it here) */
 			u32 fp = 0, fm[16];
@@ -157,6 +180,7 @@ main(void)
 			mach_port_allocate(mach_task_self_, 1, &fp);
 			mach_port_insert_right(mach_task_self_, fp, fp, 20);
 			mach_port_insert_member(mach_task_self_, fp, set);
+			if (nfence < 64) fences[nfence++] = fp;
 			for (i = 0; i < 16; i++) fm[i] = 0;
 			fm[0] = 0x80000012; fm[1] = 0x34; fm[2] = buf[2]; fm[5] = 0x9d10 + 100;
 			fm[6] = 1; fm[7] = fp; fm[8] = 0; fm[9] = 0x00130000;
