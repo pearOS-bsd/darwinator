@@ -174,8 +174,10 @@ darwinator_modevent(module_t mod, int type, void *data)
 		if (darwin_in_use())
 			return (EBUSY);
 		error = exec_unregister(&macho_execsw);
-		if (error == 0)
+		if (error == 0) {
 			darwin_mach_fini();
+			darwin_dyld_syscalls_fini();
+		}
 		break;
 	default:
 		error = EOPNOTSUPP;

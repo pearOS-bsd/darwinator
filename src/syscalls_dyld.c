@@ -39,7 +39,7 @@ _Static_assert(sizeof(struct smap) == 48, "shared_file_mapping_slide_np");
 #define	SMAP_ZF		0x10
 #define	SMAP_SLIDE	0x20
 
-#define	SR_N	64
+#define	SR_N	1024
 static struct { struct vmspace *vms; uint64_t start; bool attached; } sr_tab[SR_N];		/* attached: the shared cache of the first process is mapped in this address space (a later check without a start does not map it again) */
 static struct mtx sr_mtx;
 static bool sr_inited;
@@ -212,6 +212,23 @@ srg_attach(struct thread *td)
 	return (error);
 }
 
+/* the slot of an address space in sr_tab (sr_mtx held): its own, else an empty one (no address space), else the next one in turn.  A slot whose start is 0 is NOT free: the address space has said "unmapped" (start 0) and asks again,
+ * and a process that starts at the same time must not take the slot over (it did: the second attach then found the cache mapped already and failed, and its clean up removed the mapping) */
+static int
+sr_slot(struct vmspace *vms)
+{
+	static int turn;
+	int i;
+
+	for (i = 0; i < SR_N; i++)
+		if (sr_tab[i].vms == vms) return (i);
+	for (i = 0; i < SR_N; i++)
+		if (sr_tab[i].vms == NULL) return (i);
+	i = turn++ % SR_N;
+	sr_tab[i].vms = NULL; sr_tab[i].start = 0; sr_tab[i].attached = false;
+	return (i);
+}
+
 static int
 darwin_shared_region_check_np(struct thread *td, struct darwin_args *uap)
 {
@@ -256,8 +273,7 @@ darwin_shared_region_check_np(struct thread *td, struct darwin_args *uap)
 		/* the cache of the first process: mapped here the way a Mac maps its shared region */
 		start = srg_start;
 		mtx_lock(&sr_mtx);
-		for (i = 0; i < SR_N; i++)
-			if (sr_tab[i].vms == vms || sr_tab[i].start == 0) { sr_tab[i].vms = vms; sr_tab[i].start = start; sr_tab[i].attached = true; break; }
+		i = sr_slot(vms); sr_tab[i].vms = vms; sr_tab[i].start = start; sr_tab[i].attached = true;
 		mtx_unlock(&sr_mtx);
 	}
 noattach:
@@ -451,11 +467,7 @@ darwin_shared_region_map_and_slide_2_np(struct thread *td, struct darwin_args *u
 		struct vmspace *vms = td->td_proc->p_vmspace;
 
 		mtx_lock(&sr_mtx);
-		n = -1;
-		for (i = 0; i < SR_N; i++)
-			if (sr_tab[i].vms == vms || sr_tab[i].start == 0) { n = i; break; }
-		if (n < 0)
-			n = (int)(((uintptr_t)vms >> 8) % SR_N);
+		n = sr_slot(vms);
 		sr_tab[n].vms = vms; sr_tab[n].start = first; sr_tab[n].attached = true;		/* (its own mapping or the shared one: either way the cache is there) */
 		mtx_unlock(&sr_mtx);
 		srg_capture(td, maps, nm, common_slide, first);
@@ -476,6 +488,24 @@ out:
 	free(files, M_DARWIN);
 	free(maps, M_DARWIN);
 	return (error);
+}
+
+/* the module goes: the objects of the shared cache (swap backed, 1.7 GB with the pages of the data that were slid) are given back (each reload of the module leaked them and the swap ran full) */
+void
+darwin_dyld_syscalls_fini(void)
+{
+	int i;
+
+	if (!sr_inited)
+		return;
+	sx_xlock(&srg_sx);
+	if (srg_ready) {
+		for (i = 0; i < srg_n; i++)
+			if (srg_m[i].obj != NULL)
+				vm_object_deallocate(srg_m[i].obj);
+		srg_n = 0; srg_ready = false;
+	}
+	sx_xunlock(&srg_sx);
 }
 
 void

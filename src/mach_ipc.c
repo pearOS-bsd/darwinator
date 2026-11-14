@@ -3319,7 +3319,7 @@ darwin_mach_exit(void *arg __unused, struct proc *p)
 
 	if (darwin_debug >= 1 && p->p_sysent == &darwin_sysvec && p->p_xsig == 0)
 		printf("darwinator: %s[%d] exited with status %d\n", p->p_comm, p->p_pid, (int)p->p_xexit);
-	if ((darwin_debug >= 1 || p->p_xsig == SIGILL) && p->p_sysent == &darwin_sysvec && (p->p_xsig == SIGILL || p->p_xsig == SIGSEGV || p->p_xsig == SIGBUS || p->p_xsig == SIGABRT || p->p_xsig == SIGTRAP)) {
+	if (p->p_sysent == &darwin_sysvec && (p->p_xsig == SIGILL || p->p_xsig == SIGSEGV || p->p_xsig == SIGBUS || p->p_xsig == SIGABRT || p->p_xsig == SIGTRAP)) {
 		struct thread *tdp = curthread;
 
 		/* a Darwin process that dies of a signal of a fault: where (the thread that exits is the one that took it) */
