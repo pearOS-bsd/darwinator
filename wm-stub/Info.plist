@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key><string>com.apple.WindowManager</string>
+	<key>CFBundleName</key><string>wm-stub</string>
+	<key>BSServiceDomains</key>
+	<dict>
+		<key>com.apple.windowmanager</key>
+		<dict>
+			<key>MachName</key><string>com.apple.windowmanager.server</string>
+			<key>Services</key>
+			<dict>
+				<key>com.apple.frontboard.system-service</key><dict/>
+				<key>com.apple.frontboard.workspace-service</key><dict><key>DefaultWorkspace</key><string>com.apple.WindowManager</string></dict>
+				<key>com.apple.windowmanager.app-service</key><dict/>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>
