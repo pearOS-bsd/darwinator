@@ -118,7 +118,14 @@ static void apply_action(id a)
 {
 	L(@"handleXPCWindowTransaction: %@", t);
 	sls_init();
-	for (id a in [t performSelector:NSSelectorFromString(@"actions")]) { describe_action(a); apply_action(a); }
+	for (id a in [t performSelector:NSSelectorFromString(@"actions")]) {
+		describe_action(a); apply_action(a);
+		id fs = [a performSelector:NSSelectorFromString(@"fences")];
+		for (id f in fs) {			/* the fence of the client's commit: the window server (us) is done with it: its port goes, the client's commit goes on */
+			L(@"  fence %@ (%@)", f, [f class]);
+			if ([f respondsToSelector:NSSelectorFromString(@"invalidate")]) { [f performSelector:NSSelectorFromString(@"invalidate")]; L(@"  fence invalidated"); }
+		}
+	}
 	if (h) h();
 }
 - (void)retrieveStagesWithReply:(void (^)(id, id))h { L(@"retrieveStagesWithReply"); @try { if (getenv("WM_REPLY")) { h(@[], nil); L(@"stages replied"); } else L(@"stages: not replying"); } @catch (id e) { L(@"EXCEPTION in reply: %@", e); } }
@@ -147,7 +154,7 @@ int main(int argc, char **argv)
 	if (argc > 1 && !strcmp(argv[1], "wait")) sleep(12);
 	@autoreleasepool {
 		dlopen("/System/Library/PrivateFrameworks/WindowManagement.framework/WindowManagement", RTLD_NOW);
-		dlopen("/System/Library/PrivateFrameworks/BoardServices.framework/BoardServices", RTLD_NOW);
+		dlopen("/System/Library/PrivateFrameworks/BoardServices.framework/BoardServices", RTLD_NOW); dlopen("/System/Library/Frameworks/QuartzCore.framework/QuartzCore", RTLD_NOW);
 		Class wmi = NSClassFromString(@"WMXPCInterface"), lis = NSClassFromString(@"BSServiceConnectionListener");
 		if (!wmi || !lis) { L(@"missing classes %p %p", wmi, lis); return 1; }
 		static WMSrv *srv; srv = [WMSrv new];
