@@ -238,15 +238,22 @@ darwin_wl_dump_sysctl(SYSCTL_HANDLER_ARGS)
 		}
 	mtx_unlock(&sw_mtx);
 	printf("darwinator: wl table: %d entries\n", n);
+	darwin_wq_dump_all();
 	return (0);
 }
 SYSCTL_PROC(_kern_darwinator, OID_AUTO, wl_dump, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, NULL, 0, darwin_wl_dump_sysctl, "I", "write: print the table of workloop waiters");
 
 static int
-darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value)
+darwin_wl_sync(uint64_t tid, uint32_t fflags, uint16_t flags, uint64_t value, uint64_t udata)
 {
 	int i, free_i = -1, error = 0;
 
+	if (darwin_wl_trace && (fflags & NOTE_WL_SYNC_WAIT) != 0 && udata != 0) {		/* the queue of the wait (udata): its first words, where dq_state is */
+		uint64_t q[12] = { 0 };
+
+		if (copyin((void *)(uintptr_t)udata, q, sizeof q) == 0)
+			printf("darwinator: wl queue %#lx: %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", (u_long)udata, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8], q[9]);
+	}
 	mtx_lock(&sw_mtx);
 	if (darwin_wl_trace)
 		printf("darwinator: %s[%d] tid %d: wl sync ident %#lx fflags %#x flags %#x value %#lx\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, curthread->td_tid, (u_long)tid, fflags, flags, (u_long)value);
@@ -373,7 +380,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 		{
 			/* XNU checks the state of the queue (ext: address of dq_state, mask, expected value) before it takes a request: when the queue has been taken by a thread already the request is stale */
 			uint64_t qs = 0;
-			bool stale = darwin_wl_stale_check && (d.flags & EV_DELETE) == 0 && d.ext[1] != 0 && d.ext[2] != 0 && copyin((void *)(uintptr_t)d.ext[1], &qs, 8) == 0 && (qs & d.ext[2]) != (d.ext[3] & d.ext[2]);
+			bool stale = darwin_wl_stale_check && (d.flags & EV_DELETE) == 0 && d.ext[1] != 0 && d.ext[2] != 0 && copyin((void *)(uintptr_t)d.ext[1], &qs, 8) == 0 && (qs & d.ext[2] & ~0x700000000ULL) != (d.ext[3] & d.ext[2] & ~0x700000000ULL);	/* (the QoS bits are not part of staleness: a queue that got an override is still the one that the request was made for; dropping it lost the request and the sync waiters of the queue waited for ever) */
 
 			if (darwin_debug >= 2)
 				printf("darwinator: wl request %s %#lx fflags %#x flags %#x: ext addr %#lx mask %#lx want %#lx state %#lx\n", (d.flags & EV_DELETE) ? "delete" : "add", (u_long)d.ident, d.fflags, d.flags, (u_long)d.ext[1], (u_long)d.ext[2], (u_long)d.ext[3], (u_long)qs);
@@ -383,7 +390,7 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 				darwin_wq_request(curthread, (int64_t)d.ident, d.udata, 0, (d.flags & EV_DELETE) == 0, d.ext[1], d.ext[2], d.ext[3]);
 		}
 		if (d.filter == -17 && (d.fflags & (NOTE_WL_SYNC_WAIT | NOTE_WL_SYNC_WAKE)) != 0) {		/* the synchronisation of a workloop: done here (it may sleep); the kqueue gets a change that has no effect */
-			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1]);
+			int serr = darwin_wl_sync(d.ident, d.fflags, d.flags, d.ext[1], d.udata);
 
 			if (serr == EINTR)
 				return (EINTR);
