@@ -517,6 +517,18 @@ darwin_mac_syscall(struct thread *td, struct darwin_args *uap)
 		(void)copyinstr((void *)uap->a[0], pol, sizeof(pol), NULL);
 		printf("darwinator: %s[%d]: __mac_syscall(\"%s\", %ld, %#lx)\n", td->td_proc->p_comm, td->td_proc->p_pid, pol, (long)uap->a[1], (u_long)uap->a[2]);
 	}
+	if ((long)uap->a[1] == 90) {
+		/* AMFI: amfi_check_dyld_policy_self(input flags, &output flags), asked by dyld: {u64 input, u64 *output}; with no bit set dyld takes the process for a restricted one and ignores DYLD_INSERT_LIBRARIES and the other
+		 * variables.  No policy runs here: everything is allowed (at path, path vars, custom shared cache, fallback paths, print vars, failed library insertion, interposing, embedded vars). */
+		struct { uint64_t in; uint64_t out; } a;
+
+		memset(pol, 0, sizeof(pol));
+		if (copyinstr((void *)uap->a[0], pol, sizeof(pol), NULL) == 0 && strcmp(pol, "AMFI") == 0 && copyin((void *)uap->a[2], &a, sizeof(a)) == 0 && a.out != 0) {
+			uint64_t all = 0xff;
+
+			(void)copyout(&all, (void *)(uintptr_t)a.out, sizeof(all));
+		}
+	}
 	td->td_retval[0] = 0;
 	return (0);
 }
