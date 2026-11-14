@@ -265,6 +265,7 @@ wq_spawn(struct thread *td, struct wqp *w, int qos, bool mgr)
 	}
 	mtx_lock(&wq_mtx);
 	if (error != 0) {
+		printf("darwinator: %s[%d]: cannot make a thread of the workqueue pool (%d)\n", td->td_proc->p_comm, td->td_proc->p_pid, error);
 		t->used = 0;
 		w->nthreads--;
 	}
@@ -651,8 +652,10 @@ darwin_wq_request(struct thread *td, int64_t id, uint64_t udata, uint32_t qos, b
 
 	if (darwin_debug >= 2)
 		printf("darwinator: %s[%d]: thread request for the workloop %#lx: %s\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)id, add ? "add" : "delete");
-	if (!darwin_pth_info(td->td_proc, &wqstart, &pthsize))
+	if (!darwin_pth_info(td->td_proc, &wqstart, &pthsize)) {
+		printf("darwinator: %s[%d]: thread request of a workloop but no pthread workqueue information (the request is lost)\n", td->td_proc->p_comm, td->td_proc->p_pid);
 		return;
+	}
 	mtx_lock(&wq_mtx);
 	w = wq_get(td->td_proc, true);
 	if (w == NULL) { mtx_unlock(&wq_mtx); return; }
