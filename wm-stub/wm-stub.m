@@ -13,12 +13,44 @@ typedef void (^cfgblk)(id);
 
 static void L(NSString *fmt, ...) { va_list ap; va_start(ap, fmt); NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap]; va_end(ap); fprintf(stderr, "wm-stub: %s\n", s.UTF8String); }
 
+extern void objc_exception_throw(id);
+static void my_throw(id e) { L(@"THROW %@ | %@", e, [NSThread callStackSymbols]); objc_exception_throw(e); }
+__attribute__((used)) static struct { const void *a, *b; } ip_throw __attribute__((section("__DATA,__interpose"))) = { (const void *)my_throw, (const void *)objc_exception_throw };
+
+
+/* a generic dump of an object: its properties by KVC (the classes are private) */
+static NSString *dumpobj(id o)
+{
+	if (!o) return @"(nil)";
+	NSMutableString *r = [NSMutableString stringWithFormat:@"<%s", class_getName([o class])];
+	for (Class k = [o class]; k && k != [NSObject class]; k = class_getSuperclass(k)) {
+		unsigned n = 0; Ivar *iv = class_copyIvarList(k, &n);
+		for (unsigned i = 0; i < n; i++) {
+			const char *nm = ivar_getName(iv[i]), *ty = ivar_getTypeEncoding(iv[i]);
+			ptrdiff_t off = ivar_getOffset(iv[i]); char *base = (char *)(__bridge void *)o + off;
+			NSString *v = @"?";
+			switch (ty[0]) {
+			case '@': { id x = *(id *)base; v = x ? [NSString stringWithFormat:@"%@", x] : @"nil"; break; }
+			case 'q': case 'Q': v = [NSString stringWithFormat:@"%lld", *(long long *)base]; break;
+			case 'i': case 'I': v = [NSString stringWithFormat:@"%d", *(int *)base]; break;
+			case 'c': case 'B': v = [NSString stringWithFormat:@"%d", *(char *)base]; break;
+			case 'd': v = [NSString stringWithFormat:@"%g", *(double *)base]; break;
+			case '{': { unsigned long sz = 0, al = 0; NSGetSizeAndAlignment(ty, &sz, &al); NSMutableString *h = [NSMutableString string]; for (unsigned long b = 0; b < sz && b < 40; b++) [h appendFormat:@"%02x", (unsigned char)base[b]]; v = [NSString stringWithFormat:@"%s:%@", ty, h]; if (!strncmp(ty, "{CGRect", 7) || !strncmp(ty, "{CGPoint", 8) || !strncmp(ty, "{CGSize", 7)) v = [NSString stringWithFormat:@"%g,%g,%g,%g", ((double *)base)[0], ((double *)base)[1], ((double *)base)[2], ((double *)base)[3]]; break; }
+			default: v = [NSString stringWithFormat:@"(%s)", ty];
+			}
+			[r appendFormat:@" %s=%@", nm, v];
+		}
+		free(iv);
+	}
+	[r appendString:@">"]; return r;
+}
+
 static void describe_action(id a)
 {
 	@try {
 		L(@"  action type=%ld windowIDs=%@ spaceID=%llu props=%@ ordering=%@", (long)(NSInteger)[a performSelector:NSSelectorFromString(@"actionType")],
 		  [a performSelector:NSSelectorFromString(@"windowIDs")], (unsigned long long)(NSUInteger)[a performSelector:NSSelectorFromString(@"spaceID")],
-		  [a performSelector:NSSelectorFromString(@"properties")], [a performSelector:NSSelectorFromString(@"orderingInfo")]);
+		  dumpobj([a performSelector:NSSelectorFromString(@"properties")]), dumpobj([a performSelector:NSSelectorFromString(@"orderingInfo")]));
 	} @catch (id e) { L(@"  action: %@ (%@)", a, e); }
 }
 
@@ -31,7 +63,7 @@ static void describe_action(id a)
 	for (id a in [t performSelector:NSSelectorFromString(@"actions")]) describe_action(a);
 	if (h) h();
 }
-- (void)retrieveStagesWithReply:(void (^)(id, id))h { L(@"retrieveStagesWithReply"); if (h) h(@[], nil); }
+- (void)retrieveStagesWithReply:(void (^)(id, id))h { L(@"retrieveStagesWithReply"); @try { if (getenv("WM_REPLY")) { h(@[], nil); L(@"stages replied"); } else L(@"stages: not replying"); } @catch (id e) { L(@"EXCEPTION in reply: %@", e); } }
 - (void)performAsynchronousBridgedWindowManagementOperation:(id)op { L(@"async bridged op: %@", op); }
 - (void)performSynchronousBridgedWindowManagementOperation:(id)op replyHandler:(void (^)(id))h { L(@"sync bridged op: %@", op); if (h) h(nil); }
 - (void)proposeKeyWindowWithInfo:(id)i reply:(void (^)(id))h { L(@"proposeKey %@", i); if (h) h(nil); }
@@ -40,6 +72,7 @@ static void describe_action(id a)
 - (void)listener:(id)l didReceiveConnection:(id)c withContext:(id)ctx
 {
 	L(@"connection %@", c);
+	static NSMutableArray *conns; if (!conns) conns = [NSMutableArray new]; [conns addObject:c];		/* the connection dies with its last reference: the client's port would be dead */
 	cfgblk b = ^(id cfg) {
 		[cfg performSelector:NSSelectorFromString(@"setInterface:") withObject:[NSClassFromString(@"WMXPCInterface") performSelector:NSSelectorFromString(@"serviceInterface")]];
 		[cfg performSelector:NSSelectorFromString(@"setInterfaceTarget:") withObject:self];
