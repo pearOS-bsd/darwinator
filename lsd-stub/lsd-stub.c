@@ -2,6 +2,12 @@
  * (the description of libxpc, to stderr) and answers with an empty dictionary.  It is for finding out what the real Dock asks LaunchServices; it is the first of the replacements. */
 typedef void *xpc_object_t;
 typedef void *dq;
+static void od_reply(xpc_object_t m, xpc_object_t r);
+extern int xpc_pipe_receive(unsigned int port, xpc_object_t *out, int flags);
+extern int xpc_pipe_routine_reply(xpc_object_t reply);
+extern int bootstrap_check_in(unsigned int bp, const char *name, unsigned int *port);
+extern unsigned int bootstrap_port;
+extern void dispatch_async(dq q, void (^b)(void));
 extern xpc_object_t xpc_connection_create_mach_service(const char *name, dq q, unsigned long flags);
 extern void xpc_connection_set_event_handler(xpc_object_t c, void (^h)(xpc_object_t));
 extern void xpc_connection_resume(xpc_object_t c);
@@ -99,6 +105,11 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 	if (xpc_get_type(m) == (void *)&_xpc_type_dictionary && (r = xpc_dictionary_create_reply(m)) != 0) {
 		long cmd = xpc_dictionary_get_int64(m, "command");
 
+		if (streq(svc, "com.apple.system.opendirectoryd.libinfo") && xpc_dictionary_get_string(m, "rpc_name") != 0) {
+			od_reply(m, r);
+			{ int pr = xpc_pipe_routine_reply(r); out(pr == 0 ? "lsd-stub: od pipe reply sent\n" : "lsd-stub: od pipe reply FAILED\n"); }
+			return;
+		}
 		if (streq(svc, "com.apple.pasteboard.1") && xpc_dictionary_get_string(m, "com.apple.pboard.message") != 0) {
 			/* the pasteboard server: the answer of the one of the Mac to "create" (found with a program): the change count, the generation, whether we own it, a uuid */
 			static const unsigned char u[16] = { 0x4c, 0xfb, 0x29, 0x07, 0x91, 0x27, 0x41, 0xd7, 0x85, 0x41, 0x3f, 0x3a, 0x41, 0x7b, 0x0b, 0x19 };
@@ -252,6 +263,54 @@ handle(xpc_object_t peer, xpc_object_t m, int nsxpc, const char *svc)
 			xpc_dictionary_set_bool(r, "success", 1);
 		if (cmd == 500) { char *rd = xpc_copy_description(r); out("lsd-stub: 500 reply: "); out(rd); out("\n"); free(rd); }
 		xpc_connection_send_message(peer, r);
+	}
+}
+
+/* libinfo (getpwuid, getpwnam: libsystem_info asks opendirectoryd through an xpc pipe, which has its own receive and reply calls; found in libsystem_info: __od_rpc_call, __extract_user): the reply is a dictionary with the fields of
+ * struct passwd; the user of this machine is root */
+static void
+od_reply(xpc_object_t m, xpc_object_t r)
+{
+	const char *rn = xpc_dictionary_get_string(m, "rpc_name");
+
+	if (rn != 0 && (streq(rn, "getpwuid") || streq(rn, "getpwnam"))) {
+		const char *nm = xpc_dictionary_get_string(m, "name");
+		long uid = streq(rn, "getpwuid") ? xpc_dictionary_get_int64(m, "uid") : 0;
+
+		if (streq(rn, "getpwnam") && !(nm != 0 && streq(nm, "root"))) { xpc_dictionary_set_int64(r, "error", 1); return; }
+		xpc_dictionary_set_string(r, "pw_name", uid == 0 ? "root" : "user");
+		xpc_dictionary_set_string(r, "pw_passwd", "*");
+		xpc_dictionary_set_int64(r, "pw_uid", uid);
+		xpc_dictionary_set_int64(r, "pw_gid", uid == 0 ? 0 : 20);
+		xpc_dictionary_set_int64(r, "pw_change", 0);
+		xpc_dictionary_set_int64(r, "pw_expire", 0);
+		xpc_dictionary_set_string(r, "pw_class", "");
+		xpc_dictionary_set_string(r, "pw_gecos", uid == 0 ? "System Administrator" : "User");
+		xpc_dictionary_set_string(r, "pw_dir", uid == 0 ? "/root" : "/var/empty");
+		xpc_dictionary_set_string(r, "pw_shell", "/bin/sh");
+	} else
+		xpc_dictionary_set_int64(r, "error", 1);
+}
+
+/* libinfo (getpwuid, getpwnam) asks opendirectoryd over an xpc pipe, which has its own receive and reply calls: the first message of every client is the "w00t" of libxpc (xpc_pipe_receive refuses it with 5: skipped),
+ * the request follows */
+static void
+od_serve(const char *name)
+{
+	unsigned int port = 0;
+	int kr = bootstrap_check_in(bootstrap_port, name, &port);
+
+	out("lsd-stub: pipe service "); out(name); out(kr == 0 ? " ready\n" : " check-in failed\n");
+	if (kr != 0) return;
+	for (;;) {
+		xpc_object_t m = 0, r;
+		int rc = xpc_pipe_receive(port, &m, 0);
+
+		if (rc != 0 || m == 0) { if (rc != 5) { out("lsd-stub: pipe receive rc "); out(rc == 0x23 ? "35" : "other"); out("\n"); } continue; }
+		{ char *dd = xpc_copy_description(m); out("lsd-stub: pipe request: "); out(dd); out("\n"); free(dd); }
+		if ((r = xpc_dictionary_create_reply(m)) == 0) { out("lsd-stub: libinfo: no reply\n"); continue; }
+		od_reply(m, r);
+		{ int pr = xpc_pipe_routine_reply(r); out(pr == 0 ? "lsd-stub: pipe reply sent\n" : "lsd-stub: pipe reply FAILED\n"); }
 	}
 }
 
