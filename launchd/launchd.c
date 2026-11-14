@@ -194,6 +194,7 @@ xstr(const char *k, const char *v)
 	xn += (n + 3) / 4;
 }
 
+static void xemptydict(const char *k) { xkey(k); xw[xn++] = 0xf000; xw[xn++] = 4; xw[xn++] = 0; }
 static void xport(const char *k, u32 type) { xkey(k); xw[xn++] = type; }
 
 static void
@@ -564,6 +565,10 @@ main(int argc, char **argv, char **envp)
 				xbegin(&rq.h, 0); xdict(); xstr("out", domain_of(trailer_of(&rq.h)[10])); vouch(&rq.h); xsend();
 			} else
 				reply(&rq.h, 1, 45);	/* not supported */
+			continue;
+		}
+		if ((rq.h.id & 0xfff) == 0x2c8) {		/* xpc_connection attrs of a process (BoardServices asks for the peer of a connection): an empty set of attributes */
+			xbegin(&rq.h, 0); xdict(); xemptydict("attrs"); xsend();
 			continue;
 		}
 		{
