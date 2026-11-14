@@ -141,7 +141,7 @@ struct kmsg {
 	int			ncarry;
 	struct kcarry		carry[8];
 	int			nool;
-	struct kool		ool[4];
+	struct kool		ool[32];
 };
 
 struct kent { bool used, recv; int send, sonce; uint32_t name; struct kport *port; };
@@ -1412,7 +1412,7 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 				uint64_t addr; uint32_t sz;
 				struct kool *o;
 
-				if (off + 16 > size || m->nool == 4) goto bad_data;
+				if (off + 16 > size || m->nool == 32) goto bad_data;
 				addr = rd64(d, off); sz = rd32(d, off + 12);
 				o = &m->ool[m->nool];
 				o->type = 1; o->off = off; o->size = sz;
@@ -1425,7 +1425,7 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 			} else if (type == 2) {					/* out of line array of ports */
 				uint64_t addr; uint32_t cnt, j; struct kool *o; uint32_t *names;
 
-				if (off + 16 > size || m->nool == 4) goto bad_data;
+				if (off + 16 > size || m->nool == 32) goto bad_data;
 				addr = rd64(d, off); cnt = rd32(d, off + 12);
 				if (cnt > 64) goto bad_data;
 				o = &m->ool[m->nool];
