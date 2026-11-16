@@ -11,4 +11,4 @@ for i, a in enumerate(sys.argv[1:]):
         "bundle-identifier": bid, "dock-extra": 0,
         "file-data": {"_CFURLString": "file://" + path.replace(" ", "%20") + "/", "_CFURLStringType": 15},
         "file-label": label, "file-mod-date": 3875510296, "file-type": 41, "is-beta": 0, "parent-mod-date": 3875510296}})
-plistlib.dump({"version": 1, "region": "US", "loc": "en_US:US", "mod-count": 1, "persistent-apps": items, "persistent-others": []}, sys.stdout.buffer, fmt=plistlib.FMT_XML)
+plistlib.dump({"version": 1, "region": "US", "loc": "en_US:US", "mod-count": 1, "tilesize": 52, "persistent-apps": items, "persistent-others": []}, sys.stdout.buffer, fmt=plistlib.FMT_XML)
