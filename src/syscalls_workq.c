@@ -28,7 +28,9 @@
 #include <machine/frame.h>
 #include <machine/pcb.h>
 #include <machine/md_var.h>
+#ifdef __amd64__
 #include <machine/segments.h>
+#endif
 #include <bsm/audit_kevents.h>
 
 #include "darwinator.h"
