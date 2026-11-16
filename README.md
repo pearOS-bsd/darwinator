@@ -32,29 +32,29 @@ Written from the public description of the Mach-O format and the system call con
 
 Tested on FreeBSD 14.5 amd64 under KVM and on FreeBSD 14.5 arm64 under QEMU (the same 259 checks of `tests/c/syscalls.c`; the CI runs both on every push) (`tools/vm-test.sh`): the module builds with `-Werror`, loads, runs the Mach-O test files (`LC_MAIN`, `LC_UNIXTHREAD`, a universal file), refuses a file of the other architecture, and ELF programs and scripts still run; `kldunload` works. **arm64 compiles (syntax check against the 14.5 headers) but has not been run yet** (needs an arm64 FreeBSD: the Mac's HVF VM, or CI). The GitHub-hosted FreeBSD VMs of the CI job (`.github/workflows/ci.yml`) were unreachable at the time of writing (HTTP 504 when the action downloads its VM image).
 
-## machrun: a dyld for FreeBSD (`dyld/`)
+## machrun: a dyld for FreeBSD (now in [pearOS-bsd/dyld](https://github.com/pearOS-bsd/dyld), `machrun/`)
 
 Mach-O programs that need dyld and libSystem (nearly every Mac program) run through `machrun`, a userland loader that maps the file, applies rebase/bind and binds the imports to FreeBSD's libc and libraries, with shims for what differs (`dyld/shims.c`, `dyld/cf.c`). No kernel module is needed for this path. The unmodified command line tools of Keka (xz, zstd, lz4, 7-Zip and bsdtar, with 37 checks) run and produce archives that the system tools read: see `docs/KEKA.md` and `tests/keka.sh`.
 
 ```
-make -C dyld                      # builds dyld/machrun (FreeBSD)
-dyld/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
+make -C machrun                  # in the dyld repository: builds machrun (FreeBSD)
+machrun/machrun [-v] PROGRAM [args]  # -v: what is bound and what is missing
 KEKA_DIR=.../Keka.app/Contents/MacOS sh tests/keka.sh
 ```
 
-The list of what runs and how well is in `docs/COMPATIBILITY.md`; `sh tests/all.sh` checks it in the image (one command).
+The list of what runs and how well is in `docs/COMPATIBILITY.md` in [pearOS-bsd/dyld](https://github.com/pearOS-bsd/dyld); `sh darwinator-apps/all.sh` in [pearOS-bsd/tests](https://github.com/pearOS-bsd/tests) checks it in the image (one command).
 
 A double click on `AppCleaner.app` on the desktop of the image starts it through the Finder (`macapp`):
 
 ![AppCleaner started by a double click in the Finder of pearOS](docs/screenshot-finder-doubleclick.png)
 
-(Driven with `tools/qmp-click.py`: QEMU's monitor command `mouse_move` does not move the absolute tablet, QMP `input-send-event` does.)
+(Driven with `qmp-click.py` (repository `tests`): QEMU's monitor command `mouse_move` does not move the absolute tablet, QMP `input-send-event` does.)
 
 The Unarchiver 3.11 (the original Mac application, Objective-C) shows its Preferences window and extracts zip, tar.gz, tar.bz2, tar.xz and 7z archives, reliably (it is started with `MACHRUN_IMMORTAL_STRINGS=1`, which makes `autorelease` of strings a no-op: without it a path of 27 to 33 characters makes it crash, the cause is an over-release not found yet) (`docs/UNARCHIVER.md`, `tests/unar.sh`).
 
 ![The Unarchiver 3.11 (the unmodified Mac application) running in pearOS](docs/screenshot-unarchiver.png)
 
-XLD, a converter of audio files with plug-ins that are Mach-O bundles (`docs/XLD.md`, `tests/xld.sh`), converts WAV to FLAC and back, byte for byte. Dylibs that are Mach-O files (the frameworks of an application: FFmpeg, libmpv ...) are loaded too, with their dependencies, thread-local variables and initializers; `machrun -L LIB.dylib -x SCRIPT` calls their functions (`docs/IINA.md`, `tests/dylib-ffmpeg.sh`).
+XLD, a converter of audio files with plug-ins that are Mach-O bundles (`docs/XLD.md`, `darwinator-apps/xld.sh` in the `tests` repository), converts WAV to FLAC and back, byte for byte. Dylibs that are Mach-O files (the frameworks of an application: FFmpeg, libmpv ...) are loaded too, with their dependencies, thread-local variables and initializers; `machrun -L LIB.dylib -x SCRIPT` calls their functions (`docs/IINA.md`, `tests/dylib-ffmpeg.sh`).
 
 What recent applications need beyond that (AppCleaner is the test): `LC_DYLD_CHAINED_FIXUPS`, nibs in the `NIBArchive` format of Xcode 16 (converted to the keyed archive that GNUstep loads, `compat.m`), the constant literals of the compiler (`@[...]`, `@{...}`, `@1` as structures in the file), direct references to the program's own classes, `objc_alloc`, `objc_opt_new` and the other fast paths of newer compilers, libdispatch objects that the compiler retains with `objc_retain`, CoreGraphics and CoreFoundation from libopal and GNUstep corebase, and stand-ins for Sparkle, SF Symbols and asset catalogs.
 
@@ -62,7 +62,7 @@ What recent applications need beyond that (AppCleaner is the test): `LC_DYLD_CHA
 
 ## In the pearOS image
 
-`wsbsd/iso/build.sh` fetches this repository, builds `dyld/` (machrun, `libmachcompat.so`, `libexctrace.so`) and the kernel module, and installs them: `/usr/local/bin/machrun`, `/usr/local/bin/macapp`, `/usr/local/libexec/wrapapp.sh`, `/usr/local/lib/libmachcompat.so`, `/boot/modules/darwinator.ko` (not loaded by default). `loader.conf` loads `imgact_binmisc`; the rc script `wsbsd_machrun` registers the Mach-O magic numbers (thin and universal) with it, so a Mach-O executable runs like any program (`./kekaxz --version`); `macapp /path/App.app` starts a whole application (the bundle is wrapped in `~/Library/Caches/machrun`, as GNUstep wants it). `machrun` sets what Objective-C programs need by itself (`MACHRUN_LENIENT`, `MALLOC_CONF=junk:true`; `MACHRUN_STRICT=1` turns the first off).
+`iso/build.sh` (repository `iso`) fetches this repository and `dyld`, builds `machrun/` (machrun, `libmachcompat.so`, `libexctrace.so`) and the kernel module, and installs them: `/usr/local/bin/machrun`, `/usr/local/bin/macapp`, `/usr/local/libexec/wrapapp.sh`, `/usr/local/lib/libmachcompat.so`, `/boot/modules/darwinator.ko` (not loaded by default). `loader.conf` loads `imgact_binmisc`; the rc script `wsbsd_machrun` registers the Mach-O magic numbers (thin and universal) with it, so a Mach-O executable runs like any program (`./kekaxz --version`); `macapp /path/App.app` starts a whole application (the bundle is wrapped in `~/Library/Caches/machrun`, as GNUstep wants it). `machrun` sets what Objective-C programs need by itself (`MACHRUN_LENIENT`, `MALLOC_CONF=junk:true`; `MACHRUN_STRICT=1` turns the first off).
 
 ## Build and use
 
@@ -101,10 +101,13 @@ clang -nostdlib -Wl,-e,_start -o hello hello.s       # code that calls write/exi
 
 ## Documents
 
-`docs/REALDYLD.md` (the real dyld and libSystem on the module), `docs/TOOLCHAIN.md` (Mach-O programs and libraries built on FreeBSD), `docs/COMPATIBILITY.md` (Mac applications through `machrun`), `docs/MACCLI.md` (1265 command line tools of macOS 26.7: 604 start through `machrun`), `docs/IOS.md` (iOS 16 tools on arm64),
+`docs/REALDYLD.md` (the real dyld and libSystem on the module), `docs/TOOLCHAIN.md` (Mach-O programs and libraries built on FreeBSD), `docs/COMPATIBILITY.md` in [pearOS-bsd/dyld](https://github.com/pearOS-bsd/dyld) (Mac applications through `machrun`), `docs/MACCLI.md` (1265 command line tools of macOS 26.7: 604 start through `machrun`), `docs/IOS.md` (iOS 16 tools on arm64),
 `docs/MACPROBE.md` (what a real Mac says: structure layouts, the MIG ids, an Intel Mac), the pages of the applications (`KEKA.md`, `APPCLEANER.md`, `UNARCHIVER.md`, `XLD.md`, `IINA.md`).  Tools: `tools/macprobe/` (programs that are run on a Mac: probe 1 to 5), `tools/maccli/` (the sweeps),
 `tools/migids.py` (MIG message ids from a `.defs`), `tools/vm-test.sh` (the module and its tests in a local FreeBSD VM), `tools/macapp*` (wrap and install Mac applications).
 
 ## The daemons moved
 The user-space daemons that run on top of this module (`launchd`, `notifyd`, `wsbridge`, `lsd-stub`/`xpc-stub`, `lsd-objc`, `svc-stub`, `carender-stub`, `hid-stub`, `wm-stub`) and the scripts that start them together (`stack-dock*.sh`, `pearos-desktop.sh`) are in
 [github.com/pearOS-bsd/d](https://github.com/pearOS-bsd/d) (`darwin/` and `session/`).  On a VM they are deployed under `/root/dnew/<name>/` (the scripts expect that).
+
+## Where the rest went
+`dyld` (machrun, the cache and framework tools, notes on the real dyld) · `macdeps` (takes Apple's files from your own Mac; scripts and lists only) · `IOKit` (user-space IOKit: hid-stub) · `tests` (real Mac applications on pearOS) · `d` (the daemons and the stack scripts) · `QuartzCore/tools/ca` (the CA stream tools) · `AppKit/tools` (nib tools).  This repository keeps the kernel module (`src/`), its tests (`tests/c`, `tests/macho-toolchain`, `tests/run.sh`) and `tools/mkmacho.py`, `tools/elf2macho.py`, `tools/vm-test.sh`.
