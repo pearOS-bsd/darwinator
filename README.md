@@ -104,3 +104,7 @@ clang -nostdlib -Wl,-e,_start -o hello hello.s       # code that calls write/exi
 `docs/REALDYLD.md` (the real dyld and libSystem on the module), `docs/TOOLCHAIN.md` (Mach-O programs and libraries built on FreeBSD), `docs/COMPATIBILITY.md` (Mac applications through `machrun`), `docs/MACCLI.md` (1265 command line tools of macOS 26.7: 604 start through `machrun`), `docs/IOS.md` (iOS 16 tools on arm64),
 `docs/MACPROBE.md` (what a real Mac says: structure layouts, the MIG ids, an Intel Mac), the pages of the applications (`KEKA.md`, `APPCLEANER.md`, `UNARCHIVER.md`, `XLD.md`, `IINA.md`).  Tools: `tools/macprobe/` (programs that are run on a Mac: probe 1 to 5), `tools/maccli/` (the sweeps),
 `tools/migids.py` (MIG message ids from a `.defs`), `tools/vm-test.sh` (the module and its tests in a local FreeBSD VM), `tools/macapp*` (wrap and install Mac applications).
+
+## The daemons moved
+The user-space daemons that run on top of this module (`launchd`, `notifyd`, `wsbridge`, `lsd-stub`/`xpc-stub`, `lsd-objc`, `svc-stub`, `carender-stub`, `hid-stub`, `wm-stub`) and the scripts that start them together (`stack-dock*.sh`, `pearos-desktop.sh`) are in
+[github.com/pearOS-bsd/d](https://github.com/pearOS-bsd/d) (`darwin/` and `session/`).  On a VM they are deployed under `/root/dnew/<name>/` (the scripts expect that).
