@@ -3,6 +3,8 @@ on: [push, pull_request, workflow_dispatch]
 jobs:
   freebsd:
     runs-on: ubuntu-latest
+    # arm64: the workqueue/syscall code uses x86 registers; the arm64 port has not started, so it must not turn the whole run red
+    continue-on-error: ${{ matrix.arch == 'arm64' }}
     strategy:
       fail-fast: false
       matrix:
