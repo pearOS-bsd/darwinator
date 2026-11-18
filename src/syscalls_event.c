@@ -113,13 +113,13 @@ darwin_getfsstat64(struct thread *td, struct darwin_args *uap)
 			td->td_retval[0] = count + (darwin_two_volumes == 2 ? 1 : darwin_two_volumes ? 5 : 0);		/* the root is six volumes (two with two_volumes=2: system and data) */
 		return (error);
 	}
-	error = kern_getfsstat(td, &sb, (maxn > 5 && darwin_two_volumes ? maxn - (darwin_two_volumes == 2 ? 1 : 5) : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,
+	error = kern_getfsstat(td, &sb, (darwin_two_volumes ? maxn + 16 : maxn) * sizeof(struct statfs), &count, UIO_SYSSPACE,       /* room for the msdosfs mounts too (they are dropped below): a buffer of maxn-1 entries cut off the last real mounts whenever an msdosfs mount (the cache disk) came before them, the count of the first pass then never matched and dyld looped on getfsstat64 */
 	    mode == 1 ? MNT_WAIT : MNT_NOWAIT);
 	if (error == 0) {
 		size_t j = 0;
 
 		for (i = 0; i < count && error == 0; i++) {
-			int two = strcmp(sb[i].f_fstypename, "ufs") == 0 || strcmp(sb[i].f_fstypename, "zfs") == 0;
+			int two = strcmp(sb[i].f_mntonname, "/") == 0;       /* the root volume, whatever its file system: ufs, zfs, or cd9660 on the ISO (the second pass then gave one entry fewer than the count and dyld looped on getfsstat64) */
 
 			if (j >= maxn)
 				break;
