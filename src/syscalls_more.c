@@ -489,6 +489,8 @@ darwin_fsgetpath(struct thread *td, struct darwin_args *uap)
 
 	if (bufsize == 0)
 		return (EINVAL);
+	if (strcmp(mp->mnt_vfc->vfc_name, "cd9660") == 0)		/* the root of the ISO: its VGET takes the number as a block offset and hands back garbage vnodes whose path walk never ends (vn_fullpath spun in the kernel, the process could not be killed) */
+		return (ENOENT);
 	if ((error = VFS_VGET(mp, (ino_t)uap->a[3], LK_SHARED, &vp)) != 0)
 		return (error == EOPNOTSUPP ? ENOTSUP : (error == ENOENT || error == ESTALE ? ENOENT : error));
 	error = vn_fullpath(vp, &fullpath, &freepath);
