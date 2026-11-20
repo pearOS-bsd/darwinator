@@ -103,6 +103,10 @@ static i64 dsys8(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h)
 static volatile u64 psy_mx; static volatile int psy_state; static volatile unsigned dummy2 = 1;
 static void twait(u64 arg) { (void)arg; psy_state = 1; dsys(301, (i64)psy_mx, 0, 0, 0, 0, 0); psy_state = 2; }
 
+/* two threads in ulock_wait on one word: the thread that is woken first gets the number of the OTHER waiters back (XNU; libplatform's os_unfair_lock keeps its "waiters" bit from it) */
+static volatile unsigned uw_word = 1; static volatile int uw_started, uw_done; static volatile i64 uw_ret[2];
+static void uwait(u64 arg) { __sync_fetch_and_add(&uw_started, 1); uw_ret[arg] = dsys(515, 1, (i64)&uw_word, 1, 0, 0, 0); __sync_fetch_and_add(&uw_done, 1); }
+
 
 /* a Mach trap with seven arguments (mach_msg_trap): the seventh on the stack on x86-64, x6 on arm64 */
 static i64 dmach7(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g)
@@ -465,6 +469,19 @@ int cmain(void)
 	  S(SYS_psynch_mutexdrop, &mx2, 0, 0, 0, 0, 0);
 	  for (i = 0; i < 400 && psy_state < 2; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
 	  check("  psynch_mutexdrop wakes it", psy_state == 2, psy_state); }
+	/* ulock_wait returns the number of the other waiters of the address */
+	{ i64 b1 = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0), b2 = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0), t1 = (b1 + 65536 - 64) & ~15L, t2 = (b2 + 65536 - 64) & ~15L;
+	  uw_started = 0; uw_done = 0; uw_ret[0] = uw_ret[1] = -99;
+	  S(SYS_bsdthread_register, thread_entry, 0, 0, 0, 0, 0);
+	  S(SYS_bsdthread_create, uwait, 0, t1, 0x111000, 0, 0); S(SYS_bsdthread_create, uwait, 1, t2, 0x222000, 0, 0);
+	  for (i = 0; i < 400 && uw_started < 2; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
+	  for (i = 0; i < 40; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);		/* let both reach the wait */
+	  S(SYS_ulock_wake, 1, &uw_word, 0, 0, 0, 0);
+	  for (i = 0; i < 400 && uw_done < 1; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
+	  check("ulock_wait: the first woken of two waiters gets 1 (one other waiter) back", uw_done == 1 && (uw_ret[0] == 1 || uw_ret[1] == 1), uw_ret[0] == 1 ? uw_ret[0] : uw_ret[1]);
+	  S(SYS_ulock_wake, 1 | 0x100, &uw_word, 0, 0, 0, 0);
+	  for (i = 0; i < 400 && uw_done < 2; i++) S(SYS_ulock_wait, 1, &dummy2, 1, 5000, 0, 0);
+	  check("  the last one gets 0", uw_done == 2 && (uw_ret[0] == 0 || uw_ret[1] == 0), uw_done); }
 	check("workq_open", S(SYS_workq_open, 0, 0, 0, 0, 0, 0) == 0, 0);
 	check("workq_kernreturn of a process that has not registered with libpthread fails (EINVAL, as in XNU)", S(SYS_workq_kernreturn, 0, 0, 0, 0, 0, 0) != 0, 0);
 

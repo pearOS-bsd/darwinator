@@ -327,11 +327,33 @@ ulock_chan(struct proc *p, uint64_t addr)
 static struct sx ulock_sx;
 SX_SYSINIT(darwin_ulock, &ulock_sx, "darwin ulock");
 
+/* the threads that sleep in ulock_wait (under ulock_sx).  XNU's ulock_wait returns the number of OTHER waiters of the address when it was woken (0: none left); libplatform's os_unfair_lock
+ * uses it: a woken waiter that sees more waiters takes the lock WITHOUT the "no waiters" bit, so its unlock wakes the next one.  Returning always 0 lost the wakeups of the others (the lock word went back to 0
+ * with threads still asleep: the main thread of a SwiftUI app stayed in _FileCacheLockTransitionToPreparer for ever). */
+struct ulock_waiter {
+	TAILQ_ENTRY(ulock_waiter)	link;
+	void				*chan;
+};
+static TAILQ_HEAD(, ulock_waiter) ulock_waiters = TAILQ_HEAD_INITIALIZER(ulock_waiters);
+
+static int
+ulock_others(struct ulock_waiter *self)
+{
+	struct ulock_waiter *w;
+	int n = 0;
+
+	TAILQ_FOREACH(w, &ulock_waiters, link)
+		if (w != self && w->chan == self->chan)
+			n++;
+	return (n);
+}
+
 static int
 darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t value, uint64_t timeout_us)
 {
 	uint32_t cur;
-	int error = 0, timo = 0, wide = ((op & UL_OP_MASK) == 5 || (op & UL_OP_MASK) == 6);
+	struct ulock_waiter me;
+	int error = 0, timo = 0, wide = ((op & UL_OP_MASK) == 5 || (op & UL_OP_MASK) == 6), others = 0;
 
 	if (timeout_us != 0)
 		timo = MAX(1, (int)(timeout_us * hz / 1000000));
@@ -345,6 +367,8 @@ darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t
 		if (fueword32((void *)addr, (int32_t *)&cur) == -1) { sx_xunlock(&ulock_sx); return (EFAULT); }
 		if (cur != (uint32_t)value) { sx_xunlock(&ulock_sx); td->td_retval[0] = 0; return (0); }
 	}
+	me.chan = ulock_chan(td->td_proc, addr);
+	TAILQ_INSERT_TAIL(&ulock_waiters, &me, link);
 	if (timo == 0 && darwin_debug >= 1) {		/* a wait for ever: say so when it lasts (who holds the lock?) */
 		int rounds = 0;
 
@@ -375,12 +399,14 @@ darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t
 		}
 	} else
 		error = sx_sleep(ulock_chan(td->td_proc, addr), &ulock_sx, PCATCH, "ulock", timo);
+	TAILQ_REMOVE(&ulock_waiters, &me, link);
+	others = ulock_others(&me);
 	sx_xunlock(&ulock_sx);
 	if (error == EWOULDBLOCK)
 		error = ETIMEDOUT;
 	else if (error == ERESTART)
 		error = EINTR;
-	td->td_retval[0] = 0;
+	td->td_retval[0] = (error == 0) ? others : 0;		/* as XNU: the other waiters of the address */
 	return (error);
 }
 
