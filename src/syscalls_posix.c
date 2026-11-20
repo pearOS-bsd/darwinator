@@ -372,7 +372,7 @@ darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t
 	me.chan = ulock_chan(td->td_proc, addr);
 	me.woken = false;
 	TAILQ_INSERT_TAIL(&ulock_waiters, &me, link);
-	if (timo == 0 && darwin_debug >= 1) {		/* a wait for ever: say so when it lasts (who holds the lock?) */
+	if (timo == 0) {		/* a wait for ever: say so when it lasts (who holds the lock?) */
 		int rounds = 0;
 
 		for (;;) {
