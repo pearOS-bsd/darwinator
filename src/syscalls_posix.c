@@ -314,6 +314,7 @@ darwin_flistxattr(struct thread *td, struct darwin_args *uap)
 
 #define	UL_OP_MASK		0xff
 #define	ULF_WAKE_ALL		0x00000100
+#define	ULF_WAKE_THREAD		0x00000200		/* wake the thread whose Mach port is the wake value: we cannot tell which one sleeps where, so all of them wake and look at their word again */
 #define	ULF_NO_ERRNO		0x01000000
 
 /* the sleep channel of a user address: the same address (libobjc's runtimeLock, the shared cache) is in every Mac process, so the process is part of the key: a wakeup_one in the Dock must not wake a thread of the Finder (the wake was lost: the Finder stayed asleep) */
@@ -447,7 +448,7 @@ darwin_ulock_wake(struct thread *td, struct darwin_args *uap)
 	void *chan = ulock_chan(td->td_proc, uap->a[1]);
 
 	sx_xlock(&ulock_sx);
-	if (op & ULF_WAKE_ALL) {
+	if (op & (ULF_WAKE_ALL | ULF_WAKE_THREAD)) {
 		TAILQ_FOREACH(w, &ulock_waiters, link)
 			if (w->chan == chan)
 				w->woken = true;
