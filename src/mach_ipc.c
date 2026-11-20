@@ -2482,6 +2482,8 @@ static const struct ionode io_nodes[] = {
 	{ "Untitled", "IOMedia", 6, "disk3s4" },
 	{ "Update", "IOMedia", 6, "disk3s5" },
 	{ "VM", "IOMedia", 6, "disk3s6" },
+	/* the GPU: Apple's Metal asks for IOAccelerator services, reads MetalPluginName / MetalPluginClassName and loads that driver bundle; ours is PearMetalDriver (github.com/pearOS-bsd/Metal) */
+	{ "pear-gpu", "IOAccelerator", 1, NULL },
 };
 #define	IO_NNODES	((int)nitems(io_nodes))
 #define	IO_ITER_BASE	0x1000
@@ -2629,7 +2631,11 @@ io_property_bin(int node, const char *key, uint8_t *out)
 	bool media = io_nodes[node].bsd != NULL;
 
 	ios_w32(&s, 0xd3);
-	if (strcmp(key, "Removable") == 0 || strcmp(key, "Ejectable") == 0 || strcmp(key, "Open") == 0 || strcmp(key, "Removable-Media") == 0) {
+	if (strcmp(io_nodes[node].cls, "IOAccelerator") == 0) {
+		if (strcmp(key, "MetalPluginName") == 0) ios_str(&s, 0x09000000u, "PearMetalDriver", true);
+		else if (strcmp(key, "MetalPluginClassName") == 0) ios_str(&s, 0x09000000u, "PearMTLDevice", true);
+		else return (0);
+	} else if (strcmp(key, "Removable") == 0 || strcmp(key, "Ejectable") == 0 || strcmp(key, "Open") == 0 || strcmp(key, "Removable-Media") == 0) {
 		if (!media) return (0);
 		ios_bool(&s, false, true);
 	} else if (strcmp(key, "Writable") == 0 || strcmp(key, "Leaf") == 0) {
@@ -2804,6 +2810,38 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 		kp_unref(np);
 		return;
 	}
+	case 2884: {					/* io_service_add_notification_bin_64 (as seen from Metal: type "IOServicePublish", matching IOProviderClass IOAccelerator, a wake port): the notification object is an iterator over the nodes that match now (libIOKit and the caller read it at once: Metal makes its devices from them); later publications never come, the registry is fixed */
+		char cls[96];
+		uint32_t k;
+		bool found = false;
+
+		n = 0;
+		for (k = 32; k + 8 <= m->size && !found; k += 4)
+			if (rd32(m->data, k) == 0xd3)
+				found = io_bin_value(m->data + k, m->size - k, "IOProviderClass", cls, sizeof(cls)) || io_bin_value(m->data + k, m->size - k, "IOClass", cls, sizeof(cls));
+		if (found)
+			for (i = 0; i < IO_NNODES && n < 16; i++)
+				if (io_node_matches(i, cls)) list[n++] = i;
+		if (darwin_debug >= 1)
+			printf("darwinator: IOKit: notification for %s: %d node(s)\n", found ? cls : "(no class)", n);
+		np = io_new_iter(list, n);
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
+	}
+	case 2871: {					/* io_registry_entry_get_registry_entry_id(entry, *id): Metal asks it of its accelerator for MTLDevice.registryID; every node has a fixed one */
+		uint64_t rid;
+
+		if (node < 0) break;
+		rid = 0x100000100ULL + (uint64_t)node;
+		mig_reply_data(m, id, 0, &rid, 8);
+		return;
+	}
+	case 2869:					/* io_service_add_interest_notification_64(entry, type "IOGeneralInterest", wake port, ...): an object that never fires (nothing in this registry changes) */
+		np = io_new_iter(list, 0);
+		mig_reply(t, m, id, 0, np, NULL, 0, NULL, 0);
+		kp_unref(np);
+		return;
 	case 2802:					/* io_iterator_next(iterator, *object): the next entry or the null port at the end */
 		if (slot < 0) break;
 		if (io_iters[slot].pos >= io_iters[slot].n) { io_reply_null_port(m, id); return; }
