@@ -333,6 +333,7 @@ SX_SYSINIT(darwin_ulock, &ulock_sx, "darwin ulock");
 struct ulock_waiter {
 	TAILQ_ENTRY(ulock_waiter)	link;
 	void				*chan;
+	bool				woken;		/* a wake already chose it: it is not one of the "others" any more (it only has not run yet) */
 };
 static TAILQ_HEAD(, ulock_waiter) ulock_waiters = TAILQ_HEAD_INITIALIZER(ulock_waiters);
 
@@ -343,7 +344,7 @@ ulock_others(struct ulock_waiter *self)
 	int n = 0;
 
 	TAILQ_FOREACH(w, &ulock_waiters, link)
-		if (w != self && w->chan == self->chan)
+		if (w != self && !w->woken && w->chan == self->chan)
 			n++;
 	return (n);
 }
@@ -368,6 +369,7 @@ darwin_ulock_wait_common(struct thread *td, uint32_t op, uint64_t addr, uint64_t
 		if (cur != (uint32_t)value) { sx_xunlock(&ulock_sx); td->td_retval[0] = 0; return (0); }
 	}
 	me.chan = ulock_chan(td->td_proc, addr);
+	me.woken = false;
 	TAILQ_INSERT_TAIL(&ulock_waiters, &me, link);
 	if (timo == 0 && darwin_debug >= 1) {		/* a wait for ever: say so when it lasts (who holds the lock?) */
 		int rounds = 0;
@@ -441,11 +443,23 @@ darwin_ulock_wake(struct thread *td, struct darwin_args *uap)
 {
 	uint32_t op = (uint32_t)uap->a[0];
 
+	struct ulock_waiter *w;
+	void *chan = ulock_chan(td->td_proc, uap->a[1]);
+
 	sx_xlock(&ulock_sx);
-	if (op & ULF_WAKE_ALL)
-		wakeup(ulock_chan(td->td_proc, uap->a[1]));
-	else
-		wakeup_one(ulock_chan(td->td_proc, uap->a[1]));
+	if (op & ULF_WAKE_ALL) {
+		TAILQ_FOREACH(w, &ulock_waiters, link)
+			if (w->chan == chan)
+				w->woken = true;
+		wakeup(chan);
+	} else {
+		TAILQ_FOREACH(w, &ulock_waiters, link)
+			if (w->chan == chan && !w->woken) {
+				w->woken = true;
+				break;
+			}
+		wakeup_one(chan);
+	}
 	sx_xunlock(&ulock_sx);
 	td->td_retval[0] = 0;
 	return (0);
