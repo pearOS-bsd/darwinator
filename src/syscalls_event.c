@@ -424,6 +424,8 @@ darwin_kev_copyin(void *argp, struct kevent *kevp, int count)
 				if (darwin_debug >= 1)
 					printf("darwinator: %s[%d]: EVFILT_MACHPORT add for name %#lx: %s (options %#x, flags %#x, udata %#lx)\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident, port ? "found" : "no receive right with this name", d.fflags, d.flags, (u_long)d.udata);
 				if (port == NULL)
+					printf("darwinator: %s[%d]: EVFILT_MACHPORT add for name %#lx: NO receive right\n", curthread->td_proc->p_comm, curthread->td_proc->p_pid, (u_long)d.ident);
+				if (port == NULL)
 					kevp[i].filter = 0x7000;	/* no such port (or no receive right): the change comes back as an error */
 				else
 					kevp[i].ext[2] = (uint64_t)(uintptr_t)port;

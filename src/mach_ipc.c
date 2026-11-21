@@ -1673,7 +1673,17 @@ darwin_mach_event_receive(struct thread *td, uint32_t name, uint32_t option, uin
 {
 	if (darwin_debug >= 2)
 		printf("darwinator: %s[%d]: event receive on %#x, option %#x, buffer %#lx (%u)\n", td->td_proc->p_comm, td->td_proc->p_pid, name, option, (u_long)buf, bufsize);
-	return ((int)recv_msg_sz(td, buf, (option & ~0x100u) | MACH_RCV_TIMEOUT, bufsize, name, 0, msgsize));
+	{
+		int rc = (int)recv_msg_sz(td, buf, (option & ~0x100u) | MACH_RCV_TIMEOUT, bufsize, name, 0, msgsize);
+
+		if (rc == 0) {		/* a trace of the fence messages of the CoreAnimation render server ('cfmr', 'gflr') that a client takes from a port with the kevent receive */
+			uint32_t hdr[6];
+
+			if (copyin((void *)(uintptr_t)buf, hdr, sizeof(hdr)) == 0 && (hdr[5] == 0x726d6663 || hdr[5] == 0x726c6667))
+				printf("darwinator: %s[%d]: fence message %#x received on %#x (size %u)\n", td->td_proc->p_comm, td->td_proc->p_pid, hdr[5], name, hdr[1]);
+		}
+		return (rc);
+	}
 }
 
 /*

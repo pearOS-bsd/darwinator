@@ -526,6 +526,28 @@ int cmain(void)
 	      kr2 = dmach7(31, (i64)rcv2, 2 | 0x100, 0, 64, P, 4000, 0);
 	      check("a message from the child, through the bootstrap port it inherited, arrives (id 99, data 0xdead)", kr2 == 0 && rcv2[5] == 99 && rcv2[6] == 0xdead, kr2);
 	      { int st = -1; S(SYS_wait4, ch, &st, 0, 0, 0, 0); check("  the child ended well (it found the special port)", st == 0, st); } }
+	    /* the same as ApplyFenceTransaction between two processes: the parent keeps a send right of Q and moves the receive right and one send right of Q to the child in one message; then it writes to its own send right, and the message arrives on the child's receive right */
+	    { i64 ch2 = S(SYS_fork, 0, 0, 0, 0, 0, 0);
+	      if (ch2 == 0) { unsigned crp = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0), q2[16], m2[10], rv2[16], r4[16], bs; int kk; for (kk = 0; kk < 16; kk++) { q2[kk] = 0; rv2[kk] = 0; r4[kk] = 0; }
+		      q2[0] = 19 | (21 << 8); q2[1] = 36; q2[2] = 0x203; q2[3] = crp; q2[5] = 3409; q2[8] = 4;
+		      if (dmach7(31, (i64)q2, 3, 36, 64, crp, 3000, 0) != 0 || q2[5] != 3509 || q2[7] == 0) S(SYS_exit, 1, 0, 0, 0, 0, 0);
+		      bs = q2[7];
+		      m2[0] = 0x80000000u | 19; m2[1] = 40; m2[2] = bs; m2[3] = 0; m2[4] = 0; m2[5] = 97; m2[6] = 1; m2[7] = crp; m2[8] = 0; m2[9] = 20 << 16;
+		      if (dmach7(31, (i64)m2, 1, 40, 0, 0, 0, 0) != 0) S(SYS_exit, 2, 0, 0, 0, 0, 0);
+		      if (dmach7(31, (i64)rv2, 2 | 0x100, 0, 64, crp, 4000, 0) != 0 || rv2[6] != 2 || ((rv2[9] >> 16) & 0xff) != 16 || ((rv2[12] >> 16) & 0xff) != 17) S(SYS_exit, 3, 0, 0, 0, 0, 0);
+		      if (dmach7(31, (i64)r4, 2 | 0x100, 0, 64, rv2[7], 4000, 0) != 0 || r4[5] != 61 || r4[6] != 1 || ((r4[9] >> 24) & 0xff) != 1 || r4[10] != 8) S(SYS_exit, 4, 0, 0, 0, 0, 0);
+		      S(SYS_exit, 0, 0, 0, 0, 0, 0); }
+	      { unsigned rv3[16], Q2 = 0, cm2[13], m61[13]; static unsigned long long arr[1] = { 0x1234 }; int st2 = -1;
+		for (k = 0; k < 16; k++) rv3[k] = 0;
+		kr2 = dmach7(31, (i64)rv3, 2 | 0x100, 0, 64, P, 4000, 0);
+		check("a child sends its port (id 97) to the bootstrap port of the parent", kr2 == 0 && rv3[5] == 97 && rv3[7] != 0, kr2);
+		dmach(16, (i64)task, 1, (i64)&Q2, 0, 0, 0); dmach(21, (i64)task, Q2, Q2, 20, 0, 0); dmach(21, (i64)task, Q2, Q2, 20, 0, 0);
+		cm2[0] = 0x80000000u | 19; cm2[1] = 52; cm2[2] = rv3[7]; cm2[3] = 0; cm2[4] = 0; cm2[5] = 96; cm2[6] = 2; cm2[7] = Q2; cm2[8] = 0; cm2[9] = 16 << 16; cm2[10] = Q2; cm2[11] = 0; cm2[12] = 17 << 16;
+		kr2 = dmach7(31, (i64)cm2, 1, 52, 0, 0, 0, 0); check("  the parent moves the receive right and a send right of Q to the child, keeping a send right", kr2 == 0, kr2);
+		for (k = 0; k < 13; k++) m61[k] = 0;
+		m61[0] = 0x80000013u; m61[1] = 52; m61[2] = Q2; m61[5] = 61; m61[6] = 1; m61[7] = (unsigned)(unsigned long)arr; m61[8] = (unsigned)((unsigned long)arr >> 32); m61[9] = 0x01000100; m61[10] = 8;	/* the 'cfmr' of the render server: a complex message with one out-of-line array of u64 */
+		kr2 = dmach7(31, (i64)m61, 1, 52, 0, 0, 0, 0); check("  a complex message with an out-of-line array to the kept send right is sent", kr2 == 0, kr2);
+		S(SYS_wait4, ch2, &st2, 0, 0, 0, 0); check("  and it arrives on the receive right in the child (exit status 0)", st2 == 0, st2); } }
 	    /* a right in a message: the send right to Q goes to P in a complex message and comes out as a name with the disposition PORT_SEND */
 	    { unsigned Q = 0, cm[10] = { 0x80000000u | 19, 40, P, 0, 0, 55, 1, 0, 0, 20 << 16 }, rv[16]; for (k = 0; k < 16; k++) rv[k] = 0;
 	      dmach(16, (i64)task, 1, (i64)&Q, 0, 0, 0); cm[7] = Q;
