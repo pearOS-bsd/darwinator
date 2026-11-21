@@ -1686,6 +1686,7 @@ darwin_mach_event_receive(struct thread *td, uint32_t name, uint32_t option, uin
 	}
 }
 
+
 /*
  * mach_msg2_trap (47), the trap that libsyscall uses since macOS 12: (data, options, bits | send_size << 32, remote | local << 32, voucher | id << 32,
  * descriptor count | rcv_name << 32, rcv_size | priority << 32, timeout) (checked with the requests of dyld: bits 0x1513, send_size 40, id 200).  The header comes in registers and the message is in memory at data; here the header is written
@@ -2670,6 +2671,154 @@ io_property_bin(int node, const char *key, uint8_t *out)
 	return (s.n);
 }
 
+
+/* ---- IOSurface: the user client of IOSurfaceRoot ----
+ * What the IOSurface framework of the Mac does (found with SwiftUI/tools/msgtrace.c on a Mac and in the code of IOSurface.framework, SwiftUI/tests/iosurface): IOServiceOpen(IOSurfaceRoot), then
+ *   selector 13: no input, 40 bytes out (the limits of a surface);
+ *   selector 44, one scalar: "not found" (kIOReturnNotFound) here;
+ *   selector 0 (create), one scalar (the id of the parent surface, 0), the properties as a binary serialized dictionary, 0xc68 bytes out: the surface as the kernel made it, among them the address
+ *   (u64 @0) at which the memory of the surface is mapped in the calling task, two pointers into a region that the kernel keeps for the client (@8, @16), the id (@24), the allocation size (@32), width, height,
+ *   bytes per row (@40, @48, @56), the pixel format (@72), the allocation size again (@80).
+ * The memory is an object of the VM that every client of the surface can map; the surface lives on after the process that made it (until it is released: not yet). */
+#define IOS_MAX		256
+static struct iosurf { bool used; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; struct vm_object *obj; } iosurfs[IOS_MAX];
+static uint32_t iosurf_next = 1, iosurf_counter = 0x494;
+static struct mtx ios_mtx;
+MTX_SYSINIT(darwin_iosurf, &ios_mtx, "darwin iosurface", MTX_DEF);
+
+/* the number or string value of a key of a binary serialized dictionary (OSSerializeBinary: the signature 0xd3, then the dictionary header, then key / value pairs: a symbol (0x08) with its text padded to 4,
+ * a number (0x04: 8 bytes) ...); returns 1 and the number when the key has a number */
+static int
+ios_dict_number(uint8_t *b, size_t n, const char *want, uint64_t *out)
+{
+	size_t p = 4;
+	uint32_t hdr, cnt, i;
+
+	if (n < 8 || rd32(b, 0) != 0xd3)
+		return (0);
+	hdr = rd32(b, p); p += 4;
+	if ((hdr & 0x7f000000u) != 0x01000000u)
+		return (0);
+	cnt = hdr & 0x00ffffff;
+	for (i = 0; i < cnt && p + 4 <= n; i++) {
+		uint32_t kh = rd32(b, p), klen = kh & 0x00ffffff, vh, vlen;
+		bool match;
+		uint32_t type;
+
+		p += 4;
+		if ((kh & 0x7f000000u) != 0x08000000u || p + roundup2(klen, 4) + 4 > n)
+			return (0);
+		match = klen > 0 && strncmp((const char *)b + p, want, klen) == 0 && strlen(want) + 1 == klen;
+		p += roundup2(klen, 4);
+		vh = rd32(b, p); p += 4;
+		type = vh & 0x7f000000u; vlen = vh & 0x00ffffff;
+		if (type == 0x04000000u) {			/* a number: 8 bytes */
+			if (p + 8 > n) return (0);
+			if (match) { memcpy(out, b + p, 8); return (1); }
+			p += 8;
+		} else if (type == 0x09000000u || type == 0x08000000u || type == 0x0a000000u)
+			p += roundup2(vlen, 4);
+		else if (type == 0x0b000000u || type == 0x0c000000u)
+			;
+		else
+			return (0);					/* a collection inside: not needed */
+	}
+	return (0);
+}
+
+static int
+ios_map(struct proc *tp, struct vm_object *obj, uint64_t size, vm_offset_t *va)
+{
+	struct vm_map *map = &tp->p_vmspace->vm_map;
+	int rv;
+
+	*va = 0x200000000ULL;
+	vm_object_reference(obj);
+	rv = vm_map_find(map, obj, 0, va, round_page(size), 0, VMFS_ANY_SPACE, VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE, MAP_INHERIT_SHARE);
+	if (rv != KERN_SUCCESS)
+		vm_object_deallocate(obj);
+	return (rv);
+}
+
+static void
+iosurf_method(struct thread *td, struct kmsg *m, int id)
+{
+	uint8_t *d = m->data;
+	uint32_t sel = m->size >= 36 ? rd32(d, 32) : 0xffffffffu, nin = m->size >= 40 ? rd32(d, 36) : 0;
+	uint8_t o13[40] = { 0x3f, 0, 0, 0, 0x3f, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0x40, 0, 0, 0, 0, 0, 0, 0, 0x40, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0 };
+
+	if (darwin_debug >= 1)
+		printf("darwinator: %s[%d]: IOSurfaceRoot method %u (%u scalars, %u bytes)\n", td->td_proc->p_comm, td->td_proc->p_pid, sel, nin, m->size);
+	if (sel == 13) {					/* the limits of a surface: the answer that the Mac gave */
+		uint8_t out[4 + 40 + 4 + 8];
+
+		memset(out, 0, sizeof(out));
+		wr32(out, 0, 40); memcpy(out + 4, o13, 40);		/* inband_outputCnt, inband_output; then scalar_outputCnt = 0, ool_output_size = 0 */
+		mig_reply_data(m, id, 0, out, sizeof(out));
+		return;
+	}
+	if (sel == 0 && nin == 1 && m->size >= 56) {
+		size_t off = 40 + (size_t)nin * 8;
+		uint32_t incnt = rd32(d, off);
+		uint8_t *props = d + off + 4;
+		uint64_t w = 0, h = 0, bpe = 4, fmt = 0, row = 0, alloc = 0;
+		struct iosurf *sf = NULL;
+		int i;
+
+		if (off + 4 + incnt > m->size) { mig_reply(NULL, m, id, (int)0xe00002c2 /* kIOReturnBadArgument */, NULL, NULL, 0, NULL, 0); return; }
+		(void)ios_dict_number(props, incnt, "IOSurfaceWidth", &w);
+		(void)ios_dict_number(props, incnt, "IOSurfaceHeight", &h);
+		(void)ios_dict_number(props, incnt, "IOSurfaceBytesPerElement", &bpe);
+		(void)ios_dict_number(props, incnt, "IOSurfacePixelFormat", &fmt);
+		(void)ios_dict_number(props, incnt, "IOSurfaceBytesPerRow", &row);
+		(void)ios_dict_number(props, incnt, "IOSurfaceAllocSize", &alloc);
+		if (w == 0 || h == 0 || w > 16384 || h > 16384 || bpe == 0 || bpe > 16) { mig_reply(NULL, m, id, (int)0xe00002c2, NULL, NULL, 0, NULL, 0); return; }
+		if (row == 0) row = roundup2(w * bpe, 64);
+		if (alloc == 0) alloc = row * h;
+		mtx_lock(&ios_mtx);
+		for (i = 0; i < IOS_MAX; i++)
+			if (!iosurfs[i].used) { sf = &iosurfs[i]; break; }
+		if (sf != NULL) { memset(sf, 0, sizeof(*sf)); sf->used = true; sf->id = iosurf_next++; }
+		mtx_unlock(&ios_mtx);
+		if (sf == NULL) { mig_reply(NULL, m, id, (int)0xe00002bd /* kIOReturnNoResources */, NULL, NULL, 0, NULL, 0); return; }
+		sf->w = (uint32_t)w; sf->h = (uint32_t)h; sf->row = (uint32_t)row; sf->fmt = (uint32_t)fmt; sf->bpe = (uint32_t)bpe; sf->alloc = alloc;
+		sf->obj = vm_object_allocate(OBJT_DEFAULT, OFF_TO_IDX(round_page(alloc)));
+		{
+			vm_offset_t va = 0, iva = 0;
+			struct vm_object *io;
+			uint8_t *out = malloc(4 + 0xc68 + 4 + 8, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			uint8_t *st = out + 4;
+			int rv;
+
+			if (ios_map(td->td_proc, sf->obj, alloc, &va) != KERN_SUCCESS) { free(out, M_DARWIN_IPC); vm_object_deallocate(sf->obj); sf->used = false; mig_reply(NULL, m, id, (int)0xe00002bd, NULL, NULL, 0, NULL, 0); return; }
+			io = vm_object_allocate(OBJT_DEFAULT, 16);			/* the region that the kernel keeps for the client (the state of the surface: locks, seeds): zero pages */
+			rv = ios_map(td->td_proc, io, 16 * PAGE_SIZE, &iva);
+			vm_object_deallocate(io);
+			if (rv != KERN_SUCCESS) iva = va;
+			wr32(out, 0, 0xc68);
+			*(uint64_t *)(st + 0) = va;
+			*(uint64_t *)(st + 8) = iva + 0x4e0;
+			*(uint64_t *)(st + 16) = iva + 0x3180;
+			*(uint64_t *)(st + 24) = sf->id;
+			*(uint64_t *)(st + 32) = alloc;
+			*(uint64_t *)(st + 40) = w;
+			*(uint64_t *)(st + 48) = h;
+			*(uint64_t *)(st + 56) = row;
+			*(uint64_t *)(st + 72) = fmt;
+			*(uint64_t *)(st + 80) = alloc;
+			st[96] = (uint8_t)bpe; st[97] = 0; st[98] = 1; st[99] = 1;
+			*(uint64_t *)(st + 120) = 0x0100000000000000ULL | iosurf_counter++;
+			/* the tail of the structure (the planes) stays zero: a surface of one plane */
+			mig_reply_data(m, id, 0, out, 4 + 0xc68 + 4 + 8);
+			free(out, M_DARWIN_IPC);
+		}
+		if (darwin_debug >= 1)
+			printf("darwinator: IOSurface %u made: %ux%u, row %u, %ju bytes, format %#x\n", sf->id, sf->w, sf->h, sf->row, (uintmax_t)alloc, sf->fmt);
+		return;
+	}
+	mig_reply(NULL, m, id, (int)0xe00002f0 /* kIOReturnNotFound */, NULL, NULL, 0, NULL, 0);
+}
+
 static void
 io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 {
@@ -2948,6 +3097,10 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 		uint8_t z[16];
 
 		if (!conn) break;
+		if (strcmp(io_nodes[node].cls, "IOSurfaceRoot") == 0) {
+			iosurf_method(curthread, m, id);
+			return;
+		}
 		memset(z, 0, sizeof(z));
 		if (darwin_debug >= 1)
 			printf("darwinator: IOKit: method %u of the connection to %s\n", m->size >= 36 ? rd32(m->data, 32) : 0, io_nodes[node].name);
@@ -2970,6 +3123,34 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 		printf("darwinator: IOKit request %d is not served (it fails)\n", id);
 	mig_reply(t, m, id, (int)0xe00002c7 /* kIOReturnUnsupported */, NULL, NULL, 0, NULL, 0);
 }
+
+
+/* iokit_user_client_trap (mach trap 100): (connection, index, p1 .. p6): the fast methods of a user client.  IOSurfaceRoot: 2 lock (surface id, options, *seed), 3 unlock (surface id, options, *seed),
+ * 5 release (surface id): found in IOSurface.framework (_IOSurfaceClientLock calls IOConnectTrap3(connection, 2, id, options, &seed)).  A surface is not locked against anybody here: the seed stays 0. */
+static int
+darwin_iokit_user_client_trap(struct thread *td, struct darwin_args *uap)
+{
+	struct ktask *t;
+	struct kent *e;
+	uint32_t idx = (uint32_t)uap->a[1], seed = 0;
+	bool surf = false;
+
+	sx_xlock(&km_sx);
+	if ((t = kt_task(td->td_proc)) != NULL && (e = ent_by_name(t, (uint32_t)uap->a[0])) != NULL && e->port->kind == KP_IOOBJ && e->port->kpid >= IO_CONN_BASE)
+		surf = strcmp(io_nodes[e->port->kpid - IO_CONN_BASE].cls, "IOSurfaceRoot") == 0;
+	sx_xunlock(&km_sx);
+	if (!surf)
+		return (kr_ret(td, (int)0xe00002c7 /* kIOReturnUnsupported */));
+	if (idx == 2 || idx == 3) {
+		if (uap->a[4] != 0 && copyout(&seed, (void *)uap->a[4], sizeof(seed)) != 0)
+			return (kr_ret(td, KERN_INVALID_ADDRESS));
+		return (kr_ret(td, 0));
+	}
+	if (idx == 5)
+		return (kr_ret(td, 0));
+	return (kr_ret(td, (int)0xe00002c7));
+}
+
 
 static void
 mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m)
@@ -3641,6 +3822,7 @@ static const struct {
 	E(29, 0, darwin_self_host,		"host_self_trap"),
 	E(31, 7, darwin_mach_msg,		"mach_msg_trap"),
 	E(47, 8, darwin_mach_msg2,		"mach_msg2_trap"),
+	E(100, 8, darwin_iokit_user_client_trap,	"iokit_user_client_trap"),
 	E(50, 0, darwin_thread_special_reply_port, "thread_get_special_reply_port"),
 	E(70, 4, darwin_host_create_voucher,	"host_create_mach_voucher_trap"),
 	E(32, 9, darwin_mach_msg,		"mach_msg_overwrite_trap"),
