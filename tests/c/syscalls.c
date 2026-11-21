@@ -532,6 +532,12 @@ int cmain(void)
 	      kr2 = dmach7(31, (i64)cm, 1, 40, 0, 0, 0, 0); check("mach_msg with a port descriptor (MAKE_SEND of Q) is sent", kr2 == 0, kr2);
 	      kr2 = dmach7(31, (i64)rv, 2, 0, 64, P, 0, 0); check("  received: the descriptor holds the name of Q with the disposition 17 (PORT_SEND)", kr2 == 0 && rv[7] == Q && ((rv[9] >> 16) & 0xff) == 17, rv[9]);
 	      { unsigned m3[7] = { 19, 28, Q, 0, 0, 56, 0x77 }, r3[16]; for (k = 0; k < 16; k++) r3[k] = 0; kr2 = dmach7(31, (i64)m3, 1, 28, 0, 0, 0, 0); kr2 |= dmach7(31, (i64)r3, 2, 0, 64, Q, 0, 0); check("  and the right works: a message to Q arrives", kr2 == 0 && r3[5] == 56, kr2); } }
+	    /* the receive right of a port and a send right of the same port in one message (the answer of ApplyFenceTransaction of QuartzCore: the client listens on the first, the second goes back in its commits) */
+	    { unsigned Q = 0, cm[13] = { 0x80000000u | 19, 52, P, 0, 0, 57, 2, 0, 0, 16 << 16, 0, 0, 17 << 16 }, rv[16]; for (k = 0; k < 16; k++) rv[k] = 0;
+	      dmach(16, (i64)task, 1, (i64)&Q, 0, 0, 0); dmach(21, (i64)task, Q, Q, 20, 0, 0); cm[7] = Q; cm[10] = Q;
+	      kr2 = dmach7(31, (i64)cm, 1, 52, 0, 0, 0, 0); check("mach_msg with MOVE_RECEIVE and MOVE_SEND descriptors of the same port is sent", kr2 == 0, kr2);
+	      kr2 = dmach7(31, (i64)rv, 2, 0, 64, P, 0, 0); check("  received: two descriptors, dispositions 16 (PORT_RECEIVE) and 17 (PORT_SEND)", kr2 == 0 && rv[6] == 2 && rv[7] != 0 && rv[10] != 0 && ((rv[9] >> 16) & 0xff) == 16 && ((rv[12] >> 16) & 0xff) == 17, rv[9]);
+	      { unsigned m3[7] = { 19, 28, rv[10], 0, 0, 58, 0x78 }, r3[16]; for (k = 0; k < 16; k++) r3[k] = 0; kr2 = dmach7(31, (i64)m3, 1, 28, 0, 0, 0, 0); kr2 |= dmach7(31, (i64)r3, 2, 0, 64, rv[7], 0, 0); check("  and a message to the send right arrives on the receive right", kr2 == 0 && r3[5] == 58 && r3[6] == 0x78, kr2); } }
 	  /* MIG routines of the task and the host port (the ids come from the .defs of xnu: mach_port 3200, task 3400, host 200) */
 	  { unsigned q[24]; unsigned rpm = (unsigned)dmach(26, 0, 0, 0, 0, 0, 0), PT = 0; int k; i64 kr4;
 	    dmach(16, (i64)task, 1, (i64)&PT, 0, 0, 0); dmach(21, (i64)task, PT, PT, 20, 0, 0);
