@@ -919,7 +919,7 @@ mk_timer_fire(void *arg, int pending __unused)
 	if (p->armed) {
 		p->armed = false;
 		if (darwin_debug >= 3 && p->dbglong)
-			printf("darwinator: mk_timer fire (port %p, dead %d, late %jd us)\n", p, (int)p->dead, (intmax_t)(((int64_t)uptime_ns() - (int64_t)p->deadline) / 1000));
+			printf("darwinator: mk_timer fire (port %p, dead %d, late %jd us, queued %d)\n", p, (int)p->dead, (intmax_t)(((int64_t)uptime_ns() - (int64_t)p->deadline) / 1000), (int)p->qn);
 		if (!p->dead) {
 			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 			r->data = d = malloc(48, M_DARWIN_IPC, M_WAITOK | M_ZERO);
