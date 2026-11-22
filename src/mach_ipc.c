@@ -1048,6 +1048,49 @@ darwin_mk_timer_arm(struct thread *td, struct darwin_args *uap)		/* (name, expir
 	return (kr_ret(td, timer_arm(td, (uint32_t)uap->a[0], uap->a[1])));
 }
 
+/* debug 5: what CoreAnimation's display link looks like when its timer is armed (the thread is inside DisplayLink::callback or its timer handler): scan the user stack for a pointer to a DisplayLink (begin / end
+ * of the item array at +0x78 / +0x80 and the display at +0x8 are heap pointers) and print the link (0x140 bytes) and its first item (0x130 bytes).  The offsets are from the decompilation of QuartzCore (26.7.2). */
+static void
+dl_dump(struct thread *td)
+{
+	uint64_t stk[512], v, b, e, hdr[2];
+	uint8_t buf[0x140];
+	uint64_t sp = td->td_frame->tf_rsp;
+	int i, n = 0, k;
+
+	if (copyin((void *)sp, stk, sizeof(stk)) != 0)
+		return;
+	for (i = 0; i < 512 && n < 2; i++) {
+		v = stk[i];
+		if (v < 0x600000000000ULL || v > 0x60ffffffffffULL || (v & 7) != 0)
+			continue;
+		if (copyin((void *)(v + 0x78), hdr, 16) != 0)
+			continue;
+		b = hdr[0]; e = hdr[1];
+		if (b < 0x600000000000ULL || b > 0x60ffffffffffULL || e <= b || e - b > 0x100 || ((e - b) & 7) != 0)
+			continue;
+		if (copyin((void *)v, buf, sizeof(buf)) != 0)
+			continue;
+		printf("darwinator: DL link %#jx (stack slot %d): items %ju:", (uintmax_t)v, i, (uintmax_t)((e - b) / 8));
+		for (k = 0; k < (int)sizeof(buf); k += 8)
+			printf("%s%016jx", k % 32 == 0 ? "\n  " : " ", (uintmax_t)*(uint64_t *)(buf + k));
+		printf("\n");
+		{	/* the items (up to 4) */
+			uint64_t it, j;
+
+			for (j = 0; j < (e - b) / 8 && j < 4; j++) {
+				if (copyin((void *)(b + 8 * j), &it, 8) == 0 && copyin((void *)it, buf, 0x130) == 0) {
+					printf("darwinator: DL item %ju at %#jx:", (uintmax_t)j, (uintmax_t)it);
+					for (k = 0; k < 0x130; k += 8)
+						printf("%s%016jx", k % 32 == 0 ? "\n  " : " ", (uintmax_t)*(uint64_t *)(buf + k));
+					printf("\n");
+				}
+			}
+		}
+		n++;
+	}
+}
+
 static int
 darwin_mk_timer_arm_leeway(struct thread *td, struct darwin_args *uap)	/* (name, mk_timer_flags, mk_timer_expire_time, mk_timer_leeway): the time is absolute or relative */
 {
@@ -1055,6 +1098,12 @@ darwin_mk_timer_arm_leeway(struct thread *td, struct darwin_args *uap)	/* (name,
 
 	if ((uap->a[1] & 1) == 0)
 		t += uptime_ns();
+	if (darwin_debug >= 5 && t > uptime_ns() + 5000000) {
+		static int dumps;
+
+		if (strncmp(td->td_proc->p_comm, "akh", 3) == 0 && dumps++ % 40 == 0)
+			dl_dump(td);
+	}
 	return (kr_ret(td, timer_arm(td, (uint32_t)uap->a[0], t)));
 }
 
