@@ -3128,7 +3128,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			vm_object_clear_flag(ep->mobj, OBJ_ONEMAPPING);
 			VM_OBJECT_WUNLOCK(ep->mobj);
 			ep->moff = e->offset + (off - e->start);
-			ep->msize = size;
+			ep->msize = round_page(size);			/* an entry is made of pages: Apple rounds its size up (the stub that reads it sees 0x1000 for 0x7c0 bytes) */
 			ep->mprot = (int)(e->protection & VM_PROT_ALL);
 			vm_map_unlock_read(map);
 			(void)perm;
