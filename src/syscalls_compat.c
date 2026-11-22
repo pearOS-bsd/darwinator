@@ -549,6 +549,17 @@ darwin_ok(struct thread *td, struct darwin_args *uap __unused)
 	return (0);
 }
 
+/* kdebug_trace / kdebug_trace64 (code, arg1 .. arg4): nothing is recorded, but with kern.darwinator.debug >= 4 the codes of QuartzCore's display link (0x31ca....: the signposts of DisplayLink::callback and dispatch_items)
+ * are printed, because they are the only view into a closed library on this system */
+static int
+darwin_kdebug_trace(struct thread *td, struct darwin_args *uap)
+{
+	if (darwin_debug >= 4)
+		printf("darwinator: %s[%d]: kdebug_trace %#jx %#jx %#jx %#jx %#jx\n", td->td_proc->p_comm, td->td_proc->p_pid, (uintmax_t)uap->a[0], (uintmax_t)uap->a[1], (uintmax_t)uap->a[2], (uintmax_t)uap->a[3], (uintmax_t)uap->a[4]);
+	td->td_retval[0] = 0;
+	return (0);
+}
+
 static int
 darwin_enotsup(struct thread *td __unused, struct darwin_args *uap __unused)
 {
@@ -716,8 +727,8 @@ static const struct {
 	E(170, 4, darwin_ok,		"csops_audittoken"),
 	E(177, 4, darwin_ok,		"kdebug_typefilter"),
 	E(178, 4, darwin_ok,		"kdebug_trace_string"),
-	E(179, 6, darwin_ok,		"kdebug_trace64"),
-	E(180, 6, darwin_ok,		"kdebug_trace"),
+	E(179, 6, darwin_kdebug_trace,	"kdebug_trace64"),
+	E(180, 6, darwin_kdebug_trace,	"kdebug_trace"),
 	E(296, 1, darwin_ok,		"vm_pressure_monitor"),
 	E(322, 3, darwin_ok,		"iopolicysys"),
 	E(323, 4, darwin_ok,		"process_policy"),

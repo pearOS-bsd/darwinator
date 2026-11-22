@@ -119,6 +119,7 @@ struct kport {
 	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
 	struct timeout_task *timer;		/* KP_PORT made by mk_timer_create: the expiry sends a message to the port itself */
+	bool		dbglong;		/* debug 3: the last arm was for more than 5 ms (the display link, not the 1 ms timers of a run loop) */
 	LIST_ENTRY(kport) tlink;		/* every port with a timer is on timers: the module cancels them before it goes away (a callout that fires into unloaded code is a panic) */
 	bool		intimers;
 	struct vm_object *mobj;			/* KP_MEMENT: a memory entry, the pages of an object of the VM that can be mapped into other tasks (mach_make_memory_entry, mach_vm_map) */
@@ -905,6 +906,8 @@ darwin_generate_activity_id(struct thread *td, struct darwin_args *uap)	/* (targ
 
 /* ---- mk_timer: a port that receives a message when its time comes (traps 91-95) ---- */
 
+static uint64_t uptime_ns(void);
+
 static void
 mk_timer_fire(void *arg, int pending __unused)
 {
@@ -915,8 +918,8 @@ mk_timer_fire(void *arg, int pending __unused)
 	sx_xlock(&km_sx);
 	if (p->armed) {
 		p->armed = false;
-		if (darwin_debug >= 3)
-			printf("darwinator: mk_timer fire (port %p, dead %d)\n", p, (int)p->dead);
+		if (darwin_debug >= 3 && p->dbglong)
+			printf("darwinator: mk_timer fire (port %p, dead %d, late %jd us)\n", p, (int)p->dead, (intmax_t)(((int64_t)uptime_ns() - (int64_t)p->deadline) / 1000));
 		if (!p->dead) {
 			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 			r->data = d = malloc(48, M_DARWIN_IPC, M_WAITOK | M_ZERO);
@@ -1027,9 +1030,12 @@ timer_arm(struct thread *td, uint32_t name, uint64_t deadline)
 		p->deadline = deadline;
 		p->armed = true;
 		p->refs++;
-		if (darwin_debug >= 3)
+		p->dbglong = deadline > now && deadline - now > 5000000;
+		if (darwin_debug >= 3 && p->dbglong)
 			printf("darwinator: %s[%d]: mk_timer arm %u: in %jd ms (deadline %ju, now %ju)\n", td->td_proc->p_comm, td->td_proc->p_pid, name, (intmax_t)((int64_t)(deadline - now) / 1000000), (uintmax_t)deadline, (uintmax_t)now);
-		taskqueue_enqueue_timeout(taskqueue_thread, p->timer, deadline > now ? (int)MIN((deadline - now) / (1000000000 / hz), INT_MAX) : 0);
+		/* the time is given in sbintime (a high resolution timer), not in ticks: with hz = 100 a tick is 10 ms and a timer of 16.67 ms (the display link of CoreAnimation) fired up to 10 ms early, which CoreAnimation
+		 * takes for a missed vsync and does not deliver the tick */
+		taskqueue_enqueue_timeout_sbt(taskqueue_thread, p->timer, deadline > now ? nstosbt((int64_t)(deadline - now)) : 0, 0, 0);
 		kr = KERN_SUCCESS;
 	}
 	sx_xunlock(&km_sx);
