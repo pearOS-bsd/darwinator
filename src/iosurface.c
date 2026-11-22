@@ -31,7 +31,7 @@
 #define IOS_NORESOURCES	((int)0xe00002bd)	/* kIOReturnNoResources */
 #define IOS_UNSUPPORTED	((int)0xe00002c7)	/* kIOReturnUnsupported */
 
-static struct iosurf { bool used; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; struct vm_object *obj; } iosurfs[IOS_MAX];
+static struct iosurf { bool used, global; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; struct vm_object *obj; } iosurfs[IOS_MAX];
 static uint32_t iosurf_next = 1, iosurf_counter = 0x494;
 static struct mtx ios_mtx;
 MTX_SYSINIT(darwin_iosurf, &ios_mtx, "darwin iosurface", MTX_DEF);
@@ -86,6 +86,40 @@ iosurface_dict_number(const uint8_t *b, size_t n, const char *want, uint64_t *ou
 	return (0);
 }
 
+/* a boolean value (type 0x0b, the value is the low bit of the header) of a key: 1 when the key is there and true */
+static int
+ios_dict_true(const uint8_t *b, size_t n, const char *want)
+{
+	size_t p = 8;
+	uint32_t cnt, i;
+
+	if (n < 8 || le32(b, 0) != 0xd3)
+		return (0);
+	cnt = le32(b, 4) & 0x00ffffff;
+	for (i = 0; i < cnt && p + 4 <= n; i++) {
+		uint32_t kh = le32(b, p), klen = kh & 0x00ffffff, vh, type;
+		bool match;
+
+		p += 4;
+		if ((kh & 0x7f000000u) != 0x08000000u || p + roundup2(klen, 4) + 4 > n)
+			return (0);
+		match = klen > 0 && strlen(want) + 1 == klen && strncmp((const char *)b + p, want, klen) == 0;
+		p += roundup2(klen, 4);
+		vh = le32(b, p); p += 4;
+		type = vh & 0x7f000000u;
+		if (type == 0x0b000000u) {
+			if (match)
+				return ((vh & 1) != 0);
+		} else if (type == 0x04000000u)
+			p += 8;
+		else if (type == 0x09000000u || type == 0x08000000u || type == 0x0a000000u)
+			p += roundup2(vh & 0x00ffffff, 4);
+		else if (type != 0x0c000000u)
+			return (0);
+	}
+	return (0);
+}
+
 static int
 ios_map(struct proc *tp, struct vm_object *obj, uint64_t size, vm_offset_t *va)
 {
@@ -108,14 +142,42 @@ iosurface_limits(uint8_t *out)
 	memcpy(out, o13, sizeof(o13));
 }
 
+/* the structure of 0xc68 bytes for a surface that is mapped in the task of td at va (with the region that the kernel keeps for the client) */
+static int
+ios_fill(struct thread *td, struct iosurf *sf, vm_offset_t va, uint8_t *out)
+{
+	vm_offset_t iva = 0;
+	struct vm_object *io;
+	uint64_t v, w = sf->w, h = sf->h, row = sf->row, fmt = sf->fmt, bpe = sf->bpe, alloc = sf->alloc;
+	int rv;
+
+	io = vm_object_allocate(OBJT_DEFAULT, 16);			/* the region that the kernel keeps for the client (the state of the surface: locks, seeds): zero pages */
+	rv = ios_map(td->td_proc, io, 16 * PAGE_SIZE, &iva);
+	vm_object_deallocate(io);
+	if (rv != IOS_KERN_SUCCESS)
+		iva = va;
+	v = va; memcpy(out + 0, &v, 8);
+	v = iva + 0x4e0; memcpy(out + 8, &v, 8);
+	v = iva + 0x3180; memcpy(out + 16, &v, 8);
+	v = sf->id; memcpy(out + 24, &v, 8);
+	memcpy(out + 32, &alloc, 8);
+	memcpy(out + 40, &w, 8);
+	memcpy(out + 48, &h, 8);
+	memcpy(out + 56, &row, 8);
+	memcpy(out + 72, &fmt, 8);
+	memcpy(out + 80, &alloc, 8);
+	out[96] = (uint8_t)bpe; out[97] = 0; out[98] = 1; out[99] = 1;
+	v = 0x0100000000000000ULL | iosurf_counter++; memcpy(out + 120, &v, 8);	/* the tail of the structure (the planes) stays zero: a surface of one plane */
+	return (0);
+}
+
 int
 iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *out)
 {
-	uint64_t w = 0, h = 0, bpe = 4, fmt = 0, row = 0, alloc = 0, v;
+	uint64_t w = 0, h = 0, bpe = 4, fmt = 0, row = 0, alloc = 0;
 	struct iosurf *sf = NULL;
-	vm_offset_t va = 0, iva = 0;
-	struct vm_object *io;
-	int i, rv;
+	vm_offset_t va = 0;
+	int i;
 
 	(void)iosurface_dict_number(props, len, "IOSurfaceWidth", &w);
 	(void)iosurface_dict_number(props, len, "IOSurfaceHeight", &h);
@@ -136,30 +198,15 @@ iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *o
 	mtx_unlock(&ios_mtx);
 	if (sf == NULL)
 		return (IOS_NORESOURCES);
-	sf->w = (uint32_t)w; sf->h = (uint32_t)h; sf->row = (uint32_t)row; sf->fmt = (uint32_t)fmt; sf->bpe = (uint32_t)bpe; sf->alloc = alloc;
+	sf->w = (uint32_t)w; sf->h = (uint32_t)h; sf->row = (uint32_t)row; sf->fmt = (uint32_t)fmt; sf->bpe = (uint32_t)bpe; sf->alloc = alloc; sf->global = ios_dict_true(props, len, "IOSurfaceIsGlobal");
 	sf->obj = vm_object_allocate(OBJT_DEFAULT, OFF_TO_IDX(round_page(alloc)));
 	if (ios_map(td->td_proc, sf->obj, alloc, &va) != IOS_KERN_SUCCESS) {
 		vm_object_deallocate(sf->obj);
 		sf->used = false;
 		return (IOS_NORESOURCES);
 	}
-	io = vm_object_allocate(OBJT_DEFAULT, 16);			/* the region that the kernel keeps for the client (the state of the surface: locks, seeds): zero pages */
-	rv = ios_map(td->td_proc, io, 16 * PAGE_SIZE, &iva);
-	vm_object_deallocate(io);
-	if (rv != IOS_KERN_SUCCESS)
-		iva = va;
-	v = va; memcpy(out + 0, &v, 8);
-	v = iva + 0x4e0; memcpy(out + 8, &v, 8);
-	v = iva + 0x3180; memcpy(out + 16, &v, 8);
-	v = sf->id; memcpy(out + 24, &v, 8);
-	memcpy(out + 32, &alloc, 8);
-	memcpy(out + 40, &w, 8);
-	memcpy(out + 48, &h, 8);
-	memcpy(out + 56, &row, 8);
-	memcpy(out + 72, &fmt, 8);
-	memcpy(out + 80, &alloc, 8);
-	out[96] = (uint8_t)bpe; out[97] = 0; out[98] = 1; out[99] = 1;
-	v = 0x0100000000000000ULL | iosurf_counter++; memcpy(out + 120, &v, 8);	/* the tail of the structure (the planes) stays zero: a surface of one plane */
+	if (ios_fill(td, sf, va, out) != 0)
+		return (IOS_NORESOURCES);
 	if (darwin_debug >= 1)
 		printf("darwinator: IOSurface %u made: %ux%u, row %u, %ju bytes, format %#x\n", sf->id, sf->w, sf->h, sf->row, (uintmax_t)alloc, sf->fmt);
 	return (0);
@@ -180,4 +227,26 @@ iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options,
 	if (index == IOSURF_TRAP_RELEASE)
 		return (0);
 	return (IOS_UNSUPPORTED);
+}
+
+/* selector 4: the surface of an id (the scalar) that another process made and marked global; the memory is mapped into the caller and the structure is the one of create.  kIOReturnBadArgument for an id
+ * that is not there or not global: what the Mac answers */
+int
+iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out)
+{
+	struct iosurf *sf = NULL;
+	vm_offset_t va = 0;
+	int i;
+
+	mtx_lock(&ios_mtx);
+	for (i = 0; i < IOS_MAX; i++)
+		if (iosurfs[i].used && iosurfs[i].id == id && iosurfs[i].global) { sf = &iosurfs[i]; break; }
+	mtx_unlock(&ios_mtx);
+	if (sf == NULL)
+		return (IOS_NOTBADARG);
+	if (ios_map(td->td_proc, sf->obj, sf->alloc, &va) != IOS_KERN_SUCCESS)
+		return (IOS_NORESOURCES);
+	if (ios_fill(td, sf, va, out) != 0)
+		return (IOS_NORESOURCES);
+	return (0);
 }

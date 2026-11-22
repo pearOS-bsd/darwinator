@@ -2709,6 +2709,21 @@ iosurf_method(struct thread *td, struct kmsg *m, int id)
 		free(out, M_DARWIN_IPC);
 		return;
 	}
+	if (sel == IOSURF_SEL_LOOKUP && nin == 1 && m->size >= 48) {
+		uint8_t *out = malloc(4 + IOSURF_CREATE_SIZE + 4 + 8, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		uint64_t sid;
+		int kr;
+
+		memcpy(&sid, d + 40, 8);
+		wr32(out, 0, IOSURF_CREATE_SIZE);
+		kr = iosurface_lookup(td, sid, out + 4);
+		if (kr == 0)
+			mig_reply_data(m, id, 0, out, 4 + IOSURF_CREATE_SIZE + 4 + 8);
+		else
+			mig_reply(NULL, m, id, kr, NULL, NULL, 0, NULL, 0);
+		free(out, M_DARWIN_IPC);
+		return;
+	}
 	mig_reply(NULL, m, id, (int)0xe00002f0 /* kIOReturnNotFound */, NULL, NULL, 0, NULL, 0);
 }
 
