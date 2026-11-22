@@ -915,6 +915,8 @@ mk_timer_fire(void *arg, int pending __unused)
 	sx_xlock(&km_sx);
 	if (p->armed) {
 		p->armed = false;
+		if (darwin_debug >= 3)
+			printf("darwinator: mk_timer fire (port %p, dead %d)\n", p, (int)p->dead);
 		if (!p->dead) {
 			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
 			r->data = d = malloc(48, M_DARWIN_IPC, M_WAITOK | M_ZERO);
@@ -1025,6 +1027,8 @@ timer_arm(struct thread *td, uint32_t name, uint64_t deadline)
 		p->deadline = deadline;
 		p->armed = true;
 		p->refs++;
+		if (darwin_debug >= 3)
+			printf("darwinator: %s[%d]: mk_timer arm %u: in %jd ms (deadline %ju, now %ju)\n", td->td_proc->p_comm, td->td_proc->p_pid, name, (intmax_t)((int64_t)(deadline - now) / 1000000), (uintmax_t)deadline, (uintmax_t)now);
 		taskqueue_enqueue_timeout(taskqueue_thread, p->timer, deadline > now ? (int)MIN((deadline - now) / (1000000000 / hz), INT_MAX) : 0);
 		kr = KERN_SUCCESS;
 	}
