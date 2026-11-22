@@ -18,8 +18,12 @@
 static struct { uint64_t addr; long orig; int hits; } bp[MAXBP]; static int nbp;
 
 
+static int memreg, countmode; static long memoff, memlen; static time_t lastsec;
+
 int main(int argc, char **argv)
 {
+	countmode = getenv("BPCOUNT") != NULL;
+	if (getenv("BPMEM")) { char rn[8]; if (sscanf(getenv("BPMEM"), "%7[a-z0-9]:%li:%li", rn, &memoff, &memlen) == 3) memreg = !strcmp(rn, "rdi") ? 1 : !strcmp(rn, "rsi") ? 2 : !strcmp(rn, "rdx") ? 3 : !strcmp(rn, "rcx") ? 4 : !strcmp(rn, "r8") ? 5 : 0; if (memlen > 256) memlen = 256; }
 	pid_t pid; int st, i; struct reg r; time_t t0 = time(NULL);
 	if (argc < 3) { fprintf(stderr, "usage: bp PID ADDR...\n"); return 2; }
 	pid = atoi(argv[1]);
@@ -35,7 +39,9 @@ int main(int argc, char **argv)
 	}
 	fprintf(stderr, "bp: attached to %d with %d breakpoints\n", (int)pid, nbp);
 	ptrace(PT_CONTINUE, pid, (caddr_t)1, 0);
-	while (time(NULL) - t0 < 30) {
+	lastsec = time(NULL);
+	while (time(NULL) - t0 < (getenv("BPSECS") ? atoi(getenv("BPSECS")) : 30)) {
+		if (countmode && time(NULL) != lastsec) { lastsec = time(NULL); printf("T+%ld:", (long)(lastsec - t0)); for (int q = 0; q < nbp; q++) { printf(" %lx=%d", (unsigned long)(bp[q].addr & 0xfffff), bp[q].hits); bp[q].hits = 0; } printf("\n"); fflush(stdout); }
 		pid_t w = waitpid(pid, &st, WNOHANG);
 		if (w == 0) { usleep(1000); continue; }
 		if (w < 0 || WIFEXITED(st) || (WIFSIGNALED(st))) break;
@@ -45,8 +51,9 @@ int main(int argc, char **argv)
 			for (k = 0; k < nbp; k++) if (bp[k].addr == a) break;
 			if (k < nbp) {
 				uint64_t ret = 0; struct ptrace_io_desc io; io.piod_op = PIOD_READ_D; io.piod_offs = (void *)r.r_rsp; io.piod_addr = &ret; io.piod_len = 8; ptrace(PT_IO, pid, (caddr_t)&io, 0);
-				{ struct timespec tt; clock_gettime(CLOCK_MONOTONIC, &tt); printf("[%ld.%03ld] ", (long)(tt.tv_sec % 1000), tt.tv_nsec / 1000000); }
-				printf("BP %lx hit %d: rdi=%lx rsi=%lx rdx=%lx rcx=%lx r8=%lx r9=%lx ret=%lx\n", (unsigned long)a, ++bp[k].hits, (unsigned long)r.r_rdi, (unsigned long)r.r_rsi, (unsigned long)r.r_rdx, (unsigned long)r.r_rcx, (unsigned long)r.r_r8, (unsigned long)r.r_r9, (unsigned long)ret);
+				if (!countmode) { struct timespec tt; clock_gettime(CLOCK_MONOTONIC, &tt); printf("[%ld.%03ld] ", (long)(tt.tv_sec % 1000), tt.tv_nsec / 1000000); }
+				++bp[k].hits; if (!countmode) printf("BP %lx hit %d: rdi=%lx rsi=%lx rdx=%lx rcx=%lx r8=%lx r9=%lx ret=%lx\n", (unsigned long)a, bp[k].hits, (unsigned long)r.r_rdi, (unsigned long)r.r_rsi, (unsigned long)r.r_rdx, (unsigned long)r.r_rcx, (unsigned long)r.r_r8, (unsigned long)r.r_r9, (unsigned long)ret);
+				if (memreg && !countmode) { uint64_t base = memreg == 1 ? r.r_rdi : memreg == 2 ? r.r_rsi : memreg == 3 ? r.r_rdx : memreg == 4 ? r.r_rcx : r.r_r8; unsigned char mb[256]; struct ptrace_io_desc mio; mio.piod_op = PIOD_READ_D; mio.piod_offs = (void *)(base + memoff); mio.piod_addr = mb; mio.piod_len = memlen; if (ptrace(PT_IO, pid, (caddr_t)&mio, 0) == 0) { printf("   mem[%lx+%lx]:", (unsigned long)base, memoff); for (long q = 0; q < memlen; q++) printf("%s%02x", q % 8 == 0 ? " " : "", mb[q]); printf("\n"); } }
 				fflush(stdout);
 				unsigned char b = (unsigned char)bp[k].orig; io.piod_op = PIOD_WRITE_D; io.piod_offs = (void *)a; io.piod_addr = &b; io.piod_len = 1; ptrace(PT_IO, pid, (caddr_t)&io, 0);
 				r.r_rip = a; ptrace(PT_SETREGS, pid, (caddr_t)&r, 0);
