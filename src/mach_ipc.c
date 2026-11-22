@@ -917,10 +917,10 @@ mk_timer_fire(void *arg, int pending __unused)
 		p->armed = false;
 		if (!p->dead) {
 			r = malloc(sizeof(*r), M_DARWIN_IPC, M_WAITOK | M_ZERO);
-			r->data = d = malloc(40, M_DARWIN_IPC, M_WAITOK | M_ZERO);
-			r->size = 40;
+			r->data = d = malloc(48, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+			r->size = 48;			/* mk_timer_expire_msg_t: the header and three 64-bit words, all zero (a Mac receives 48 bytes, seen with SwiftUI/tools/msgtrace.c): CoreAnimation's display timer reads the three words */
 			wr32(d, 0, MM_MOVE_SEND_ONCE);
-			wr32(d, 4, 40);
+			wr32(d, 4, 48);
 			TAILQ_INSERT_TAIL(&p->q, r, link);
 			p->qn++; kq_post(p);
 			wakeup(p);
