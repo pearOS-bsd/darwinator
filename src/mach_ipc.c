@@ -1101,7 +1101,7 @@ darwin_mk_timer_arm_leeway(struct thread *td, struct darwin_args *uap)	/* (name,
 	if (darwin_debug >= 5 && t > uptime_ns() + 5000000) {
 		static int dumps;
 
-		if (strncmp(td->td_proc->p_comm, "akh", 3) == 0 && dumps++ % 40 == 0)
+		if ((strncmp(td->td_proc->p_comm, "akh", 3) == 0 || strncmp(td->td_proc->p_comm, "Hello", 5) == 0) && dumps++ % 40 == 0)
 			dl_dump(td);
 	}
 	return (kr_ret(td, timer_arm(td, (uint32_t)uap->a[0], t)));
@@ -3173,10 +3173,21 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			}
 			if (tp->p_vmspace == NULL) { mig_reply(t, m, id, KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0); break; }
 			map = &tp->p_vmspace->vm_map;
+			if ((perm & 0x20000) != 0) {			/* MAP_MEM_NAMED_CREATE: new memory, no address of the task: the pages of an object of the VM that the entry holds (CoreAnimation makes the backing stores of its layers this way: a Shmem of 0x2180 bytes for the text of a SwiftUI view) */
+				ep = kp_new(KP_MEMENT);
+				ep->mobj = vm_object_allocate(OBJT_DEFAULT, OFF_TO_IDX(round_page(size)));
+				ep->moff = 0;
+				ep->msize = round_page(size);
+				ep->mprot = VM_PROT_READ | VM_PROT_WRITE;
+				if (darwin_debug >= 1)
+					printf("darwinator: %s[%d]: memory entry (named create) of %#lx bytes\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)size);
+			} else {
 			vm_map_lock_read(map);
 			if (!vm_map_lookup_entry(map, (vm_offset_t)off, &e) || (e->eflags & MAP_ENTRY_IS_SUB_MAP) != 0 || e->object.vm_object == NULL ||
 			    off + size > e->end) {
 				vm_map_unlock_read(map);
+				if (darwin_debug >= 1)
+					printf("darwinator: %s[%d]: memory entry of %#lx+%#lx refused (permission %#x): no such memory\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)off, (u_long)size, perm);
 				mig_reply(t, m, id, KERN_INVALID_ADDRESS, NULL, NULL, 0, NULL, 0);
 				break;
 			}
@@ -3190,7 +3201,7 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			ep->msize = round_page(size);			/* an entry is made of pages: Apple rounds its size up (the stub that reads it sees 0x1000 for 0x7c0 bytes) */
 			ep->mprot = (int)(e->protection & VM_PROT_ALL);
 			vm_map_unlock_read(map);
-			(void)perm;
+			}
 			if (darwin_debug >= 2)
 				printf("darwinator: %s[%d]: memory entry of %#lx+%#lx: object %p type %d size %ju pages, offset %#lx, eflags %#x, prot %d\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)off, (u_long)size, ep->mobj, ep->mobj->type, (uintmax_t)ep->mobj->size, (u_long)ep->moff, (unsigned)e->eflags, ep->mprot);
 			/* the reply: a complex message with the port (a send right) and the size */
@@ -3222,6 +3233,27 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			struct vm_map *map;
 			int rv;
 
+			if (op == NULL && m->size >= 100 && size != 0 && tp->p_vmspace != NULL) {	/* no object (MACH_PORT_NULL): new zero-filled memory, as mach_vm_map does (flags: ANYWHERE 1, PURGABLE 2, the tag in the top byte; CoreAnimation allocates the buffers of its backing stores this way) */
+				struct vm_object *no;
+				uint64_t out64;
+
+				map = &tp->p_vmspace->vm_map;
+				no = vm_object_allocate(OBJT_DEFAULT, OFF_TO_IDX(round_page(size)));
+				if ((flags & 1) != 0)
+					va = 0x200000000ULL;
+				rv = vm_map_find(map, no, 0, &va, round_page(size), 0, (flags & 1) != 0 ? VMFS_ANY_SPACE : VMFS_NO_SPACE,
+				    (vm_prot_t)((cur ? cur : (VM_PROT_READ | VM_PROT_WRITE)) & VM_PROT_ALL), (vm_prot_t)(VM_PROT_ALL), MAP_INHERIT_SHARE);
+				if (rv != KERN_SUCCESS) {
+					vm_object_deallocate(no);
+					mig_reply(t, m, id, rv == KERN_NO_SPACE ? 3 : KERN_INVALID_ARGUMENT, NULL, NULL, 0, NULL, 0);
+					break;
+				}
+				if (darwin_debug >= 1)
+					printf("darwinator: %s[%d]: vm_map without an object: %#lx bytes at %#lx (flags %#x)\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)size, (u_long)va, flags);
+				out64 = va;
+				mig_reply_data(m, id, 0, &out64, 8);
+				break;
+			}
 			if (m->size < 100 || op == NULL || op->kind != KP_MEMENT || op->mobj == NULL || size == 0 || offset + size > op->msize || tp->p_vmspace == NULL) {
 				if (darwin_debug >= 1)
 					printf("darwinator: %s[%d]: vm_map of an entry refused: msg size %u, port %p kind %d, size %#lx offset %#lx, entry size %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, m->size, op, op ? op->kind : -1, (u_long)size, (u_long)offset, op ? (u_long)op->msize : 0);
