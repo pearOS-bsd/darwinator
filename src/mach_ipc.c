@@ -2616,6 +2616,38 @@ io_bin_value(const uint8_t *b, uint32_t len, const char *key, char *val, size_t 
 	return (false);
 }
 
+
+/* the number that follows a key in a binary matching dictionary (IORegistryEntryIDMatching: { IORegistryEntryID = n }): the same walk as io_bin_value, the value is a number object (type 4: 8 bytes of data) */
+static bool
+io_bin_number(const uint8_t *b, uint32_t len, const char *key, uint64_t *val)
+{
+	uint32_t pos = 4, w, l;
+	bool take = false;
+
+	if (len < 8 || rd32(b, 0) != 0xd3)
+		return (false);
+	while (pos + 4 <= len) {
+		uint32_t ty;
+
+		w = rd32(b, pos); pos += 4;
+		l = w & 0xffffff;
+		ty = (w >> 24) & 0x7f;
+		if (ty == 0x08 || ty == 0x09) {
+			if (pos + l > len) return (false);
+			take = (l == strlen(key) + 1 && memcmp(b + pos, key, l) == 0);
+			pos += (l + 3) & ~3u;
+			continue;
+		} else if (ty == 0x0a) {
+			pos += (l + 3) & ~3u;
+		} else if (ty == 0x04) {
+			if (take && pos + 8 <= len) { *val = (uint64_t)rd32(b, pos) | ((uint64_t)rd32(b, pos + 4) << 32); return (true); }
+			pos += 8;
+		}
+		take = false;
+	}
+	return (false);
+}
+
 static struct kport *
 io_new_iter(int *list, int n)
 {
@@ -2912,6 +2944,23 @@ io_serve(struct ktask *t, struct kport *dest, struct kmsg *m, int id)
 			    io_bin_value(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IONameMatch", cls, sizeof(cls)));
 		else
 			found = io_xml_value(xml, "IOProviderClass", cls, sizeof(cls)) || io_xml_value(xml, "IOClass", cls, sizeof(cls)) || io_xml_value(xml, "IONameMatch", cls, sizeof(cls));
+		if (!found && bsdname[0] == 0) {		/* IORegistryEntryIDMatching(id): the node whose registry entry id (the one io_registry_entry_get_registry_entry_id gives: 0x100000100 + node) it is: Metal's MTLDevice.registryID, looked up again by RenderBox */
+			uint64_t rid = 0;
+			bool have = false;
+
+			if (id == 2880 || id == 2881)
+				have = m->size >= 36 && io_bin_number(m->data + 36, MIN(rd32(m->data, 32), m->size - 36), "IORegistryEntryID", &rid);
+			else {
+				const char *p = strstr(xml, "<key>IORegistryEntryID</key>"), *q = p ? strstr(p, "<integer") : NULL, *r = q ? strchr(q, '>') : NULL;
+
+				if (r != NULL) { rid = (uint64_t)strtouq(r + 1, NULL, 0); have = true; }
+			}
+			if (have && rid >= 0x100000100ULL && rid - 0x100000100ULL < IO_NNODES)
+				list[n++] = (int)(rid - 0x100000100ULL);
+			if (darwin_debug >= 1)
+				printf("darwinator: IOKit: matching by registry entry id %s%llx: %d node(s)\n", have ? "0x" : "(none) ", (unsigned long long)rid, n);
+			if (have) { found = true; strlcpy(cls, "(registry entry id)", sizeof(cls)); }
+		}
 		if (bsdname[0] != 0) {		/* a medium by its BSD name */
 			for (i = 0; i < IO_NNODES && n < 16; i++)
 				if (io_nodes[i].bsd != NULL && strcmp(io_nodes[i].bsd, bsdname) == 0 && (!found || io_node_matches(i, cls))) list[n++] = i;
