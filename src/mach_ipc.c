@@ -3201,6 +3201,8 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 			ep->msize = round_page(size);			/* an entry is made of pages: Apple rounds its size up (the stub that reads it sees 0x1000 for 0x7c0 bytes) */
 			ep->mprot = (int)(e->protection & VM_PROT_ALL);
 			vm_map_unlock_read(map);
+			if (darwin_debug >= 1)
+				printf("darwinator: %s[%d]: memory entry of %#lx+%#lx (permission %#x): made\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)off, (u_long)size, perm);
 			}
 			if (darwin_debug >= 2)
 				printf("darwinator: %s[%d]: memory entry of %#lx+%#lx: object %p type %d size %ju pages, offset %#lx, eflags %#x, prot %d\n", td->td_proc->p_comm, td->td_proc->p_pid, (u_long)off, (u_long)size, ep->mobj, ep->mobj->type, (uintmax_t)ep->mobj->size, (u_long)ep->moff, (unsigned)e->eflags, ep->mprot);
