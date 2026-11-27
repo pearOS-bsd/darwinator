@@ -70,6 +70,16 @@ darwin_fcntl(struct thread *td, struct darwin_args *uap)
 		return (error);
 	case DARWIN_F_SETFL:
 		return (kern_fcntl(td, fd, F_SETFL, arg & (DARWIN_O_NONBLOCK | DARWIN_O_APPEND | DARWIN_O_ASYNC)));
+	case 95:			/* F_SETCONFINED: the descriptor may not leave the process (in a message): nothing to enforce here */
+		return (0);
+	case 96:			/* F_GETCONFINED */
+		td->td_retval[0] = 0;
+		return (0);
+	case 90:			/* F_OFD_SETLK, F_OFD_SETLKW, F_OFD_GETLK: locks owned by the open file, not the process (SQLite of the Mac takes them); FreeBSD has no such fcntl locks: */
+	case 91:			/* they become POSIX locks of the process (the same ranges; two descriptors of one process share them, which a single connection does not notice) */
+	case 92:
+		cmd = cmd == 90 ? DARWIN_F_SETLK : cmd == 91 ? DARWIN_F_SETLKW : DARWIN_F_GETLK;
+		/* FALLTHROUGH */
 	case DARWIN_F_GETLK:
 	case DARWIN_F_SETLK:
 	case DARWIN_F_SETLKW:

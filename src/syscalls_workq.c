@@ -646,11 +646,12 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
 			int i, idle = 0, woken = 0;
 
 			for (i = 0; i < WQ_MAX_THREADS; i++)		/* wake the parked threads first: they take the work (as many as the requests: waking all of them at every request kept 33 threads of launchservicesd at 4 CPUs) */
-				if (w->thr[i].used && w->thr[i].td != NULL) {
+				if (w->thr[i].used && w->thr[i].td != NULL && w->thr[i].parked) {
 					if (woken < MAX((int)n, 1)) { wakeup(&w->thr[i]); woken++; }
 					idle++;
 				}
-			while ((w->want > 0 || w->want_oc > 0) && w->nthreads < WQ_MAX_THREADS && w->nthreads >= idle) {
+			/* a new thread only for the requests that no parked thread takes (idle counted every thread of the pool: each request made a new thread until the pool was full) */
+			while ((w->want > 0 || w->want_oc > 0) && w->nthreads < WQ_MAX_THREADS && w->want + w->want_oc > idle) {
 				bool oc = false;
 				int tq = wq_take(w, &oc);		/* the new thread starts with this request */
 
