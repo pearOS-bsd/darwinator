@@ -31,7 +31,11 @@
 #define IOS_NORESOURCES	((int)0xe00002bd)	/* kIOReturnNoResources */
 #define IOS_UNSUPPORTED	((int)0xe00002c7)	/* kIOReturnUnsupported */
 
-static struct iosurf { bool used, global; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; struct vm_object *obj; } iosurfs[IOS_MAX];
+#define IOS_USERS	16
+/* a surface and its users: as in IOSurfaceRootUserClient on the Mac, each process that made or looked up a surface has one client of it with a use count (create and lookup add one, the release trap takes
+ * one away); when the count of a process goes to 0 the memory is unmapped from it, and when no process uses the surface any more the surface goes.  A process that exits loses its uses. */
+struct ios_user { pid_t pid; uint32_t uses; vm_offset_t va, iva; };
+static struct iosurf { bool used, global; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; struct vm_object *obj; struct ios_user u[IOS_USERS]; } iosurfs[IOS_MAX];
 static uint32_t iosurf_next = 1, iosurf_counter = 0x494;
 static struct mtx ios_mtx;
 MTX_SYSINIT(darwin_iosurf, &ios_mtx, "darwin iosurface", MTX_DEF);
@@ -223,19 +227,13 @@ iosurface_limits(uint8_t *out)
 	memcpy(out, o13, sizeof(o13));
 }
 
-/* the structure of 0xc68 bytes for a surface that is mapped in the task of td at va (with the region that the kernel keeps for the client) */
-static int
-ios_fill(struct thread *td, struct iosurf *sf, vm_offset_t va, uint8_t *out)
+/* the structure of 0xc68 bytes for a surface that is mapped at va, with the region that the kernel keeps for the client at iva */
+static void
+ios_fill_addrs(struct iosurf *sf, vm_offset_t va, vm_offset_t iva, uint8_t *out)
 {
-	vm_offset_t iva = 0;
-	struct vm_object *io;
 	uint64_t v, w = sf->w, h = sf->h, row = sf->row, fmt = sf->fmt, bpe = sf->bpe, alloc = sf->alloc;
-	int rv;
 
-	io = vm_object_allocate(OBJT_DEFAULT, 16);			/* the region that the kernel keeps for the client (the state of the surface: locks, seeds): zero pages */
-	rv = ios_map(td->td_proc, io, 16 * PAGE_SIZE, &iva);
-	vm_object_deallocate(io);
-	if (rv != IOS_KERN_SUCCESS)
+	if (iva == 0)
 		iva = va;
 	v = va; memcpy(out + 0, &v, 8);
 	v = iva + 0x4e0; memcpy(out + 8, &v, 8);
@@ -249,7 +247,76 @@ ios_fill(struct thread *td, struct iosurf *sf, vm_offset_t va, uint8_t *out)
 	memcpy(out + 80, &alloc, 8);
 	out[96] = (uint8_t)bpe; out[97] = 0; out[98] = 1; out[99] = 1;
 	v = 0x0100000000000000ULL | iosurf_counter++; memcpy(out + 120, &v, 8);	/* the tail of the structure (the planes) stays zero: a surface of one plane */
+}
+
+/* the same for a surface that was just mapped in the task of td at va: the client region is made and mapped too (its address in *ivap, 0 when it could not be mapped) */
+static int
+ios_fill(struct thread *td, struct iosurf *sf, vm_offset_t va, uint8_t *out, vm_offset_t *ivap)
+{
+	vm_offset_t iva = 0;
+	struct vm_object *io;
+	int rv;
+
+	io = vm_object_allocate(OBJT_DEFAULT, 16);			/* the region that the kernel keeps for the client (the state of the surface: locks, seeds): zero pages */
+	rv = ios_map(td->td_proc, io, 16 * PAGE_SIZE, &iva);
+	vm_object_deallocate(io);
+	*ivap = rv == IOS_KERN_SUCCESS ? iva : 0;
+	ios_fill_addrs(sf, va, *ivap, out);
 	return (0);
+}
+
+/* the user entry of process p in sf (made when add is true); NULL when there is none (or no room).  ios_mtx held */
+static struct ios_user *
+ios_user_of(struct iosurf *sf, pid_t pid, bool add)
+{
+	int i;
+
+	for (i = 0; i < IOS_USERS; i++)
+		if (sf->u[i].uses != 0 && sf->u[i].pid == pid)
+			return (&sf->u[i]);
+	if (add)
+		for (i = 0; i < IOS_USERS; i++)
+			if (sf->u[i].uses == 0) { memset(&sf->u[i], 0, sizeof(sf->u[i])); sf->u[i].pid = pid; return (&sf->u[i]); }
+	return (NULL);
+}
+
+/* no process uses sf any more: the slot is free and the table's reference to the memory goes (the pages go with the last mapping).  ios_mtx held; the object to deallocate (outside the lock) is returned */
+static struct vm_object *
+ios_drop_if_unused(struct iosurf *sf)
+{
+	struct vm_object *o;
+	int i;
+
+	for (i = 0; i < IOS_USERS; i++)
+		if (sf->u[i].uses != 0)
+			return (NULL);
+	o = sf->obj;
+	if (darwin_debug >= 1)
+		printf("darwinator: IOSurface %u freed (%ju bytes)\n", sf->id, (uintmax_t)sf->alloc);
+	memset(sf, 0, sizeof(*sf));
+	return (o);
+}
+
+/* a process that exits: its uses of every surface go (its address space goes with it, so nothing is unmapped here) */
+void
+iosurface_proc_exit(struct proc *p)
+{
+	struct vm_object *drop[IOS_MAX];
+	int i, j, n = 0;
+
+	mtx_lock(&ios_mtx);
+	for (i = 0; i < IOS_MAX; i++) {
+		struct ios_user *u;
+
+		if (!iosurfs[i].used || (u = ios_user_of(&iosurfs[i], p->p_pid, false)) == NULL)
+			continue;
+		u->uses = 0;
+		if ((drop[n] = ios_drop_if_unused(&iosurfs[i])) != NULL)
+			n++;
+	}
+	mtx_unlock(&ios_mtx);
+	for (j = 0; j < n; j++)
+		vm_object_deallocate(drop[j]);
 }
 
 int
@@ -257,7 +324,7 @@ iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *o
 {
 	uint64_t w = 0, h = 0, bpe = 4, fmt = 0, row = 0, alloc = 0;
 	struct iosurf *sf = NULL;
-	vm_offset_t va = 0;
+	vm_offset_t va = 0, iva = 0;
 	int i;
 
 	(void)iosurface_dict_number(props, len, "IOSurfaceWidth", &w);
@@ -292,8 +359,11 @@ iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *o
 		sf->used = false;
 		return (IOS_NORESOURCES);
 	}
-	if (ios_fill(td, sf, va, out) != 0)
+	if (ios_fill(td, sf, va, out, &iva) != 0)
 		return (IOS_NORESOURCES);
+	mtx_lock(&ios_mtx);
+	sf->u[0].pid = td->td_proc->p_pid; sf->u[0].uses = 1; sf->u[0].va = va; sf->u[0].iva = iva;
+	mtx_unlock(&ios_mtx);
 	if (darwin_debug >= 1)
 		printf("darwinator: IOSurface %u made: %ux%u, row %u, %ju bytes, format %#x\n", sf->id, sf->w, sf->h, sf->row, (uintmax_t)alloc, sf->fmt);
 	return (0);
@@ -305,14 +375,43 @@ iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options,
 {
 	uint32_t seed = 0;
 
-	(void)td; (void)id; (void)options;
+	(void)options;
 	if (index == IOSURF_TRAP_LOCK || index == IOSURF_TRAP_UNLOCK) {
 		if (seed_user_addr != 0 && copyout(&seed, (void *)seed_user_addr, sizeof(seed)) != 0)
 			return (IOS_KERN_INVALID_ADDRESS);
 		return (0);
 	}
-	if (index == IOSURF_TRAP_RELEASE)
-		return (0);
+	if (index == IOSURF_TRAP_RELEASE) {
+		struct vm_map *map = &td->td_proc->p_vmspace->vm_map;
+		struct vm_object *o = NULL;
+		vm_offset_t va = 0, iva = 0;
+		uint64_t size = 0;
+		int i, rv = IOS_NOTBADARG;
+
+		mtx_lock(&ios_mtx);
+		for (i = 0; i < IOS_MAX; i++) {
+			struct ios_user *u;
+
+			if (!iosurfs[i].used || iosurfs[i].id != id)
+				continue;
+			if ((u = ios_user_of(&iosurfs[i], td->td_proc->p_pid, false)) != NULL) {
+				rv = 0;
+				if (--u->uses == 0) {		/* the client of this process goes: its mappings go (IOSurfaceClient on the Mac releases its memory map) */
+					va = u->va; iva = u->iva; size = iosurfs[i].alloc;
+					o = ios_drop_if_unused(&iosurfs[i]);
+				}
+			}
+			break;
+		}
+		mtx_unlock(&ios_mtx);
+		if (va != 0)
+			vm_map_remove(map, va, va + round_page(size));
+		if (iva != 0)
+			vm_map_remove(map, iva, iva + 16 * PAGE_SIZE);
+		if (o != NULL)
+			vm_object_deallocate(o);
+		return (rv);
+	}
 	return (IOS_UNSUPPORTED);
 }
 
@@ -322,18 +421,37 @@ int
 iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out)
 {
 	struct iosurf *sf = NULL;
-	vm_offset_t va = 0;
+	struct ios_user *u;
+	vm_offset_t va = 0, iva = 0;
 	int i;
 
 	mtx_lock(&ios_mtx);
 	for (i = 0; i < IOS_MAX; i++)
 		if (iosurfs[i].used && iosurfs[i].id == id && iosurfs[i].global) { sf = &iosurfs[i]; break; }
+	if (sf != NULL && (u = ios_user_of(sf, td->td_proc->p_pid, false)) != NULL && u->va != 0) {
+		u->uses++;			/* a process that has the surface already: one more use of the same mapping */
+		va = u->va; iva = u->iva;
+	}
+	if (sf != NULL)
+		vm_object_reference(sf->obj);	/* the surface stays while it is mapped here (another process may release it meanwhile) */
 	mtx_unlock(&ios_mtx);
 	if (sf == NULL)
 		return (IOS_NOTBADARG);
-	if (ios_map(td->td_proc, sf->obj, sf->alloc, &va) != IOS_KERN_SUCCESS)
+	if (va != 0) {
+		vm_object_deallocate(sf->obj);
+		/* the same structure as before, with the addresses of the existing mapping */
+		ios_fill_addrs(sf, va, iva, out);
+		return (0);
+	}
+	if (ios_map(td->td_proc, sf->obj, sf->alloc, &va) != IOS_KERN_SUCCESS) {
+		vm_object_deallocate(sf->obj);
 		return (IOS_NORESOURCES);
-	if (ios_fill(td, sf, va, out) != 0)
+	}
+	vm_object_deallocate(sf->obj);
+	if (ios_fill(td, sf, va, out, &iva) != 0)
 		return (IOS_NORESOURCES);
+	mtx_lock(&ios_mtx);
+	if (sf->used && sf->id == id && (u = ios_user_of(sf, td->td_proc->p_pid, true)) != NULL) { u->uses++; u->va = va; u->iva = iva; }
+	mtx_unlock(&ios_mtx);
 	return (0);
 }

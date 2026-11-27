@@ -5,6 +5,7 @@
 #include <sys/types.h>
 
 struct thread;
+struct proc;
 
 #define IOSURF_SEL_CREATE	0	/* the properties as a binary serialized dictionary in, IOSURF_CREATE_SIZE bytes out */
 #define IOSURF_SEL_LOOKUP	4	/* one scalar: the id; IOSURF_CREATE_SIZE bytes out */
@@ -22,6 +23,8 @@ int	iosurface_dict_number(const uint8_t *buf, size_t len, const char *key, uint6
 int	iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *out);
 int	iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out);
 void	iosurface_limits(uint8_t *out);
+/* a process that exits loses its uses of the surfaces (the last use of a surface frees it) */
+void	iosurface_proc_exit(struct proc *p);
 /* the fast methods (iokit_user_client_trap): a kern_return_t */
 int	iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options, uint64_t seed_user_addr);
 
