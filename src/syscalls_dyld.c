@@ -243,6 +243,22 @@ darwin_shared_region_check_np(struct thread *td, struct darwin_args *uap)
 	for (i = 0; i < SR_N; i++)
 		if (sr_tab[i].vms == vms && sr_tab[i].start != 0) { start = sr_tab[i].start; break; }
 	mtx_unlock(&sr_mtx);
+	if (start != 0 && uap->a[0] != 0) {
+		/* the table is keyed by the address of the vmspace, which a new process can have again after an old one exited: an entry whose region is not mapped here is stale (the new
+		 * process then got ENOMEM, dyld mapped and slid a private copy of the whole cache: about 360 MB of dirty pages per process, the VM ran out of memory with 20 processes) */
+		bool there;
+
+		vm_map_lock_read(&vms->vm_map);
+		there = vm_map_lookup_entry(&vms->vm_map, start, &e);
+		vm_map_unlock_read(&vms->vm_map);
+		if (!there) {
+			mtx_lock(&sr_mtx);
+			for (i = 0; i < SR_N; i++)
+				if (sr_tab[i].vms == vms) { sr_tab[i].vms = NULL; sr_tab[i].start = 0; sr_tab[i].attached = false; }
+			mtx_unlock(&sr_mtx);
+			start = 0;
+		}
+	}
 	if (!darwin_use_cache)
 		return (ENOMEM);
 	if (uap->a[0] == 0) {			/* NULL: dyld has unmapped the region */
