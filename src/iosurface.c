@@ -45,12 +45,86 @@ le32(const uint8_t *b, size_t off)
 	return (v);
 }
 
-/* OSSerializeBinary: the signature 0xd3, the header of the dictionary (0x01 and the number of pairs, 0x80 for the last item of a collection), then key / value pairs: a symbol (0x08, the length with the
- * terminating 0, the text padded to 4), the value: a number (0x04: the header holds the bits, 8 bytes follow), a string (0x09), data (0x0a) with the length, a boolean (0x0b) or an object (0x0c) without bytes */
-int
-iosurface_dict_number(const uint8_t *b, size_t n, const char *want, uint64_t *out)
+/* OSSerializeBinary: the signature 0xd3, then one object: a header word (the type in bits 24-30, 0x80000000 on the last item of a collection, the length or the count in bits 0-23) and its bytes.
+ * Types: 0x01 dictionary (count pairs: a key and a value, the key is a symbol), 0x02 array and 0x03 set (count objects), 0x04 number (the header holds the bits, 8 bytes follow), 0x08 symbol,
+ * 0x09 string, 0x0a data (the length, the bytes padded to 4), 0x0b boolean (the value is the low bit), 0x0c a reference to an object seen before (no bytes).  CoreImage puts collections among the
+ * properties of a surface (the planes ...): they are skipped as a whole, the keys after them are read. */
+static int
+ios_skip(const uint8_t *b, size_t n, size_t *pp, int depth)	/* steps over one object; 0 when the bytes are not a valid object */
+{
+	size_t p = *pp;
+	uint32_t h, type, len, i;
+
+	if (depth > 16 || p + 4 > n)
+		return (0);
+	h = le32(b, p); p += 4;
+	type = h & 0x7f000000u; len = h & 0x00ffffff;
+	switch (type) {
+	case 0x01000000u:
+		for (i = 0; i < 2 * len; i++)
+			if (!ios_skip(b, n, &p, depth + 1))
+				return (0);
+		break;
+	case 0x02000000u:
+	case 0x03000000u:
+		for (i = 0; i < len; i++)
+			if (!ios_skip(b, n, &p, depth + 1))
+				return (0);
+		break;
+	case 0x04000000u:
+		p += 8;
+		break;
+	case 0x08000000u:
+	case 0x09000000u:
+	case 0x0a000000u:
+		p += roundup2(len, 4);
+		break;
+	case 0x0b000000u:
+	case 0x0c000000u:
+		break;
+	default:
+		return (0);
+	}
+	if (p > n)
+		return (0);
+	*pp = p;
+	return (1);
+}
+
+/* the object of an index: the objects are numbered in the order of the stream (the top dictionary is 0, keys count, references do not), as OSUnserializeBinary keeps them */
+static int
+ios_object_at(const uint8_t *b, size_t n, uint32_t want, uint32_t *vh, size_t *vp)
 {
 	size_t p = 4;
+	uint32_t idx = 0, h, type, len;
+
+	while (p + 4 <= n) {
+		h = le32(b, p);
+		type = h & 0x7f000000u; len = h & 0x00ffffff;
+		if (type != 0x0c000000u) {
+			if (idx == want) {
+				*vh = h;
+				*vp = p + 4;
+				return (1);
+			}
+			idx++;
+		}
+		p += 4;
+		if (type == 0x04000000u)
+			p += 8;
+		else if (type == 0x08000000u || type == 0x09000000u || type == 0x0a000000u)
+			p += roundup2(len, 4);
+		else if (type < 0x01000000u || type > 0x0c000000u)
+			return (0);
+	}
+	return (0);
+}
+
+/* the header word and the offset of the bytes of the value of a key of the top dictionary; 0 when the key is not there */
+static int
+ios_dict_find(const uint8_t *b, size_t n, const char *want, uint32_t *vh, size_t *vp)
+{
+	size_t p = 4, wl = strlen(want) + 1;
 	uint32_t hdr, cnt, i;
 
 	if (n < 8 || le32(b, 0) != 0xd3)
@@ -60,64 +134,71 @@ iosurface_dict_number(const uint8_t *b, size_t n, const char *want, uint64_t *ou
 		return (0);
 	cnt = hdr & 0x00ffffff;
 	for (i = 0; i < cnt && p + 4 <= n; i++) {
-		uint32_t kh = le32(b, p), klen = kh & 0x00ffffff, vh, vlen, type;
+		uint32_t kh = le32(b, p), klen = kh & 0x00ffffff;
 		bool match;
 
-		p += 4;
-		if ((kh & 0x7f000000u) != 0x08000000u || p + roundup2(klen, 4) + 4 > n)
+		if ((kh & 0x7f000000u) != 0x08000000u || p + 4 + roundup2(klen, 4) + 4 > n)
 			return (0);
-		match = klen > 0 && strlen(want) + 1 == klen && strncmp((const char *)b + p, want, klen) == 0;
-		p += roundup2(klen, 4);
-		vh = le32(b, p); p += 4;
-		type = vh & 0x7f000000u; vlen = vh & 0x00ffffff;
-		if (type == 0x04000000u) {
-			if (p + 8 > n)
-				return (0);
-			if (match) {
-				memcpy(out, b + p, 8);
-				return (1);
-			}
-			p += 8;
-		} else if (type == 0x09000000u || type == 0x08000000u || type == 0x0a000000u)
-			p += roundup2(vlen, 4);
-		else if (type != 0x0b000000u && type != 0x0c000000u)
-			return (0);					/* a collection inside: not needed */
+		match = klen == wl && strncmp((const char *)b + p + 4, want, klen) == 0;
+		p += 4 + roundup2(klen, 4);
+		if (match) {
+			*vh = le32(b, p);
+			*vp = p + 4;
+			if ((*vh & 0x7f000000u) == 0x0c000000u)		/* the same object as one before (IOSurfaceHeight is the CFNumber of IOSurfaceWidth when they are equal) */
+				return (ios_object_at(b, n, *vh & 0x00ffffff, vh, vp));
+			return (1);
+		}
+		if (!ios_skip(b, n, &p, 1))
+			return (0);
 	}
 	return (0);
+}
+
+/* debugging: the keys of the top dictionary and the header word of each value */
+static void
+ios_dict_dump(const uint8_t *b, size_t n)
+{
+	size_t p = 8;
+	uint32_t cnt, i;
+
+	if (n < 8 || le32(b, 0) != 0xd3)
+		return;
+	cnt = le32(b, 4) & 0x00ffffff;
+	for (i = 0; i < cnt && p + 4 <= n; i++) {
+		uint32_t kh = le32(b, p), klen = kh & 0x00ffffff;
+		char key[64];
+
+		if (p + 4 + roundup2(klen, 4) + 4 > n)
+			return;
+		strlcpy(key, (const char *)b + p + 4, MIN(sizeof(key), klen + 1));
+		p += 4 + roundup2(klen, 4);
+		printf("darwinator:   key %#x %s: value %#x%s\n", kh, (kh & 0x7f000000u) == 0x08000000u ? key : "(not a symbol)", le32(b, p),
+		    (le32(b, p) & 0x7f000000u) == 0x04000000u && p + 12 <= n ? "" : "");
+		if ((kh & 0x7f000000u) != 0x08000000u || !ios_skip(b, n, &p, 1))
+			return;
+	}
+}
+
+int
+iosurface_dict_number(const uint8_t *b, size_t n, const char *want, uint64_t *out)
+{
+	uint32_t vh;
+	size_t vp;
+
+	if (!ios_dict_find(b, n, want, &vh, &vp) || (vh & 0x7f000000u) != 0x04000000u || vp + 8 > n)
+		return (0);
+	memcpy(out, b + vp, 8);
+	return (1);
 }
 
 /* a boolean value (type 0x0b, the value is the low bit of the header) of a key: 1 when the key is there and true */
 static int
 ios_dict_true(const uint8_t *b, size_t n, const char *want)
 {
-	size_t p = 8;
-	uint32_t cnt, i;
+	uint32_t vh;
+	size_t vp;
 
-	if (n < 8 || le32(b, 0) != 0xd3)
-		return (0);
-	cnt = le32(b, 4) & 0x00ffffff;
-	for (i = 0; i < cnt && p + 4 <= n; i++) {
-		uint32_t kh = le32(b, p), klen = kh & 0x00ffffff, vh, type;
-		bool match;
-
-		p += 4;
-		if ((kh & 0x7f000000u) != 0x08000000u || p + roundup2(klen, 4) + 4 > n)
-			return (0);
-		match = klen > 0 && strlen(want) + 1 == klen && strncmp((const char *)b + p, want, klen) == 0;
-		p += roundup2(klen, 4);
-		vh = le32(b, p); p += 4;
-		type = vh & 0x7f000000u;
-		if (type == 0x0b000000u) {
-			if (match)
-				return ((vh & 1) != 0);
-		} else if (type == 0x04000000u)
-			p += 8;
-		else if (type == 0x09000000u || type == 0x08000000u || type == 0x0a000000u)
-			p += roundup2(vh & 0x00ffffff, 4);
-		else if (type != 0x0c000000u)
-			return (0);
-	}
-	return (0);
+	return (ios_dict_find(b, n, want, &vh, &vp) && (vh & 0x7f000000u) == 0x0b000000u && (vh & 1) != 0);
 }
 
 static int
@@ -185,8 +266,14 @@ iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *o
 	(void)iosurface_dict_number(props, len, "IOSurfacePixelFormat", &fmt);
 	(void)iosurface_dict_number(props, len, "IOSurfaceBytesPerRow", &row);
 	(void)iosurface_dict_number(props, len, "IOSurfaceAllocSize", &alloc);
-	if (w == 0 || h == 0 || w > 16384 || h > 16384 || bpe == 0 || bpe > 16)
+	if (w == 0 || h == 0 || w > 16384 || h > 16384 || bpe == 0 || bpe > 16) {
+		if (darwin_debug >= 1)
+		{
+			printf("darwinator: IOSurface not made: width %ju height %ju bytes per element %ju (%zu bytes of properties)\n", (uintmax_t)w, (uintmax_t)h, (uintmax_t)bpe, len);
+			ios_dict_dump(props, len);
+		}
 		return (IOS_NOTBADARG);
+	}
 	if (row == 0)
 		row = roundup2(w * bpe, 64);
 	if (alloc == 0)
