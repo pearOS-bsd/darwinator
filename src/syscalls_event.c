@@ -1063,6 +1063,90 @@ da_parent_ino(struct thread *td, const char *path)
 	return ((uint64_t)psb.st_ino);
 }
 
+/*
+ * The paths of the file ids this module handed out.  On a Mac fsgetpath(fsid, id) finds any file of an APFS volume by its id, and CFURL builds the
+ * path components of bookmark data with it, walking up from a file through ATTR_CMN_PARENTID.  FreeBSD can find a vnode by number only on some
+ * file systems (VFS_VGET), and on the ISO's cd9660 root the number is the offset of a directory record: VGET hands back vnodes whose path walk
+ * never ends.  So every absolute path whose id (or whose parent's id) getattrlist returns is kept here, and fsgetpath answers from this table first
+ * (the entry is checked again with stat: the id must still be that of the path).  A ring of DA_IDPATHS entries; the newest entry for an id wins.
+ */
+#define	DA_IDPATHS	1024
+static struct { uint64_t ino; char *path; } da_idpaths[DA_IDPATHS];
+static u_int da_idpath_next;
+static struct mtx da_idpath_mtx;
+MTX_SYSINIT(da_idpath, &da_idpath_mtx, "darwinator id paths", MTX_DEF);
+
+static void
+da_idpath_add(uint64_t ino, const char *path)
+{
+	char *copy, *old = NULL;
+	size_t l;
+	u_int i;
+
+	if (path[0] != '/' || ino == 0)
+		return;
+	mtx_lock(&da_idpath_mtx);
+	for (i = 0; i < DA_IDPATHS; i++)
+		if (da_idpaths[i].ino == ino && da_idpaths[i].path != NULL && strcmp(da_idpaths[i].path, path) == 0) {
+			mtx_unlock(&da_idpath_mtx);
+			return;				/* known already */
+		}
+	mtx_unlock(&da_idpath_mtx);
+	l = strlen(path) + 1;
+	copy = malloc(l, M_DARWIN, M_WAITOK);
+	memcpy(copy, path, l);
+	mtx_lock(&da_idpath_mtx);
+	i = da_idpath_next++ % DA_IDPATHS;
+	old = da_idpaths[i].path;
+	da_idpaths[i].ino = ino;
+	da_idpaths[i].path = copy;
+	mtx_unlock(&da_idpath_mtx);
+	free(old, M_DARWIN);
+}
+
+/* the path of a file id handed out before, still that file's (0), or ENOENT */
+int
+darwin_idpath_lookup(struct thread *td, uint64_t ino, char *buf, size_t len)
+{
+	struct stat sb;
+	u_int i, k;
+	int found;
+
+	mtx_lock(&da_idpath_mtx);
+	for (k = 0, found = 0; k < DA_IDPATHS && !found; k++) {
+		i = (da_idpath_next - 1 - k) % DA_IDPATHS;	/* newest first */
+		if (da_idpaths[i].path != NULL && da_idpaths[i].ino == ino && strlen(da_idpaths[i].path) < len) {
+			strlcpy(buf, da_idpaths[i].path, len);
+			found = 1;
+		}
+	}
+	mtx_unlock(&da_idpath_mtx);
+	if (!found)
+		return (ENOENT);
+	if (ino == 2 && strcmp(buf, "/") == 0)
+		return (0);			/* the id a Mac gives to the parent of the root */
+	if (kern_statat(td, 0, AT_FDCWD, buf, UIO_SYSSPACE, &sb) != 0 || (uint64_t)sb.st_ino != ino)
+		return (ENOENT);
+	return (0);
+}
+
+static void
+da_idpath_parent(struct thread *td, const char *path)	/* keeps the parent of a path under the id da_parent_ino gives it */
+{
+	char pp[MAXPATHLEN], *sl;
+
+	if (path[0] != '/')
+		return;
+	if (strcmp(path, "/") == 0) {
+		da_idpath_add(2, "/");
+		return;
+	}
+	strlcpy(pp, path, sizeof(pp));
+	sl = strrchr(pp, '/');
+	if (sl == pp) pp[1] = 0; else if (sl != NULL) *sl = 0;
+	da_idpath_add(da_parent_ino(td, path), pp);
+}
+
 static int
 da_mntpoint(const char *path)		/* the path is the root of a volume of the table */
 {
@@ -1150,6 +1234,8 @@ attr_fill(struct thread *td, struct darwin_args *uap, const struct stat *sbp, co
 		if (cmn & DA_CMN_OBJTYPE)	PUT32(objtype);
 		if (cmn & DA_CMN_OBJTAG)	PUT32(0);
 		if (cmn & DA_CMN_OBJID)		{ PUT32(sb.st_ino); PUT32(sb.st_gen); }
+		if (cmn & (DA_CMN_OBJID | DA_CMN_FILEID))	da_idpath_add(sb.st_ino, path);	/* for fsgetpath */
+		if (cmn & (DA_CMN_PAROBJID | DA_CMN_PARENTID))	da_idpath_parent(td, path);
 		if (cmn & DA_CMN_PAROBJID)	{ PUT32((uint32_t)da_parent_ino(td, path)); PUT32(0); }		/* the parent: as PARENTID, not looked up */
 		if (cmn & DA_CMN_SCRIPT)	PUT32(0);			/* the text encoding: MacRoman */
 		if (cmn & DA_CMN_CRTIME)	PUTTS(sb.st_mtim);		/* the files of a Mac's system were made as they are: the creation time is the modification time (a copy keeps the second, not the birth) */

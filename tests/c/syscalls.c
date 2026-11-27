@@ -406,7 +406,12 @@ int cmain(void)
 	  else check("getattrlist", 0, r);
 	  al.cmn = 0x00400000u; r = S(SYS_getattrlist, "/tmp/dsc/a", &al, ab, sizeof(ab), 0, 0);
 	  check("  an attribute that is not supported is EINVAL", r == -22, r);
-	  al.cmn = 1; r = S(SYS_getattrlist, "/tmp/dsc/none", &al, ab, sizeof(ab), 0, 0); check("  a missing file is ENOENT", r == -2, r); }
+	  al.cmn = 1; r = S(SYS_getattrlist, "/tmp/dsc/none", &al, ab, sizeof(ab), 0, 0); check("  a missing file is ENOENT", r == -2, r);
+	  /* fsgetpath of the parent id getattrlist gave: CFURL walks up a path this way when it makes bookmark data */
+	  { struct { unsigned short n, res; unsigned cmn, vol, dir, file, fork; } pal = { 5, 0, 0x04000000, 0, 0, 0, 0 }; static char pb[64], pp[256]; int fsid[2] = { 0, 0 };
+	    r = S(SYS_getattrlist, "/tmp/dsc/a", &pal, pb, sizeof(pb), 0, 0);
+	    i64 pl = r == 0 ? S(427, pp, sizeof(pp), fsid, *(u64 *)(pb + 4), 0, 0) : r;
+	    check("fsgetpath of ATTR_CMN_PARENTID is the directory", pl == 9 && seq(pp, "/tmp/dsc"), pl); } }
 
 	/* the *at family: AT_FDCWD is -2 on Darwin */
 	{ i64 dirfd = S(SYS_open, "/tmp/dsc", 0, 0, 0, 0, 0); struct dstat64 st; char lb[64]; for (i = 0; i < 64; i++) lb[i] = 0;

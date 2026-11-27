@@ -489,6 +489,20 @@ darwin_fsgetpath(struct thread *td, struct darwin_args *uap)
 
 	if (bufsize == 0)
 		return (EINVAL);
+	{
+		char *kp = malloc(MAXPATHLEN, M_DARWIN, M_WAITOK);
+
+		error = darwin_idpath_lookup(td, (uint64_t)uap->a[3], kp, MAXPATHLEN);	/* an id that getattrlist handed out: its path, on any file system */
+		if (error == 0) {
+			l = strlen(kp) + 1;
+			error = l > bufsize ? ERANGE : copyout(kp, (void *)uap->a[0], l);
+			if (error == 0)
+				td->td_retval[0] = l;
+		}
+		free(kp, M_DARWIN);
+		if (error != ENOENT)
+			return (error);
+	}
 	if (strcmp(mp->mnt_vfc->vfc_name, "cd9660") == 0)		/* the root of the ISO: its VGET takes the number as a block offset and hands back garbage vnodes whose path walk never ends (vn_fullpath spun in the kernel, the process could not be killed) */
 		return (ENOENT);
 	if ((error = VFS_VGET(mp, (ino_t)uap->a[3], LK_SHARED, &vp)) != 0)

@@ -66,6 +66,7 @@ int	darwin_commpage_map(struct vmspace *);	/* maps it into a new process */
 void	darwin_stack_init(struct sysentvec *);	/* where the stack of a Darwin process is */
 dev_t	darwin_to_dev(int32_t);				/* Darwin dev_t (major << 24 | minor) <-> FreeBSD's */
 int32_t	darwin_from_dev(dev_t);
+int	darwin_idpath_lookup(struct thread *, uint64_t, char *, size_t);	/* syscalls_event.c: the path of a file id getattrlist handed out (fsgetpath) */
 struct statfs;
 struct stat;
 int	darwin_statfs_out(const struct statfs *, void *);
