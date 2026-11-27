@@ -117,6 +117,8 @@ struct kport {
 	struct kport	*dn_port;		/* a dead-name notification is sent here when this port dies (mach_port_request_notification) */
 	struct file	*fp;			/* KP_FILE: a fileport holds the open file */
 	struct kport	*ns_port;		/* a no-more-senders notification (id 70) is sent here when no task has a send right to this port */
+	uint32_t	mscount;		/* the make-send count: send rights made from the receive right (MAKE_SEND), as XNU counts them */
+	uint32_t	ns_sync;		/* the no-more-senders request fires only once mscount >= this (XNU: ipc_port_nsrequest) */
 	uint32_t	dn_name;		/* the name that the requester has for this port */
 	struct timeout_task *timer;		/* KP_PORT made by mk_timer_create: the expiry sends a message to the port itself */
 	bool		dbglong;		/* debug 3: the last arm was for more than 5 ms (the display link, not the 1 ms timers of a run loop) */
@@ -690,6 +692,7 @@ darwin_port_insert_right(struct thread *td, struct darwin_args *uap)	/* (target,
 	if (t != NULL && (e = ent_by_name(t, (uint32_t)uap->a[2])) != NULL && (uint32_t)uap->a[1] == (uint32_t)uap->a[2]) {
 		if ((disp == MM_MAKE_SEND && e->recv) || ((disp == MM_COPY_SEND || disp == MM_MOVE_SEND) && e->send > 0)) {
 			if (disp != MM_MOVE_SEND) e->send++;
+			if (disp == MM_MAKE_SEND) e->port->mscount++;
 			kr = KERN_SUCCESS;
 		} else
 			kr = KERN_INVALID_RIGHT;
@@ -1376,7 +1379,7 @@ right_out(struct ktask *t, uint32_t name, int disp, struct kcarry *c)
 	case MM_MOVE_RECEIVE: if (!e->recv) return (KERN_INVALID_RIGHT); e->recv = false; break;
 	case MM_MOVE_SEND: if (e->send < 1) return (KERN_INVALID_RIGHT); e->send--; break;
 	case MM_COPY_SEND: if (e->send < 1) return (KERN_INVALID_RIGHT); break;
-	case MM_MAKE_SEND: case MM_MAKE_SEND_ONCE: if (!e->recv) return (KERN_INVALID_RIGHT); break;
+	case MM_MAKE_SEND: case MM_MAKE_SEND_ONCE: if (!e->recv) return (KERN_INVALID_RIGHT); if (disp == MM_MAKE_SEND) e->port->mscount++; break;
 	case MM_MOVE_SEND_ONCE: if (e->sonce < 1) return (KERN_INVALID_RIGHT); e->sonce--; break;
 	default: return (KERN_INVALID_VALUE);
 	}
@@ -1444,7 +1447,7 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 	switch (rdisp) {
 	case MM_COPY_SEND: if (de->send < 1 && !de->recv) goto bad_right; break;
 	case MM_MOVE_SEND: if (de->send < 1) goto bad_right; de->send--; break;
-	case MM_MAKE_SEND: case MM_MAKE_SEND_ONCE: if (!de->recv) goto bad_right; break;
+	case MM_MAKE_SEND: case MM_MAKE_SEND_ONCE: if (!de->recv) goto bad_right; if (rdisp == MM_MAKE_SEND) de->port->mscount++; break;
 	case MM_MOVE_SEND_ONCE: if (de->sonce < 1) goto bad_right; de->sonce--; break;
 	default: goto bad_right;
 	}
@@ -1932,11 +1935,11 @@ ns_check(void)
 		if (p->dead || p->ns_port == NULL) {
 			ns_list[i] = NULL;
 			kp_unref(p);
-		} else if (ns_sends(p) == 0) {
+		} else if (ns_sends(p) == 0 && p->mscount >= p->ns_sync) {	/* XNU: no senders and the make-send count has reached the sync of the request */
 			struct kport *np = p->ns_port;
 
 			p->ns_port = NULL;
-			notify_id(np, 70, 0);			/* MACH_NOTIFY_NO_SENDERS: the make-send count follows the NDR */
+			notify_id(np, 70, p->mscount);		/* MACH_NOTIFY_NO_SENDERS: the make-send count follows the NDR */
 			kp_unref(np);
 			ns_list[i] = NULL;
 			kp_unref(p);
@@ -2038,7 +2041,7 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			if (e == NULL) { mig_reply_data(m, id, KERN_INVALID_NAME, NULL, 0); return (true); }
 			if (a == 1) { out[0] = 1; out[1] = 5; n = 1; }				/* MACH_PORT_LIMITS_INFO: the queue limit (5) */
 			else if (a == 2) {							/* MACH_PORT_RECEIVE_STATUS: mach_port_status_t, 10 ints */
-				out[0] = 1; out[1] = 0 /* mps_pset */; out[2] = 0 /* seqno */; out[3] = 0 /* mscount */; out[4] = 5 /* qlimit */;
+				out[0] = 1; out[1] = 0 /* mps_pset */; out[2] = 0 /* seqno */; out[3] = e->port->mscount /* mscount */; out[4] = 5 /* qlimit */;
 				out[5] = (uint32_t)e->port->qn /* msgcount */; out[6] = 0; out[7] = 0; out[8] = 0; out[9] = 0; n = 10;
 				out[0] = 0; out[1] = e->port->set != NULL ? 1 : 0;
 			} else if (a == 3) { out[0] = 0; n = 1; }				/* MACH_PORT_DNREQUESTS_SIZE */
@@ -2333,7 +2336,15 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, 0, &a, 4);
 			return (true);
 		}
-	case 3210: case 3216:				/* mach_port_set_mscount, mach_port_set_seqno: accepted */
+	case 3210:					/* mach_port_set_mscount(task, name, mscount) */
+		{
+			struct kent *e = m->size >= 40 ? ent_by_name(t, rd32(d, 32)) : NULL;
+
+			if (e != NULL && e->recv) e->port->mscount = rd32(d, 36);
+			mig_reply_data(m, id, e == NULL ? KERN_INVALID_NAME : (e->recv ? 0 : KERN_INVALID_RIGHT), NULL, 0);
+			return (true);
+		}
+	case 3216:					/* mach_port_set_seqno: accepted */
 	case 3218:					/* mach_port_set_attributes: accepted */
 	case 8000: case 8001:				/* task_restartable_ranges_register (the ranges are not used), task_restartable_ranges_synchronize: libobjc needs them to answer 0 */
 	case 3407: case 3408:				/* task_suspend, task_resume */
@@ -3431,9 +3442,10 @@ mig_server(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *
 					if (ns_list[k] == NULL) {
 						ns_list[k] = e->port; e->port->refs++;
 						e->port->ns_port = m->carry[0].port; m->carry[0].port->refs++;
+						e->port->ns_sync = rd32(m->data, 56);	/* sync: the make-send count from which it may fire */
 						break;
 					}
-				ns_check();			/* no sender yet: it is sent now */
+				ns_check();			/* no sender and the count reached: it is sent now; else it waits for the senders to go */
 			}
 			if (variant == 72 && m->ncarry == 1 && m->carry[0].port != NULL) {
 				struct kport *tp = e->port;
@@ -3705,6 +3717,7 @@ darwin_port_request_notification_trap(struct thread *td, struct darwin_args *uap
 				if (ns_list[k] == NULL) {
 					ns_list[k] = e->port; e->port->refs++;
 					e->port->ns_port = ne->port; ne->port->refs++;
+					e->port->ns_sync = (uint32_t)uap->a[3];
 					break;
 				}
 			ns_check();
