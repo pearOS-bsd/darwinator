@@ -144,8 +144,13 @@ darwin_wq_dump_all(void)
 		if (wqs[i].p == NULL) continue;
 		for (k = 0; k < WQ_NREQ && n < 62; k++)
 			if (wqs[i].req[k].id != 0) { snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].req[k].id; snap[n].ea = wqs[i].req[k].eaddr; snap[n].em = wqs[i].req[k].emask; snap[n].ev = wqs[i].req[k].evalue; snap[n].tid = 0; n++; }
+		printf("darwinator: wq pid %d: threads %d, wanted %d (qos %d) overcommit %d (qos %d), manager out %d\n", wqs[i].pid, wqs[i].nthreads, wqs[i].want, wqs[i].wantqos, wqs[i].want_oc, wqs[i].wantqos_oc, wqs[i].mgr);
+		for (k = 0; k < WQ_MAX_THREADS; k++)
+			if (wqs[i].thr[k].used)
+				printf("darwinator:   thread %d tid %d: parked %d bound %#lx manager %d qos %d wait %s\n", k, wqs[i].thr[k].tid, wqs[i].thr[k].parked, (u_long)wqs[i].thr[k].bound, wqs[i].thr[k].ismgr, wqs[i].thr[k].prio,
+				    wqs[i].thr[k].td != NULL && wqs[i].thr[k].td->td_wmesg != NULL ? wqs[i].thr[k].td->td_wmesg : "-");
 		for (k = 0; k < WQ_NREQ && n < 62; k++)
-			if (wqs[i].wl[k].id != 0) { snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].wl[k].id; snap[n].ea = 0; snap[n].em = 0; snap[n].ev = 0; snap[n].tid = wqs[i].wl[k].tid; n++; }
+			if (wqs[i].wl[k].id != 0 && wqs[i].wl[k].tid != 0) {		/* (a released slot keeps its id with tid 0: not shown) */ snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].wl[k].id; snap[n].ea = 0; snap[n].em = 0; snap[n].ev = 0; snap[n].tid = wqs[i].wl[k].tid; n++; }
 	}
 	mtx_unlock(&wq_mtx);
 	for (i = 0; i < n; i++) {
@@ -303,7 +308,7 @@ wl_claim(struct wqp *w, int64_t id, lwpid_t tid)
 
 	for (i = 0; i < WQ_NREQ; i++) {
 		if (w->wl[i].id == id) { if (w->wl[i].tid != 0) return (false); w->wl[i].tid = tid; return (true); }
-		if (w->wl[i].id == 0 && freei < 0) freei = i;
+		if (w->wl[i].tid == 0 && freei < 0) freei = i;		/* a slot that nobody works for is free (wl_release keeps the id: with only id == 0 counted, a program that had made WQ_NREQ workloops could have no thread for a new one, and CoreImage makes many) */
 	}
 	if (freei < 0)
 		return (false);
@@ -376,7 +381,7 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 			return (EJUSTRETURN);
 		}
 		/* a thread request of a workloop that nobody serves */
-		for (k = 0; k < 16; k++) {
+		for (k = 0; k < WQ_NREQ; k++) {	/* every slot: darwin_wq_request fills any of the WQ_NREQ (a request beyond the 16th was never served: the icon agent hung with ~50 waiting) */
 			if (darwin_wl_stale_check && w->req[k].id != 0 && w->req[k].eaddr != 0 && w->req[k].emask != 0) {		/* the queue was taken (or emptied) since the request: the state is not the one that the request was made for (libdispatch aborts: "Invalid wlh state") */
 				uint64_t qs = 0;
 				uint64_t ea = w->req[k].eaddr, em = w->req[k].emask, ev = w->req[k].evalue;
