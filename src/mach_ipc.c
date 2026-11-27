@@ -139,6 +139,7 @@ struct kmsg {
 	uint32_t		size;
 	uint8_t			*data;
 	int32_t			spid, suid, sgid;	/* the sender (0: the kernel), for the trailer of the receiver */
+	int32_t			sasid;			/* the audit session of the sender: 100000 + its real uid, the id getaudit_addr gives */
 	struct kcarry		reply;		/* the local port of the header: the reply right */
 	int			ncarry;
 	struct kcarry		carry[8];
@@ -1425,7 +1426,7 @@ send_msg(struct thread *td, uint64_t uaddr, uint32_t size)
 	m->data = malloc(size, M_DARWIN_IPC, M_WAITOK);
 	m->size = size;
 	m->spid = td->td_proc->p_pid == launchd_pid ? 1 : td->td_proc->p_pid;
-	m->suid = td->td_ucred->cr_uid; m->sgid = td->td_ucred->cr_gid;
+	m->suid = td->td_ucred->cr_uid; m->sgid = td->td_ucred->cr_gid; m->sasid = 100000 + (int32_t)td->td_ucred->cr_ruid;
 	d = m->data;
 	if (copyin((void *)(uintptr_t)uaddr, d, size) != 0) {
 		kmsg_free(m);
@@ -1694,7 +1695,7 @@ recv_msg_sz(struct thread *td, uint64_t uaddr, uint32_t option, uint32_t rsize, 
 		tr[0] = 0; tr[1] = tsize; tr[2] = 0;
 		tr[3] = m->suid; tr[4] = m->sgid;				/* the security token */
 		tr[5] = 0xffffffffu; tr[6] = m->suid; tr[7] = m->sgid; tr[8] = m->suid; tr[9] = m->sgid;	/* auid euid egid ruid rgid, as TASK_AUDIT_TOKEN gives them */
-		tr[10] = m->spid; tr[11] = m->spid; tr[12] = 1;		/* pid asid pidversion (the exec count: 1, as in the token of the task) */
+		tr[10] = m->spid; tr[11] = m->sasid; tr[12] = 1;		/* pid asid pidversion (the exec count: 1, as in the token of the task); the asid is the session of getaudit_addr (it was the pid: launchservicesd stand-ins handed it out as LSSessionID and the window server got a wrong session in CreateApplication) */
 		tr[13] = (uint32_t)ctxv; tr[14] = (uint32_t)(ctxv >> 32);	/* the context of the port (the trailer of 60 bytes) */
 		if (darwin_debug >= 2)
 			printf("darwinator: %s[%d]: received id %#x, size %u, option %#x, buffer %u: trailer %u bytes (sender pid %d)%s\n", td->td_proc->p_comm, td->td_proc->p_pid, rd32(d, 20), m->size, option, rsize, tsize, m->spid, at + tsize <= rsize ? "" : " DOES NOT FIT");
@@ -2381,7 +2382,7 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 				memcpy(out, q, 16); out[4] = out[5] = out[6] = out[7] = 0; out[8] = 1; out[9] = 0; n = 10;
 			} else if (a == 15) {					/* TASK_AUDIT_TOKEN: audit_token_t, eight 32 bit words: auid euid egid ruid rgid pid asid pidversion */
 				out[0] = 0xffffffffu; out[1] = td->td_ucred->cr_uid; out[2] = td->td_ucred->cr_gid; out[3] = td->td_ucred->cr_ruid; out[4] = td->td_ucred->cr_rgid;
-				out[5] = (uint32_t)p->p_pid; out[6] = (uint32_t)p->p_pid; out[7] = 1; n = 8;
+				out[5] = (uint32_t)p->p_pid; out[6] = 100000 + (uint32_t)td->td_ucred->cr_ruid; out[7] = 1; n = 8;	/* asid: the session of getaudit_addr */
 			} else if (a == 17) {					/* TASK_DYLD_INFO: all_image_info_addr (u64), size (u64), format (int): nothing registered */
 				n = 5;
 			} else { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
