@@ -459,12 +459,13 @@ int cmain(void)
 	  check("  the new thread ran func(arg) (registers of the start routine)", thread_val == 0x1234, (i64)thread_val);
 	  check("  its kernel port is its thread id", thread_port > 0, (i64)thread_port); }
 
-	/* psynch: a drop before the wait is remembered (mutex); a signal with nobody waiting is lost (condition variable); a wait that times out; a thread that waits and is woken */
+	/* psynch: a drop before the wait is remembered (mutex); a signal with nobody in the kernel is kept for the waiter on its way (condition variable: libpthread signals only announced waiters); a wait that times out; a thread that waits and is woken */
 	{ static unsigned long mx, cv, mx2; i64 base2, top2;
 	  r = S(SYS_psynch_mutexdrop, &mx, 0, 0, 0, 0, 0); check("psynch_mutexdrop", r == 0, r);
 	  r = S(SYS_psynch_mutexwait, &mx, 7, 0, 0, 0, 0); check("psynch_mutexwait after a drop returns at once (gives the generation back)", r == 7, r);
 	  r = S(SYS_psynch_cvsignal, &cv, 0, 0, 0, 0, 0); check("psynch_cvsignal with no waiter", r == 0, r);
-	  r = dsys8(SYS_psynch_cvwait, (i64)&cv, 0, 0, 0, 0, 0, 0, 30000000); check("psynch_cvwait times out (ETIMEDOUT = 60): the earlier signal was not kept", r == -60, r);
+	  r = dsys8(SYS_psynch_cvwait, (i64)&cv, 0, 0, 0, 0, 0, 0, 30000000); check("psynch_cvwait after a signal returns at once (the signal was kept)", r == 0, r);
+	  r = dsys8(SYS_psynch_cvwait, (i64)&cv, 0, 0, 0, 0, 0, 0, 30000000); check("psynch_cvwait times out (ETIMEDOUT = 60): one signal wakes one wait", r == -60, r);
 	  psy_mx = (u64)&mx2; psy_state = 0;
 	  base2 = S(SYS_mmap_, 0, 65536, 3, 0x1002, -1, 0); top2 = (base2 + 65536 - 64) & ~15L;
 	  S(SYS_bsdthread_register, thread_entry, 0, 0, 0, 0, 0);

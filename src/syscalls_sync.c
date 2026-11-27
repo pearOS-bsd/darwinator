@@ -4,8 +4,11 @@
  *
  * psynch here is a simplification of xnu's kernel side: every lock or condition variable address of a process has a counter of waiters and a
  * counter of wake tokens, under one lock.  A wake with nobody waiting is remembered for a mutex (a drop before the wait must not be lost)
- * and forgotten for a condition variable (a signal with no waiter is lost, as POSIX says).  The generation numbers that xnu keeps in the word of
- * the lock are not interpreted: the value that comes back from psynch_mutexwait is the generation that was passed in.
+ * and for a condition variable too: Darwin's libpthread counts a waiter in the word of the condition (L) and drops the mutex in user space
+ * before it enters psynch_cvwait, and it calls psynch_cvsignal / psynch_cvbroad only when there are such waiters, so a signal that finds
+ * nobody in the kernel is for a waiter on its way (xnu keeps it as a "prepost"; forgetting it left RenderBox waiting forever for an image
+ * that was ready).  An extra wake is a spurious wakeup, which a condition variable allows; a lost one is a deadlock.  The other generation
+ * numbers are not interpreted: the value that comes back from psynch_mutexwait is the generation that was passed in.
  * Mach IPC is here only inside one process (see below): no ports shared between processes, so no bootstrap server and no services.
  */
 #include <sys/param.h>
@@ -21,6 +24,7 @@
 #include <sys/queue.h>
 #include <sys/sx.h>
 #include <sys/syscallsubr.h>
+#include <sys/sysctl.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/time.h>
@@ -39,6 +43,10 @@ struct ps_ent {
 	bool		used;
 };
 #define	PS_N	512
+SYSCTL_DECL(_kern_darwinator);
+static int darwin_ps_trace;
+SYSCTL_INT(_kern_darwinator, OID_AUTO, ps_trace, CTLFLAG_RW, &darwin_ps_trace, 0, "log the condition variable calls of psynch (address, generations, waiters, tokens)");
+#define	PS_TRACE(what, td, e, a1, a2) do { if (darwin_ps_trace) printf("darwinator: %s[%d] tid %d: %s %#lx gen %#lx %#lx: waiters %d tokens %d\n", (td)->td_proc->p_comm, (td)->td_proc->p_pid, (td)->td_tid, what, (u_long)uap->a[0], (u_long)(a1), (u_long)(a2), (e) ? (e)->waiters : -1, (e) ? (e)->tokens : -1); } while (0)
 static struct ps_ent ps_tab[PS_N];
 static struct sx ps_sx;
 SX_SYSINIT(darwin_ps, &ps_sx, "darwin psynch");
@@ -88,11 +96,15 @@ ps_wait(struct ps_ent *e, int timo)
 	return (error);
 }
 
+#define	PS_MAX_TOKENS	64		/* wakes kept for waiters that have not come yet (a bound: a word read wrong cannot pile them up) */
+
 static void
 ps_release(struct ps_ent *e, int n, bool remember)
 {
 	if (!remember && e->waiters - e->tokens < n)
 		n = e->waiters - e->tokens;
+	if (remember && e->tokens + n > MAX(PS_MAX_TOKENS, e->waiters))
+		n = MAX(PS_MAX_TOKENS, e->waiters) - e->tokens;
 	if (n > 0) {
 		e->tokens += n;
 		if (n == 1)
@@ -155,7 +167,9 @@ darwin_psynch_cvwait(struct thread *td, struct darwin_args *uap)
 	}
 	if (uap->a[3] != 0 && (mx = ps_find(td->td_proc, uap->a[3], true)) != NULL)
 		ps_release(mx, 1, true);		/* the mutex is dropped and the wait begins under one lock */
+	PS_TRACE("cvwait", td, cv, uap->a[1], uap->a[2]);
 	error = ps_wait(cv, ps_timo((int64_t)uap->a[6], (int64_t)uap->a[7]));
+	PS_TRACE(error ? "cvwait error" : "cvwait woken", td, cv->used ? cv : NULL, error, 0);
 	sx_xunlock(&ps_sx);
 	td->td_retval[0] = 0;
 	return (error);
@@ -167,8 +181,9 @@ darwin_psynch_cvsignal(struct thread *td, struct darwin_args *uap)
 	struct ps_ent *cv;
 
 	sx_xlock(&ps_sx);
-	if ((cv = ps_find(td->td_proc, uap->a[0], false)) != NULL)
-		ps_release(cv, 1, false);
+	if ((cv = ps_find(td->td_proc, uap->a[0], true)) != NULL)
+		ps_release(cv, 1, true);		/* kept when the waiter is not in the kernel yet (see the top) */
+	PS_TRACE("cvsignal", td, cv, uap->a[1], uap->a[2]);
 	sx_xunlock(&ps_sx);
 	td->td_retval[0] = 0;
 	return (0);
@@ -179,9 +194,16 @@ darwin_psynch_cvbroad(struct thread *td, struct darwin_args *uap)
 {
 	struct ps_ent *cv;
 
+	/* every waiter that has counted itself (L, the low word of cvlsgen) and not yet gone (S, the high word); the counts step by 0x100, the low byte holds flags */
+	uint32_t lgen = (uint32_t)uap->a[1], sgen = (uint32_t)(uap->a[1] >> 32);
+	int announced = (int)(((lgen & 0xffffff00u) - (sgen & 0xffffff00u)) >> 8);
+
+	if (announced < 0 || announced > PS_MAX_TOKENS)
+		announced = 0;
 	sx_xlock(&ps_sx);
-	if ((cv = ps_find(td->td_proc, uap->a[0], false)) != NULL)
-		ps_release(cv, cv->waiters, false);
+	if ((cv = ps_find(td->td_proc, uap->a[0], announced > 0)) != NULL)
+		ps_release(cv, MAX(cv->waiters - cv->tokens, announced), announced > cv->waiters);
+	PS_TRACE("cvbroad", td, cv, uap->a[1], uap->a[2]);
 	sx_xunlock(&ps_sx);
 	td->td_retval[0] = 0;
 	return (0);

@@ -18,6 +18,7 @@
 #include <sys/ptrace.h>
 #include <sys/signalvar.h>
 #include <sys/syscallsubr.h>
+#include <sys/sysctl.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/thr.h>
@@ -97,11 +98,14 @@ struct wqp {
 	struct proc	*p;
 	pid_t		pid;
 	uint64_t	wqstart, pthsize;
-	int		want;			/* threads asked for and not started yet */
-	int		wantqos;
+	int		want;			/* threads asked for and not started yet (the sum of want_q) */
+	int		wantqos;		/* the QoS of the last request (shown by the dump) */
 	int		mgr;			/* an event manager thread is out */
 	int		want_oc;		/* the same for the requests with the overcommit flag (libdispatch has separate root queues for them: the thread must say that it is for them) */
 	int		wantqos_oc;
+	int		want_q[8], want_oc_q[8];	/* the requests by QoS: each thread starts at the QoS that was asked for, because libdispatch drains the root queue of that QoS (with one QoS
+						 * for all, two requests at different QoS sent both threads to the last one, and the work on the other root queue waited forever: a dispatch_sync
+						 * of CoreImage that never got its queue) */
 	int		nthreads;
 	struct { int64_t id; lwpid_t tid; } wl[WQ_NREQ];		/* the workloops that a thread works for now: one thread at a time for each */
 	struct { int64_t id; uint64_t udata; uint32_t qos; uint64_t eaddr, emask, evalue; } req[WQ_NREQ];	/* thread requests of workloops (libdispatch wakes a serial queue with one) */
@@ -109,6 +113,9 @@ struct wqp {
 };
 
 static struct wqp wqs[16];
+SYSCTL_DECL(_kern_darwinator);
+static int darwin_wq_trace;
+SYSCTL_INT(_kern_darwinator, OID_AUTO, wq_trace, CTLFLAG_RW, &darwin_wq_trace, 0, "log the requests for threads of the workqueue and the threads that take them");
 static struct mtx wq_mtx;
 MTX_SYSINIT(darwin_wq, &wq_mtx, "darwin workqueue", MTX_DEF);
 
@@ -326,6 +333,27 @@ wl_release(struct wqp *w, int64_t id)
 			w->wl[i].tid = 0;
 }
 
+/* takes one request for a thread (the lock is held): the overcommit ones first, then by QoS from the highest, as XNU serves them; the QoS, or -1 when there is none */
+static int
+wq_take(struct wqp *w, bool *oc)
+{
+	int q;
+
+	for (q = 7; q >= 0; q--)
+		if (w->want_oc_q[q] > 0) { w->want_oc_q[q]--; w->want_oc--; *oc = true; return (q); }
+	for (q = 7; q >= 0; q--)
+		if (w->want_q[q] > 0) { w->want_q[q]--; w->want--; *oc = false; return (q); }
+	w->want = w->want_oc = 0;
+	return (-1);
+}
+
+/* gives a request back (a thread could not be made for it) */
+static void
+wq_untake(struct wqp *w, int q, bool oc)
+{
+	if (oc) { w->want_oc_q[q]++; w->want_oc++; } else { w->want_q[q]++; w->want++; }
+}
+
 /* the thread of the pool that comes back: it parks until there is work, and then starts again at the entry (the lock is not held) */
 static int
 wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int nevents, bool kevent_return)
@@ -371,15 +399,20 @@ wq_park(struct thread *td, struct wqp *w, struct wqthr *t, uint64_t item, int ne
 		/* work that was asked for */
 		mtx_lock(&wq_mtx);
 		if (w->want > 0 || w->want_oc > 0) {
-			bool oc = w->want_oc > 0;
-			int qos = oc ? w->wantqos_oc : w->wantqos;
+			bool oc = false;
+			int qos = wq_take(w, &oc);
 
-			if (oc) w->want_oc--; else w->want--;
+			if (qos < 0) { mtx_unlock(&wq_mtx); goto nowant; }
+			if (darwin_wq_trace)
+				printf("darwinator: %s[%d] tid %d: takes a request: qos %d%s (left %d / %d)\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_tid, qos, oc ? " overcommit" : "", w->want, w->want_oc);
 			t->parked = 0;
 			mtx_unlock(&wq_mtx);
 			wq_set_regs(td, t, wqstart, 0, (base_flags & ~WQ_FLAG_THREAD_KEVENT & ~0xfu) | (oc ? WQ_FLAG_THREAD_OVERCOMMIT : 0) | (uint32_t)qos, 0, (t->self - 64) & ~0xfULL);
 			return (EJUSTRETURN);
 		}
+		mtx_unlock(&wq_mtx);
+nowant:
+		mtx_lock(&wq_mtx);
 		/* a thread request of a workloop that nobody serves */
 		for (k = 0; k < WQ_NREQ; k++) {	/* every slot: darwin_wq_request fills any of the WQ_NREQ (a request beyond the 16th was never served: the icon agent hung with ~50 waiting) */
 			if (darwin_wl_stale_check && w->req[k].id != 0 && w->req[k].eaddr != 0 && w->req[k].emask != 0) {		/* the queue was taken (or emptied) since the request: the state is not the one that the request was made for (libdispatch aborts: "Invalid wlh state") */
@@ -598,14 +631,16 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
 		w = wq_get(td->td_proc, true);
 		if (w == NULL) { mtx_unlock(&wq_mtx); return (EAGAIN); }
 		w->wqstart = wqstart; w->pthsize = pthsize;
+		if (qos < 0 || qos > 7)
+			qos = 4;
+		if (darwin_wq_trace)
+			printf("darwinator: %s[%d] tid %d: asks for %d thread(s): priority %#x qos %d%s (wanted %d / %d, threads %d)\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_tid, n, pri, qos, (pri & 0x80000000u) ? " overcommit" : "", w->want, w->want_oc, w->nthreads);
 		if ((pri & 0x80000000u) != 0) {			/* _PTHREAD_PRIORITY_OVERCOMMIT_FLAG */
-			w->want_oc += n; w->wantqos_oc = qos;
-			if (w->want_oc > WQ_MAX_THREADS)
-				w->want_oc = WQ_MAX_THREADS;
+			n = MIN(n, WQ_MAX_THREADS - w->want_oc_q[qos]);
+			w->want_oc_q[qos] += n; w->want_oc += n; w->wantqos_oc = qos;
 		} else {
-			w->want += n; w->wantqos = qos;
-			if (w->want > WQ_MAX_THREADS)
-				w->want = WQ_MAX_THREADS;
+			n = MIN(n, WQ_MAX_THREADS - w->want_q[qos]);
+			w->want_q[qos] += n; w->want += n; w->wantqos = qos;
 		}
 		{
 			int i, idle = 0, woken = 0;
@@ -616,11 +651,15 @@ darwin_workq_kernreturn(struct thread *td, struct darwin_args *uap)
 					idle++;
 				}
 			while ((w->want > 0 || w->want_oc > 0) && w->nthreads < WQ_MAX_THREADS && w->nthreads >= idle) {
-				bool oc = w->want_oc > 0;
+				bool oc = false;
+				int tq = wq_take(w, &oc);		/* the new thread starts with this request */
 
-				if (oc) w->want_oc--; else w->want--;	/* the new thread starts with this request */
-				error = wq_spawn(td, w, oc ? (w->wantqos_oc | 0x100) : w->wantqos, false);
-				if (error != 0) { if (oc) w->want_oc++; else w->want++; break; }
+				if (tq < 0)
+					break;
+				error = wq_spawn(td, w, oc ? (tq | 0x100) : tq, false);
+				if (darwin_wq_trace)
+					printf("darwinator: %s[%d]: a new thread for a request: qos %d%s: error %d\n", td->td_proc->p_comm, td->td_proc->p_pid, tq, oc ? " overcommit" : "", error);
+				if (error != 0) { wq_untake(w, tq, oc); break; }
 			}
 		}
 		mtx_unlock(&wq_mtx);
