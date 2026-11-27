@@ -1,7 +1,10 @@
 /* bp: a tiny breakpoint tool for a Mach-O process that runs on darwinator (FreeBSD ptrace): the only way to look inside the closed libraries on this system, as lldb does on a Mac.
  *   bp PID ADDR [ADDR ...]       ADDR are absolute addresses (the unslid address of the cache + the slide of the process)
  * It attaches, writes an int3 at each address, and at every hit prints the registers rdi rsi rdx rcx r8 r9 and the return address, restores the byte, single-steps, puts the int3 back and continues.
- * Output lines: "BP <addr> hit <n>: rdi=.. rsi=.. rdx=.. rcx=.. r8=.. r9=.. ret=..".  Detaches after 30 seconds or when the process ends. */
+ * Output lines: "BP <addr> hit <n>: rdi=.. rsi=.. rdx=.. rcx=.. r8=.. r9=.. ret=..".  Detaches after 30 seconds or when the process ends.
+ * BPWAIT=1: for a process stopped before its first instruction (sysctl kern.darwinator.stop=1): the addresses of the dyld cache are not mapped yet, so the
+ * process runs in steps of 1 ms (continue, SIGSTOP) until the first address can be read; then the breakpoints go in (what happens in the first
+ * milliseconds of a program can be watched: the real Dock checks in with launchservicesd before anything can attach to it). */
 #include <sys/types.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
@@ -30,6 +33,18 @@ int main(int argc, char **argv)
 	for (i = 2; i < argc && nbp < MAXBP; i++) bp[nbp++].addr = strtoull(argv[i], NULL, 16);
 	if (ptrace(PT_ATTACH, pid, 0, 0) != 0) { perror("attach"); return 1; }
 	waitpid(pid, &st, 0);
+	if (getenv("BPWAIT")) {
+		int tries;
+
+		for (tries = 0; tries < 20000; tries++) {
+			struct ptrace_io_desc io; unsigned char b;
+			io.piod_op = PIOD_READ_D; io.piod_offs = (void *)bp[0].addr; io.piod_addr = &b; io.piod_len = 1;
+			if (ptrace(PT_IO, pid, (caddr_t)&io, 0) == 0 && io.piod_len == 1) break;
+			ptrace(PT_CONTINUE, pid, (caddr_t)1, 0); usleep(1000); kill(pid, SIGSTOP); waitpid(pid, &st, 0);
+			if (WIFEXITED(st) || WIFSIGNALED(st)) { fprintf(stderr, "bp: the process ended before the addresses were mapped\n"); return 1; }
+		}
+		fprintf(stderr, "bp: mapped after %d steps\n", tries);
+	}
 	for (i = 0; i < nbp; i++) {
 		struct ptrace_io_desc io; unsigned char b;
 		io.piod_op = PIOD_READ_D; io.piod_offs = (void *)bp[i].addr; io.piod_addr = &b; io.piod_len = 1;
