@@ -2069,14 +2069,27 @@ mig_info(struct thread *td, struct ktask *t, struct kport *dest, struct kmsg *m,
 			mig_reply_data(m, id, 0, buf, (buf[0] + 1) * 4);
 			return (true);
 		}
-	case 3603:					/* thread_get_state(thread, flavor, *state, *count): x86_THREAD_STATE64 (4) of the calling thread */
+	case 3603:					/* thread_get_state(thread, flavor, *state, *count): x86_THREAD_STATE64 (4) of a thread of the calling process */
 		{
 			if (dest->kind != KP_THREAD) return (false);
 #if defined(__amd64__)
 			a = m->size >= 40 ? rd32(d, 32) : 0;
-			if (a == 4 && (dest->kpid == 0 || dest->kpid == (pid_t)td->td_tid)) {
+			if (a == 4) {
 				uint64_t r[21];
-				struct trapframe *tf = td->td_frame;
+				struct trapframe *tf = td->td_frame, own;
+				struct thread *t2;
+
+				if (dest->kpid != 0 && dest->kpid != (pid_t)td->td_tid) {	/* another thread of this process: the user registers it left in the kernel (it sleeps in a call, like a
+												 * thread that XNU has suspended; a thread that runs in user space gives the registers of its last entry) */
+					bool found = false;
+
+					PROC_LOCK(td->td_proc);
+					FOREACH_THREAD_IN_PROC(td->td_proc, t2)
+						if (t2->td_tid == (lwpid_t)dest->kpid && t2->td_frame != NULL) { own = *t2->td_frame; found = true; break; }
+					PROC_UNLOCK(td->td_proc);
+					if (!found) { mig_reply_data(m, id, KERN_INVALID_ARGUMENT, NULL, 0); return (true); }
+					tf = &own;
+				}
 
 				r[0] = tf->tf_rax; r[1] = tf->tf_rbx; r[2] = tf->tf_rcx; r[3] = tf->tf_rdx; r[4] = tf->tf_rdi; r[5] = tf->tf_rsi;
 				r[6] = tf->tf_rbp; r[7] = tf->tf_rsp; r[8] = tf->tf_r8; r[9] = tf->tf_r9; r[10] = tf->tf_r10; r[11] = tf->tf_r11;

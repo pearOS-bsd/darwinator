@@ -513,7 +513,7 @@ darwin_shared_region_check_np(struct thread *td __unused, struct darwin_args *ua
 
 static struct mtx pth_mtx;
 MTX_SYSINIT(darwin_pth, &pth_mtx, "darwin pthread", MTX_DEF);
-static struct { struct proc *p; pid_t pid; uint64_t start, wqstart, pthsize; } pth_reg[64];
+static struct { struct proc *p; pid_t pid; uint64_t start, wqstart, pthsize; } pth_reg[512];	/* 64 evicted a live process once a session had more Mach processes */
 
 static int
 darwin_bsdthread_register(struct thread *td, struct darwin_args *uap)

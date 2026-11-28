@@ -112,7 +112,12 @@ struct wqp {
 	struct wqthr	thr[WQ_MAX_THREADS];
 };
 
-static struct wqp wqs[16];
+/* one entry per process that uses the workqueue, allocated at its first use and kept for reuse (never freed: a thread of a dying process may still hold
+ * the pointer).  It was a static table of 16: the 17th Mach process of a session (ControlCenter next to the stubs and services) got no entry, so no thread,
+ * and its listeners never answered (cfprefsd, opendirectoryd: every client waited for ever). */
+#define	WQ_MAX_PROCS		256
+static struct wqp *wqs[WQ_MAX_PROCS];
+static bool wq_full_said;
 SYSCTL_DECL(_kern_darwinator);
 static int darwin_wq_trace;
 SYSCTL_INT(_kern_darwinator, OID_AUTO, wq_trace, CTLFLAG_RW, &darwin_wq_trace, 0, "log the requests for threads of the workqueue and the threads that take them");
@@ -120,23 +125,32 @@ static struct mtx wq_mtx;
 MTX_SYSINIT(darwin_wq, &wq_mtx, "darwin workqueue", MTX_DEF);
 
 static MALLOC_DEFINE(M_DARWIN_WQ, "darwin_wq", "darwinator workqueue");
+static MALLOC_DEFINE(M_DARWIN_WQP, "darwin_wqp", "darwinator workqueue of a process");
 
 static struct wqp *
 wq_get(struct proc *p, bool create)
 {
-	int i, freei = -1;
+	int i, reuse = -1, empty = -1;
 
 	for (i = 0; i < (int)nitems(wqs); i++) {
-		if (wqs[i].p == p && wqs[i].pid == p->p_pid)
-			return (&wqs[i]);
-		if (wqs[i].p == NULL && freei < 0)
-			freei = i;
+		if (wqs[i] == NULL) { if (empty < 0) empty = i; continue; }
+		if (wqs[i]->p == p && wqs[i]->pid == p->p_pid)
+			return (wqs[i]);
+		if (wqs[i]->p == NULL && reuse < 0)
+			reuse = i;
 	}
-	if (!create || freei < 0)
+	if (!create)
 		return (NULL);
-	memset(&wqs[freei], 0, sizeof(wqs[freei]));
-	wqs[freei].p = p; wqs[freei].pid = p->p_pid;
-	return (&wqs[freei]);
+	if (reuse < 0) {
+		if (empty < 0 || (wqs[empty] = malloc(sizeof(struct wqp), M_DARWIN_WQP, M_NOWAIT | M_ZERO)) == NULL) {
+			if (!wq_full_said) { wq_full_said = true; printf("darwinator: %s[%d]: no workqueue entry left (%d processes): its queues get no threads\n", p->p_comm, p->p_pid, (int)nitems(wqs)); }
+			return (NULL);
+		}
+		reuse = empty;
+	}
+	memset(wqs[reuse], 0, sizeof(*wqs[reuse]));
+	wqs[reuse]->p = p; wqs[reuse]->pid = p->p_pid;
+	return (wqs[reuse]);
 }
 
 /* debugging: the thread requests that wait and the workloops that threads work for (sysctl kern.darwinator.wl_dump), with the state word of each queue read now */
@@ -148,16 +162,16 @@ darwin_wq_dump_all(void)
 
 	mtx_lock(&wq_mtx);
 	for (i = 0; i < (int)nitems(wqs) && n < 60; i++) {
-		if (wqs[i].p == NULL) continue;
+		if (wqs[i] == NULL || wqs[i]->p == NULL) continue;
 		for (k = 0; k < WQ_NREQ && n < 62; k++)
-			if (wqs[i].req[k].id != 0) { snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].req[k].id; snap[n].ea = wqs[i].req[k].eaddr; snap[n].em = wqs[i].req[k].emask; snap[n].ev = wqs[i].req[k].evalue; snap[n].tid = 0; n++; }
-		printf("darwinator: wq pid %d: threads %d, wanted %d (qos %d) overcommit %d (qos %d), manager out %d\n", wqs[i].pid, wqs[i].nthreads, wqs[i].want, wqs[i].wantqos, wqs[i].want_oc, wqs[i].wantqos_oc, wqs[i].mgr);
+			if (wqs[i]->req[k].id != 0) { snap[n].p = wqs[i]->p; snap[n].pid = wqs[i]->pid; snap[n].id = wqs[i]->req[k].id; snap[n].ea = wqs[i]->req[k].eaddr; snap[n].em = wqs[i]->req[k].emask; snap[n].ev = wqs[i]->req[k].evalue; snap[n].tid = 0; n++; }
+		printf("darwinator: wq pid %d: threads %d, wanted %d (qos %d) overcommit %d (qos %d), manager out %d\n", wqs[i]->pid, wqs[i]->nthreads, wqs[i]->want, wqs[i]->wantqos, wqs[i]->want_oc, wqs[i]->wantqos_oc, wqs[i]->mgr);
 		for (k = 0; k < WQ_MAX_THREADS; k++)
-			if (wqs[i].thr[k].used)
-				printf("darwinator:   thread %d tid %d: parked %d bound %#lx manager %d qos %d wait %s\n", k, wqs[i].thr[k].tid, wqs[i].thr[k].parked, (u_long)wqs[i].thr[k].bound, wqs[i].thr[k].ismgr, wqs[i].thr[k].prio,
-				    wqs[i].thr[k].td != NULL && wqs[i].thr[k].td->td_wmesg != NULL ? wqs[i].thr[k].td->td_wmesg : "-");
+			if (wqs[i]->thr[k].used)
+				printf("darwinator:   thread %d tid %d: parked %d bound %#lx manager %d qos %d wait %s\n", k, wqs[i]->thr[k].tid, wqs[i]->thr[k].parked, (u_long)wqs[i]->thr[k].bound, wqs[i]->thr[k].ismgr, wqs[i]->thr[k].prio,
+				    wqs[i]->thr[k].td != NULL && wqs[i]->thr[k].td->td_wmesg != NULL ? wqs[i]->thr[k].td->td_wmesg : "-");
 		for (k = 0; k < WQ_NREQ && n < 62; k++)
-			if (wqs[i].wl[k].id != 0 && wqs[i].wl[k].tid != 0) {		/* (a released slot keeps its id with tid 0: not shown) */ snap[n].p = wqs[i].p; snap[n].pid = wqs[i].pid; snap[n].id = wqs[i].wl[k].id; snap[n].ea = 0; snap[n].em = 0; snap[n].ev = 0; snap[n].tid = wqs[i].wl[k].tid; n++; }
+			if (wqs[i]->wl[k].id != 0 && wqs[i]->wl[k].tid != 0) {		/* (a released slot keeps its id with tid 0: not shown) */ snap[n].p = wqs[i]->p; snap[n].pid = wqs[i]->pid; snap[n].id = wqs[i]->wl[k].id; snap[n].ea = 0; snap[n].em = 0; snap[n].ev = 0; snap[n].tid = wqs[i]->wl[k].tid; n++; }
 	}
 	mtx_unlock(&wq_mtx);
 	for (i = 0; i < n; i++) {
