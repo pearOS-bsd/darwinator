@@ -1,0 +1,9 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+current-version: 1351
+exports:
+  - targets:         [ x86_64-macos ]
+    symbols:         [ dyld_stub_binder, _pthread_create, _pthread_join, _pthread_self, _pthread_mutex_lock, _pthread_mutex_unlock, _pthread_cond_wait, _pthread_cond_timedwait, _pthread_cond_broadcast, _pthread_cond_signal_thread_np, _gettimeofday, _printf ]
+...

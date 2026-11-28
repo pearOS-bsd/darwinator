@@ -39,14 +39,16 @@ struct ps_ent {
 	struct proc	*p;
 	pid_t		pid;
 	uint64_t	addr;
-	int		waiters, tokens;
+	int		waiters, tokens;	/* tokens: wakes kept for waiters not in the kernel yet (served - next when positive), for the trace and the eviction */
+	uint64_t	next, served;		/* tickets: a waiter takes `next` and sleeps until its ticket is below `served`; a release moves `served` */
+	int		cancelled;		/* tickets below next and not served whose waiter left (timeout, signal): the next release serves past them */
 	bool		used;
 };
 #define	PS_N	512
 SYSCTL_DECL(_kern_darwinator);
 static int darwin_ps_trace;
-SYSCTL_INT(_kern_darwinator, OID_AUTO, ps_trace, CTLFLAG_RW, &darwin_ps_trace, 0, "log the condition variable calls of psynch (address, generations, waiters, tokens)");
-#define	PS_TRACE(what, td, e, a1, a2) do { if (darwin_ps_trace) printf("darwinator: %s[%d] tid %d: %s %#lx gen %#lx %#lx: waiters %d tokens %d\n", (td)->td_proc->p_comm, (td)->td_proc->p_pid, (td)->td_tid, what, (u_long)uap->a[0], (u_long)(a1), (u_long)(a2), (e) ? (e)->waiters : -1, (e) ? (e)->tokens : -1); } while (0)
+SYSCTL_INT(_kern_darwinator, OID_AUTO, ps_trace, CTLFLAG_RW, &darwin_ps_trace, 0, "log psynch condition variable calls: 1 every call (address, generations, waiters, kept wakes), 2 only signals that name a thread");
+#define	PS_TRACE(what, td, e, a1, a2) do { if (darwin_ps_trace == 1) printf("darwinator: %s[%d] tid %d: %s %#lx gen %#lx %#lx: waiters %d tokens %d\n", (td)->td_proc->p_comm, (td)->td_proc->p_pid, (td)->td_tid, what, (u_long)uap->a[0], (u_long)(a1), (u_long)(a2), (e) ? (e)->waiters : -1, (e) ? (e)->tokens : -1); } while (0)
 static struct ps_ent ps_tab[PS_N];
 static struct sx ps_sx;
 SX_SYSINIT(darwin_ps, &ps_sx, "darwin psynch");
@@ -71,29 +73,59 @@ ps_find(struct proc *p, uint64_t addr, bool create)
 	i = free_i >= 0 ? free_i : evict;
 	if (i < 0)
 		return (NULL);
-	ps_tab[i] = (struct ps_ent){ .p = p, .pid = p->p_pid, .addr = addr, .used = true };
+	ps_tab[i] = (struct ps_ent){ .p = p, .pid = p->p_pid, .addr = addr, .used = true };	/* next = served = 0 */
 	return (&ps_tab[i]);
 }
 
-/* sleeps until a token is there (consumes it); timeout in ticks, 0 = none */
+/*
+ * Waiting is by ticket, in order of arrival: a release serves the waiters that are there (and keeps wakes for waiters on their way), and a thread that
+ * comes back to wait takes a new ticket behind them.  With a plain count of wake tokens the thread that had just broadcast and went to wait itself took
+ * the wakes meant for the waiter already asleep (the wakeup had not run it yet): SwiftUI's main thread consumed both wakes of its own broadcast in
+ * MovableLockLock, the render thread slept on in MovableLockSyncMain, and the app's main thread waited for it forever (2026-11-28, kern.darwinator.ps_trace).
+ */
+static void
+ps_tidy(struct ps_ent *e)
+{
+	if (e->waiters == 0 && e->served < e->next) {		/* every ticket still unserved belongs to a waiter that left */
+		e->served = e->next; e->cancelled = 0;
+	}
+	e->tokens = e->served > e->next ? (int)(e->served - e->next) : 0;
+	if (e->waiters == 0 && e->tokens == 0)
+		e->used = false;
+}
+
+/* sleeps until its ticket is served; timeout in ticks, 0 = none */
 static int
 ps_wait(struct ps_ent *e, int timo)
 {
 	int error = 0;
+	uint64_t t = e->next++;
 
 	e->waiters++;
-	while (e->tokens == 0 && error == 0)
+	while (t >= e->served && error == 0)
 		error = sx_sleep(e, &ps_sx, PCATCH, "psynch", timo);
 	e->waiters--;
-	if (error == 0)
-		e->tokens--;
-	else if (error == EWOULDBLOCK)
+	if (t < e->served)		/* served, even if the sleep also timed out: the wake is taken, not lost */
+		error = 0;
+	else if (t == e->next - 1 && e->served <= t)
+		e->next--;		/* the last ticket: given back */
+	else
+		e->cancelled++;
+	if (error == EWOULDBLOCK)
 		error = ETIMEDOUT;
 	else if (error == ERESTART)
 		error = EINTR;
-	if (e->waiters == 0 && e->tokens == 0)
-		e->used = false;
+	ps_tidy(e);
 	return (error);
+}
+
+/* the waiters in the kernel that are not served yet */
+static int
+ps_unserved(struct ps_ent *e)
+{
+	int64_t u = (int64_t)(e->next - e->served) - e->cancelled;
+
+	return (u > 0 ? (int)u : 0);
 }
 
 #define	PS_MAX_TOKENS	64		/* wakes kept for waiters that have not come yet (a bound: a word read wrong cannot pile them up) */
@@ -101,17 +133,20 @@ ps_wait(struct ps_ent *e, int timo)
 static void
 ps_release(struct ps_ent *e, int n, bool remember)
 {
-	if (!remember && e->waiters - e->tokens < n)
-		n = e->waiters - e->tokens;
-	if (remember && e->tokens + n > MAX(PS_MAX_TOKENS, e->waiters))
-		n = MAX(PS_MAX_TOKENS, e->waiters) - e->tokens;
+	int u = ps_unserved(e);
+
+	if (!remember && n > u)
+		n = u;
+	if (remember && n - u + e->tokens > PS_MAX_TOKENS)		/* the wakes kept beyond the waiters there are bounded */
+		n = MAX(u, PS_MAX_TOKENS - e->tokens + u);
 	if (n > 0) {
-		e->tokens += n;
-		if (n == 1)
-			wakeup_one(e);
-		else
-			wakeup(e);
+		if (e->served < e->next)			/* the tickets of waiters that left are passed over, not counted as served wakes */
+			e->served += e->cancelled;
+		e->cancelled = 0;
+		e->served += n;
+		wakeup(e);					/* each sleeper looks at its own ticket */
 	}
+	ps_tidy(e);
 }
 
 static int
@@ -181,9 +216,18 @@ darwin_psynch_cvsignal(struct thread *td, struct darwin_args *uap)
 	struct ps_ent *cv;
 
 	sx_xlock(&ps_sx);
-	if ((cv = ps_find(td->td_proc, uap->a[0], true)) != NULL)
-		ps_release(cv, 1, true);		/* kept when the waiter is not in the kernel yet (see the top) */
+	if ((cv = ps_find(td->td_proc, uap->a[0], true)) != NULL) {
+		if ((uint32_t)uap->a[3] != 0)
+			/* psynch_cvsignal(cv, cvlsgen, cvugen, thread_port, mutex, mugen, tid, flags): a thread port names the one waiter to wake (pthread_cond_signal_thread_np).
+			 * Waiters are not told apart here, so every waiter in the kernel is woken (the others see a spurious wakeup, which a condition variable allows) and one
+			 * wake is kept if the named thread is not in the kernel yet.  One token to whoever came first left SwiftUI's MovableLock deadlocked: its render thread
+			 * (MovableLockSyncMain) signals the main thread by name, another waiter of the same condition took the wake, the main thread slept on in MovableLockLock. */
+			ps_release(cv, MAX(ps_unserved(cv), 1), true);
+		else
+			ps_release(cv, 1, true);	/* kept when the waiter is not in the kernel yet (see the top) */
+	}
 	PS_TRACE("cvsignal", td, cv, uap->a[1], uap->a[2]);
+	if (darwin_ps_trace && (uint32_t)uap->a[3] != 0) printf("darwinator: %s[%d] tid %d: cvsignal %#lx thread %#lx mutex %#lx tid %#lx flags %#lx\n", td->td_proc->p_comm, td->td_proc->p_pid, td->td_tid, (u_long)uap->a[0], (u_long)uap->a[3], (u_long)uap->a[4], (u_long)uap->a[6], (u_long)uap->a[7]);
 	sx_xunlock(&ps_sx);
 	td->td_retval[0] = 0;
 	return (0);
@@ -202,7 +246,7 @@ darwin_psynch_cvbroad(struct thread *td, struct darwin_args *uap)
 		announced = 0;
 	sx_xlock(&ps_sx);
 	if ((cv = ps_find(td->td_proc, uap->a[0], announced > 0)) != NULL)
-		ps_release(cv, MAX(cv->waiters - cv->tokens, announced), announced > cv->waiters);
+		ps_release(cv, MAX(ps_unserved(cv), announced), announced > cv->waiters);
 	PS_TRACE("cvbroad", td, cv, uap->a[1], uap->a[2]);
 	sx_xunlock(&ps_sx);
 	td->td_retval[0] = 0;
@@ -231,7 +275,7 @@ darwin_psynch_rw_unlock(struct thread *td, struct darwin_args *uap)
 
 	sx_xlock(&ps_sx);
 	if ((e = ps_find(td->td_proc, uap->a[0], false)) != NULL)
-		ps_release(e, e->waiters, false);
+		ps_release(e, ps_unserved(e), false);
 	sx_xunlock(&ps_sx);
 	td->td_retval[0] = 0;
 	return (0);

@@ -52,6 +52,8 @@ if [ -x /usr/lib/dyld ] && command -v /usr/local/llvm21/bin/ld64.lld >/dev/null;
 	sysctl kern.darwinator.dyld=1 >/dev/null
 	if sh tests/macho-toolchain/rlimit/build.sh $T/rl >/dev/null 2>&1 && out="$($T/rl/rlimit 2>&1)"; then echo "ok   rlimit (fopen of a Mac program)"
 	else echo "FAIL rlimit: $out"; fail=1; fi
+	if sh tests/macho-toolchain/condvar/build.sh $T/cv >/dev/null 2>&1 && out="$($T/cv/condvar 2>&1)"; then echo "ok   condvar (a broadcast wakes the sleeper, not the broadcaster)"
+	else echo "FAIL condvar: $out"; fail=1; fi
 else echo "skip rlimit (no Mac dyld)"; fi
 
 # a Mach-O file of the other architecture is refused, ELF programs and scripts still run
