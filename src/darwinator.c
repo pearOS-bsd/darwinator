@@ -29,7 +29,7 @@ int darwin_stop;
 SYSCTL_INT(_kern_darwinator, OID_AUTO, stop, CTLFLAG_RWTUN, &darwin_stop, 0, "debugging: a Mach-O program stops (SIGSTOP) before its first instruction, so that a debugger can attach");
 int darwin_dyld;
 extern int darwin_fast_sleep_ms;
-SYSCTL_INT(_kern_darwinator, OID_AUTO, fast_sleep_ms, CTLFLAG_RW, &darwin_fast_sleep_ms, 0, "sleep(3) of 1 s or more lasts only this many ms (0: off)");
+SYSCTL_INT(_kern_darwinator, OID_AUTO, fast_sleep_ms, CTLFLAG_RW, &darwin_fast_sleep_ms, 0, "sleep(3) of 1..5 s lasts only this many ms (0: off, the default and the Mac behaviour)");
 SYSCTL_INT(_kern_darwinator, OID_AUTO, dyld, CTLFLAG_RWTUN, &darwin_dyld, 0, "run a dynamic Mach-O program with the dyld that its load commands name (/usr/lib/dyld of a Mac)");
 
 struct sysentvec darwin_sysvec;

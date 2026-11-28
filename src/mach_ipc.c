@@ -1269,7 +1269,8 @@ darwin_sem_timedwait(struct thread *td, struct darwin_args *uap)		/* (sem, sec, 
 	return (kr_ret(td, kr));
 }
 
-/* kern.darwinator.fast_sleep_ms: when not 0 the relative waits of a second or more (sleep(3)) last this many ms; IOSurface sleeps 241 s for an IOSurfaceRoot that pearOS never has */
+/* kern.darwinator.fast_sleep_ms: when not 0 the relative waits of 1..5 s (sleep(3)) last this many ms.  Made when IOSurface slept 241 s waiting for an IOSurfaceRoot that pearOS did not have; the registry has it now
+ * (io_nodes) and IOSurfaceCreate connects at once with 0 (2026-11-28), so the default 0 is the Mac behaviour and the stacks no longer set it.  Debug 2 logs who still sleeps whole seconds. */
 int darwin_fast_sleep_ms = 0;
 
 static int darwin_sem_timedwait_signal(struct thread *td, struct darwin_args *uap) { return (kr_ret(td, sem_wait_signal(td, (uint32_t)uap->a[0], (uint32_t)uap->a[1], semtimo((uint32_t)uap->a[2], (int32_t)uap->a[3])))); }
@@ -1285,6 +1286,8 @@ darwin_semwait_signal(struct thread *td, struct darwin_args *uap)
 		int64_t sec = (int64_t)uap->a[4];
 		int32_t nsec = (int32_t)uap->a[5];
 
+		if ((int)uap->a[3] != 0 && sec >= 1 && darwin_debug >= 2)	/* who still sleeps whole seconds (the reason for fast_sleep_ms) */
+			printf("darwinator: %s[%d]: semwait_signal sleep %jd s\n", td->td_proc->p_comm, td->td_proc->p_pid, (intmax_t)sec);
 		if ((int)uap->a[3] != 0 && darwin_fast_sleep_ms > 0 && sec >= 1 && sec <= 5) {	/* a relative sleep(3) */
 			nsec = darwin_fast_sleep_ms * 1000000; sec = 0;
 		} else if ((int)uap->a[3] == 0) {			/* an absolute time */
