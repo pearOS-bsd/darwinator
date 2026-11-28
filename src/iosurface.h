@@ -9,7 +9,9 @@ struct proc;
 
 #define IOSURF_SEL_CREATE	0	/* the properties as a binary serialized dictionary in, IOSURF_CREATE_SIZE bytes out */
 #define IOSURF_SEL_LOOKUP	4	/* one scalar: the id; IOSURF_CREATE_SIZE bytes out */
-#define IOSURF_SEL_LIMITS	13	/* nothing in, IOSURF_LIMITS_SIZE bytes out */
+#define IOSURF_SEL_LIMITS	13
+#define IOSURF_SEL_LOOKUP_PORT	34	/* one scalar: a port name (IOSurfaceLookupFromMachPort); IOSURF_CREATE_SIZE bytes out, or -1 and the id when the caller has the surface */
+#define IOSURF_SEL_CREATE_PORT	35	/* two scalars: the id, options; one scalar out: the name of a send right of a new port of the surface (IOSurfaceCreateMachPort) */	/* nothing in, IOSURF_LIMITS_SIZE bytes out */
 #define IOSURF_CREATE_SIZE	0xc68
 #define IOSURF_LIMITS_SIZE	40
 
@@ -23,6 +25,10 @@ int	iosurface_dict_number(const uint8_t *buf, size_t len, const char *key, uint6
 int	iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *out);
 int	iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out);
 void	iosurface_limits(uint8_t *out);
+int	iosurface_lookup_port(struct thread *td, uint32_t id, uint8_t *out);
+/* a port of a surface holds a use of it: 0 or a kern_return_t (the caller has no such surface) */
+int	iosurface_port_ref(struct thread *td, uint32_t id);
+void	iosurface_port_unref(uint32_t id);
 /* a process that exits loses its uses of the surfaces (the last use of a surface frees it) */
 void	iosurface_proc_exit(struct proc *p);
 /* /dev/iosurface (iosurface_dev.h): made at load, gone at unload */

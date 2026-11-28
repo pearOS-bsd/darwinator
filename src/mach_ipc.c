@@ -100,7 +100,7 @@
 
 MALLOC_DEFINE(M_DARWIN_IPC, "darwin_ipc", "Mach ports and messages");
 
-enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT, KP_IOKIT, KP_IOOBJ };
+enum { KP_PORT, KP_TASK, KP_HOST, KP_THREAD, KP_SET, KP_SEM, KP_FILE, KP_CLOCK, KP_BOOTSTRAP, KP_MEMENT, KP_IOKIT, KP_IOOBJ, KP_IOSURF };	/* KP_IOSURF: a port of an IOSurface (IOSurfaceCreateMachPort), kpid is the surface's id */
 
 struct kmsg;
 struct kport {
@@ -219,6 +219,8 @@ kp_unref(struct kport *p)
 		free(p->timer, M_DARWIN_IPC);
 	if (p->mobj != NULL)
 		vm_object_deallocate(p->mobj);
+	if (p->kind == KP_IOSURF)
+		iosurface_port_unref((uint32_t)p->kpid);
 	knlist_delete(&p->kl, curthread, 0);
 	knlist_destroy(&p->kl);
 	free(p, M_DARWIN_IPC);
@@ -2833,6 +2835,52 @@ iosurf_method(struct thread *td, struct kmsg *m, int id)
 		memcpy(&sid, d + 40, 8);
 		wr32(out, 0, IOSURF_CREATE_SIZE);
 		kr = iosurface_lookup(td, sid, out + 4);
+		if (kr == 0)
+			mig_reply_data(m, id, 0, out, 4 + IOSURF_CREATE_SIZE + 4 + 8);
+		else
+			mig_reply(NULL, m, id, kr, NULL, NULL, 0, NULL, 0);
+		free(out, M_DARWIN_IPC);
+		return;
+	}
+	if (sel == IOSURF_SEL_CREATE_PORT && nin == 2 && m->size >= 56) {	/* IOSurfaceCreateMachPort: a new port of the surface, its send right named in the caller; the name comes back as the one scalar output */
+		struct ktask *t = kt_task(td->td_proc);
+		struct kport *p;
+		struct kent *e = NULL;
+		uint64_t sid, name;
+		uint8_t out[4 + 4 + 8 + 8];
+		int kr;
+
+		memcpy(&sid, d + 40, 8);
+		if (t == NULL || (kr = iosurface_port_ref(td, (uint32_t)sid)) != 0) { mig_reply(NULL, m, id, t == NULL ? KERN_FAILURE : kr, NULL, NULL, 0, NULL, 0); return; }
+		p = kp_new(KP_IOSURF);
+		p->kpid = (pid_t)sid;
+		e = ent_add(t, p, MM_MAKE_SEND);
+		p->refs--;
+		if (e == NULL) { kp_unref(p); mig_reply(NULL, m, id, (int)0xe00002bd /* kIOReturnNoResources */, NULL, NULL, 0, NULL, 0); return; }
+		name = e->name;
+		memset(out, 0, sizeof(out));
+		wr32(out, 4, 1);					/* inband_outputCnt 0, scalar_outputCnt 1, the scalar, ool_output_size 0 */
+		memcpy(out + 8, &name, 8);
+		if (darwin_debug >= 1)
+			printf("darwinator: %s[%d]: IOSurface %u: port %#x\n", td->td_proc->p_comm, td->td_proc->p_pid, (uint32_t)sid, (uint32_t)name);
+		mig_reply_data(m, id, 0, out, sizeof(out));
+		return;
+	}
+	if (sel == IOSURF_SEL_LOOKUP_PORT && nin == 1 && m->size >= 48) {	/* IOSurfaceLookupFromMachPort: the surface that a port of the caller names */
+		struct ktask *t = kt_task(td->td_proc);
+		struct kent *e;
+		uint64_t pname;
+		uint32_t sid = 0;
+		uint8_t *out;
+		int kr;
+
+		memcpy(&pname, d + 40, 8);
+		if (t != NULL && (e = ent_by_name(t, (uint32_t)pname)) != NULL && e->port->kind == KP_IOSURF)
+			sid = (uint32_t)e->port->kpid;
+		if (sid == 0) { mig_reply(NULL, m, id, (int)0xe00002c2 /* kIOReturnBadArgument */, NULL, NULL, 0, NULL, 0); return; }
+		out = malloc(4 + IOSURF_CREATE_SIZE + 4 + 8, M_DARWIN_IPC, M_WAITOK | M_ZERO);
+		wr32(out, 0, IOSURF_CREATE_SIZE);
+		kr = iosurface_lookup_port(td, sid, out + 4);
 		if (kr == 0)
 			mig_reply_data(m, id, 0, out, 4 + IOSURF_CREATE_SIZE + 4 + 8);
 		else

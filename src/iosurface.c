@@ -388,6 +388,59 @@ iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *o
 	return (0);
 }
 
+static int ios_lookup(struct thread *td, uint64_t id, uint8_t *out, bool by_port);
+
+int
+iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out)
+{
+	return (ios_lookup(td, id, out, false));
+}
+
+/* IOSurfaceLookupFromMachPort (selector 34): the surface of a port that IOSurfaceCreateMachPort made; a port gives access whether the surface is global or not */
+int
+iosurface_lookup_port(struct thread *td, uint32_t id, uint8_t *out)
+{
+	return (ios_lookup(td, id, out, true));
+}
+
+/* the ports of a surface (IOSurfaceCreateMachPort, selector 35): each one is a use of the surface by "the ports" (pid -1), so the surface stays while a port names it (in a message on its way, in a
+ * task that has not looked it up yet); the port's death takes the use away */
+int
+iosurface_port_ref(struct thread *td, uint32_t id)
+{
+	struct ios_user *u;
+	int i, rv = IOS_NOTBADARG;
+
+	mtx_lock(&ios_mtx);
+	for (i = 0; i < IOS_MAX; i++)
+		if (iosurfs[i].used && iosurfs[i].id == id) {
+			/* the caller must have the surface (a client of it on the Mac) */
+			if (ios_user_of(&iosurfs[i], td->td_proc->p_pid, false) != NULL && (u = ios_user_of(&iosurfs[i], -1, true)) != NULL) { u->uses++; rv = 0; }
+			break;
+		}
+	mtx_unlock(&ios_mtx);
+	return (rv);
+}
+
+void
+iosurface_port_unref(uint32_t id)
+{
+	struct shmfd *o = NULL;
+	struct ios_user *u;
+	int i;
+
+	mtx_lock(&ios_mtx);
+	for (i = 0; i < IOS_MAX; i++)
+		if (iosurfs[i].used && iosurfs[i].id == id) {
+			if ((u = ios_user_of(&iosurfs[i], -1, false)) != NULL && --u->uses == 0)
+				o = ios_drop_if_unused(&iosurfs[i]);
+			break;
+		}
+	mtx_unlock(&ios_mtx);
+	if (o != NULL)
+		shm_drop(o);
+}
+
 /* lock (id, options, *seed), unlock (id, options, *seed), release (id): a surface is not locked against anybody here, the seed stays 0 */
 int
 iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options, uint64_t seed_user_addr)
@@ -436,8 +489,8 @@ iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options,
 
 /* selector 4: the surface of an id (the scalar) that another process made and marked global; the memory is mapped into the caller and the structure is the one of create.  kIOReturnBadArgument for an id
  * that is not there or not global: what the Mac answers */
-int
-iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out)
+static int
+ios_lookup(struct thread *td, uint64_t id, uint8_t *out, bool by_port)
 {
 	struct iosurf *sf = NULL;
 	struct ios_user *u;
@@ -446,8 +499,14 @@ iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out)
 
 	mtx_lock(&ios_mtx);
 	for (i = 0; i < IOS_MAX; i++)
-		if (iosurfs[i].used && iosurfs[i].id == id && iosurfs[i].global) { sf = &iosurfs[i]; break; }
+		if (iosurfs[i].used && iosurfs[i].id == id && (iosurfs[i].global || by_port)) { sf = &iosurfs[i]; break; }
 	if (sf != NULL && (u = ios_user_of(sf, td->td_proc->p_pid, false)) != NULL && u->va != 0) {
+		if (by_port) {			/* the Mac's answer to a look-up from a port by a process that has the surface already: -1 and the id; the framework takes its cached client (IOSurfaceClientLookupFromMachPort, decompiled) */
+			mtx_unlock(&ios_mtx);
+			memset(out, 0xff, 8);
+			memcpy(out + 24, &sf->id, 4);
+			return (0);
+		}
 		u->uses++;			/* a process that has the surface already: one more use of the same mapping */
 		va = u->va; iva = u->iva;
 	}
