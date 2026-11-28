@@ -47,6 +47,13 @@ if sh tests/build-c.sh $T/spawn "" tests/c/spawn.c; then
 	[ $st -eq 0 ] && echo "ok   spawn (posix_spawn)" || { echo "FAIL spawn: $st failure(s)"; fail=1; }
 else echo "FAIL building spawn"; fail=1; fi
 
+# getrlimit / sysconf / fopen through the Mac's libc (needs the dyld of a Mac and its cache; skipped without them)
+if [ -x /usr/lib/dyld ] && command -v /usr/local/llvm21/bin/ld64.lld >/dev/null; then
+	sysctl kern.darwinator.dyld=1 >/dev/null
+	if sh tests/macho-toolchain/rlimit/build.sh $T/rl >/dev/null 2>&1 && out="$($T/rl/rlimit 2>&1)"; then echo "ok   rlimit (fopen of a Mac program)"
+	else echo "FAIL rlimit: $out"; fail=1; fi
+else echo "skip rlimit (no Mac dyld)"; fi
+
 # a Mach-O file of the other architecture is refused, ELF programs and scripts still run
 OTHER=arm64; [ $ARCH = arm64 ] && OTHER=x86_64
 python3 tools/mkmacho.py --arch $OTHER -o $T/other

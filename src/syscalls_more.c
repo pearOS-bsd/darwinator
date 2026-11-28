@@ -570,16 +570,21 @@ darwin_sigprocmask(struct thread *td, struct darwin_args *uap)
 	return (error);
 }
 
-/* ---- getrlimit / setrlimit: the resources 0..8 are the same; Darwin's RLIMIT_AS is 5 (RSS here) ---- */
+/* ---- getrlimit / setrlimit: the resources 0..8 are the same; Darwin's RLIMIT_AS is 5 (RSS here).
+ * Darwin's libc (the UNIX03 variants, which every program gets) adds _RLIMIT_POSIX_FLAG (0x1000) to the resource and XNU takes it away
+ * (`which & ~_RLIMIT_POSIX_FLAG`): refused here before, getrlimit(RLIMIT_NOFILE) failed, sysconf(_SC_STREAM_MAX) was -1 and every fopen()
+ * of a Mac program failed with EMFILE.  With the flag, XNU's setrlimit refuses an RLIMIT_NOFILE soft limit above maxfilesperproc (UNIX03). ---- */
+#define	DARWIN_RLIMIT_POSIX_FLAG	0x1000
 
 static int
 darwin_getrlimit(struct thread *td, struct darwin_args *uap)
 {
 	struct rlimit rl;
+	u_int which = (u_int)uap->a[0] & ~DARWIN_RLIMIT_POSIX_FLAG;
 
-	if ((u_int)uap->a[0] > 8)
+	if (which > 8)
 		return (EINVAL);
-	lim_rlimit(td, (int)uap->a[0], &rl);
+	lim_rlimit(td, (int)which, &rl);
 	return (copyout(&rl, (void *)uap->a[1], sizeof(rl)));
 }
 
@@ -588,11 +593,16 @@ darwin_setrlimit(struct thread *td, struct darwin_args *uap)
 {
 	struct rlimit rl;
 	int error;
+	u_int which = (u_int)uap->a[0] & ~DARWIN_RLIMIT_POSIX_FLAG;
 
-	if ((u_int)uap->a[0] > 8)
+	if (which > 8)
 		return (EINVAL);
 	error = copyin((void *)uap->a[1], &rl, sizeof(rl));
-	return (error != 0 ? error : kern_setrlimit(td, (u_int)uap->a[0], &rl));
+	if (error != 0)
+		return (error);
+	if (((u_int)uap->a[0] & DARWIN_RLIMIT_POSIX_FLAG) != 0 && which == RLIMIT_NOFILE && rl.rlim_cur > (rlim_t)maxfilesperproc)
+		return (EINVAL);
+	return (kern_setrlimit(td, which, &rl));
 }
 
 /* ---- msync: Darwin's MS_SYNC is 0x10 (FreeBSD's is 0) ---- */
