@@ -18,6 +18,7 @@
 #include <sys/errno.h>
 
 #include "darwinator.h"
+#include "iosurface.h"
 
 MALLOC_DEFINE(M_DARWIN, "darwinator", "Mach-O loader and Darwin system call layer");
 
@@ -165,6 +166,7 @@ darwinator_modevent(module_t mod, int type, void *data)
 	case MOD_LOAD:
 		darwin_sysvec_init();
 		darwin_mach_init();
+		iosurface_dev_init();
 		error = exec_register(&macho_execsw);
 		if (error == 0)
 			printf("darwinator: Mach-O executables enabled (%s)\n",
@@ -175,6 +177,7 @@ darwinator_modevent(module_t mod, int type, void *data)
 			return (EBUSY);
 		error = exec_unregister(&macho_execsw);
 		if (error == 0) {
+			iosurface_dev_fini();
 			darwin_mach_fini();
 			darwin_dyld_syscalls_fini();
 		}

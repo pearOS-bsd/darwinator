@@ -25,6 +25,9 @@ int	iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out);
 void	iosurface_limits(uint8_t *out);
 /* a process that exits loses its uses of the surfaces (the last use of a surface frees it) */
 void	iosurface_proc_exit(struct proc *p);
+/* /dev/iosurface (iosurface_dev.h): made at load, gone at unload */
+void	iosurface_dev_init(void);
+void	iosurface_dev_fini(void);
 /* the fast methods (iokit_user_client_trap): a kern_return_t */
 int	iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options, uint64_t seed_user_addr);
 

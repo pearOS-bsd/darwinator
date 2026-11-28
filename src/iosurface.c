@@ -7,7 +7,8 @@
  *   (u64 @0) at which the memory of the surface is mapped in the calling task, two pointers into a region that the kernel keeps for the client (@8, @16), the id (@24), the allocation size (@32), width, height,
  *   bytes per row (@40, @48, @56), the pixel format (@72), the allocation size again (@80), bytes per element and two flag bytes (@96), a counter (@120);
  *   the fast methods are mach trap 100 (iokit_user_client_trap): 2 lock, 3 unlock, 5 release.
- * The memory of a surface is an object of the VM that every client of the surface can map. */
+ * The memory of a surface is an object of the VM that every client of the surface can map: a POSIX shared memory object (shm_alloc), so that a native program of the system (the Metal helper,
+ * the window server) can have it as a file descriptor through /dev/iosurface (iosurface_dev.h); the Mac's IOSurface is a memory descriptor that the GPU driver and WindowServer map the same way. */
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -16,6 +17,12 @@
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/sysent.h>
+#include <sys/conf.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
+#include <sys/ioccom.h>
+#include <sys/mman.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
@@ -23,6 +30,7 @@
 #include <vm/vm_extern.h>
 #include "darwinator.h"
 #include "iosurface.h"
+#include "iosurface_dev.h"
 
 #define IOS_MAX		256
 #define IOS_KERN_SUCCESS	0		/* kern_return_t of Mach */
@@ -35,7 +43,8 @@
 /* a surface and its users: as in IOSurfaceRootUserClient on the Mac, each process that made or looked up a surface has one client of it with a use count (create and lookup add one, the release trap takes
  * one away); when the count of a process goes to 0 the memory is unmapped from it, and when no process uses the surface any more the surface goes.  A process that exits loses its uses. */
 struct ios_user { pid_t pid; uint32_t uses; vm_offset_t va, iva; };
-static struct iosurf { bool used, global; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; struct vm_object *obj; struct ios_user u[IOS_USERS]; } iosurfs[IOS_MAX];
+static struct iosurf { bool used, global; uint32_t id, w, h, row, fmt, bpe; uint64_t alloc; uid_t uid; struct shmfd *shm; struct vm_object *obj; struct ios_user u[IOS_USERS]; } iosurfs[IOS_MAX];
+/* the table owns one reference to the shared memory of each surface (shm); the shm owns the VM object; every mapping and every descriptor of /dev/iosurface holds its own reference */
 static uint32_t iosurf_next = 1, iosurf_counter = 0x494;
 static struct mtx ios_mtx;
 MTX_SYSINIT(darwin_iosurf, &ios_mtx, "darwin iosurface", MTX_DEF);
@@ -281,16 +290,16 @@ ios_user_of(struct iosurf *sf, pid_t pid, bool add)
 }
 
 /* no process uses sf any more: the slot is free and the table's reference to the memory goes (the pages go with the last mapping).  ios_mtx held; the object to deallocate (outside the lock) is returned */
-static struct vm_object *
+static struct shmfd *
 ios_drop_if_unused(struct iosurf *sf)
 {
-	struct vm_object *o;
+	struct shmfd *o;
 	int i;
 
 	for (i = 0; i < IOS_USERS; i++)
 		if (sf->u[i].uses != 0)
 			return (NULL);
-	o = sf->obj;
+	o = sf->shm;
 	if (darwin_debug >= 1)
 		printf("darwinator: IOSurface %u freed (%ju bytes)\n", sf->id, (uintmax_t)sf->alloc);
 	memset(sf, 0, sizeof(*sf));
@@ -301,7 +310,7 @@ ios_drop_if_unused(struct iosurf *sf)
 void
 iosurface_proc_exit(struct proc *p)
 {
-	struct vm_object *drop[IOS_MAX];
+	struct shmfd *drop[IOS_MAX];
 	int i, j, n = 0;
 
 	mtx_lock(&ios_mtx);
@@ -316,7 +325,7 @@ iosurface_proc_exit(struct proc *p)
 	}
 	mtx_unlock(&ios_mtx);
 	for (j = 0; j < n; j++)
-		vm_object_deallocate(drop[j]);
+		shm_drop(drop[j]);
 }
 
 int
@@ -353,9 +362,19 @@ iosurface_create(struct thread *td, const uint8_t *props, size_t len, uint8_t *o
 	if (sf == NULL)
 		return (IOS_NORESOURCES);
 	sf->w = (uint32_t)w; sf->h = (uint32_t)h; sf->row = (uint32_t)row; sf->fmt = (uint32_t)fmt; sf->bpe = (uint32_t)bpe; sf->alloc = alloc; sf->global = ios_dict_true(props, len, "IOSurfaceIsGlobal");
-	sf->obj = vm_object_allocate(OBJT_DEFAULT, OFF_TO_IDX(round_page(alloc)));
+	sf->uid = td->td_ucred->cr_uid;
+	sf->shm = shm_alloc(td->td_ucred, 0600, false);
+	if (sf->shm == NULL || shm_dotruncate(sf->shm, round_page(alloc)) != 0) {
+		if (sf->shm != NULL)
+			shm_drop(sf->shm);
+		sf->shm = NULL;
+		sf->used = false;
+		return (IOS_NORESOURCES);
+	}
+	sf->obj = sf->shm->shm_object;
 	if (ios_map(td->td_proc, sf->obj, alloc, &va) != IOS_KERN_SUCCESS) {
-		vm_object_deallocate(sf->obj);
+		shm_drop(sf->shm);
+		sf->shm = NULL;
 		sf->used = false;
 		return (IOS_NORESOURCES);
 	}
@@ -383,7 +402,7 @@ iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options,
 	}
 	if (index == IOSURF_TRAP_RELEASE) {
 		struct vm_map *map = &td->td_proc->p_vmspace->vm_map;
-		struct vm_object *o = NULL;
+		struct shmfd *o = NULL;
 		vm_offset_t va = 0, iva = 0;
 		uint64_t size = 0;
 		int i, rv = IOS_NOTBADARG;
@@ -409,7 +428,7 @@ iosurface_trap(struct thread *td, uint32_t index, uint64_t id, uint64_t options,
 		if (iva != 0)
 			vm_map_remove(map, iva, iva + 16 * PAGE_SIZE);
 		if (o != NULL)
-			vm_object_deallocate(o);
+			shm_drop(o);
 		return (rv);
 	}
 	return (IOS_UNSUPPORTED);
@@ -454,4 +473,63 @@ iosurface_lookup(struct thread *td, uint64_t id, uint8_t *out)
 	if (sf->used && sf->id == id && (u = ios_user_of(sf, td->td_proc->p_pid, true)) != NULL) { u->uses++; u->va = va; u->iva = iva; }
 	mtx_unlock(&ios_mtx);
 	return (0);
+}
+
+/* ---- /dev/iosurface: the memory of a surface as a file descriptor, for the native programs of the system (iosurface_dev.h) ---- */
+
+static int
+iosurface_dev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread *td)
+{
+	struct iosurf_open *io = (struct iosurf_open *)data;
+	struct iosurf *sf = NULL;
+	struct shmfd *shm = NULL;
+	struct file *fp;
+	int i, fd, error;
+
+	(void)dev; (void)fflag;
+	if (cmd != IOSURF_IOC_OPEN)
+		return (ENOTTY);
+	mtx_lock(&ios_mtx);
+	for (i = 0; i < IOS_MAX; i++)
+		if (iosurfs[i].used && iosurfs[i].id == io->id && iosurfs[i].shm != NULL) { sf = &iosurfs[i]; break; }
+	/* a global surface, one of the caller's user, or any for the superuser (the window server and the Metal helper run as root) */
+	if (sf != NULL && (sf->global || sf->uid == td->td_ucred->cr_uid || td->td_ucred->cr_uid == 0)) {
+		shm = shm_hold(sf->shm);
+		io->width = sf->w; io->height = sf->h; io->bytes_per_row = sf->row; io->pixel_format = sf->fmt; io->bytes_per_element = sf->bpe; io->alloc_size = sf->alloc;
+	}
+	mtx_unlock(&ios_mtx);
+	if (sf == NULL)
+		return (ENOENT);
+	if (shm == NULL)
+		return (EPERM);
+	error = falloc(td, &fp, &fd, O_CLOEXEC);
+	if (error != 0) {
+		shm_drop(shm);
+		return (error);
+	}
+	finit(fp, FREAD | FWRITE, DTYPE_SHM, shm, &shm_ops);	/* the reference of shm_hold goes to the file */
+	fdrop(fp, td);
+	io->fd = fd;
+	return (0);
+}
+
+static struct cdevsw iosurface_cdevsw = {
+	.d_version = D_VERSION,
+	.d_name = "iosurface",
+	.d_ioctl = iosurface_dev_ioctl,
+};
+static struct cdev *iosurface_cdev;
+
+void
+iosurface_dev_init(void)
+{
+	iosurface_cdev = make_dev(&iosurface_cdevsw, 0, UID_ROOT, GID_WHEEL, 0666, "iosurface");
+}
+
+void
+iosurface_dev_fini(void)
+{
+	if (iosurface_cdev != NULL)
+		destroy_dev(iosurface_cdev);
+	iosurface_cdev = NULL;
 }
